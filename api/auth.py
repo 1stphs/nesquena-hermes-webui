@@ -12,6 +12,8 @@ import os
 import secrets
 import tempfile
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 from api.config import STATE_DIR, load_settings
 
@@ -20,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ── Public paths (no auth required) ─────────────────────────────────────────
 PUBLIC_PATHS = frozenset({
     '/login', '/health', '/favicon.ico',
-    '/api/auth/login', '/api/auth/status',
+    '/api/auth/login', '/api/auth/status', '/api/auth/token-login',
     '/manifest.json', '/manifest.webmanifest',
 })
 
@@ -28,6 +30,7 @@ COOKIE_NAME = 'hermes_session'
 SESSION_TTL = 86400 * 30  # 30 days
 
 _SESSIONS_FILE = STATE_DIR / '.sessions.json'
+_API_TOKENS_FILE = STATE_DIR / 'api_tokens.json'
 
 
 def _load_sessions() -> dict[str, float]:
@@ -152,6 +155,109 @@ def verify_password(plain) -> bool:
     return hmac.compare_digest(_hash_password(plain), expected)
 
 
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _api_tokens_file() -> Path:
+    override = os.getenv('HERMES_WEBUI_API_TOKENS_FILE', '').strip()
+    if override:
+        return Path(override).expanduser()
+    return _API_TOKENS_FILE
+
+
+def load_api_token_records() -> list[dict]:
+    """Load long-lived API token records from STATE_DIR/api_tokens.json."""
+    path = _api_tokens_file()
+    try:
+        if not path.exists():
+            return []
+        data = json.loads(path.read_text(encoding='utf-8'))
+        records = data.get('tokens') if isinstance(data, dict) else data
+        if not isinstance(records, list):
+            return []
+        return [record for record in records if isinstance(record, dict)]
+    except Exception as e:
+        logger.warning("Failed to load API token config from %s: %s", path, e)
+        return []
+
+
+def _hash_api_token(token: str) -> str:
+    return 'sha256:' + hashlib.sha256(token.encode()).hexdigest()
+
+
+def _token_record_enabled(record: dict) -> bool:
+    value = record.get('enabled', True)
+    if isinstance(value, str):
+        return value.strip().lower() not in {'0', 'false', 'no', 'off'}
+    return bool(value)
+
+
+def _expires_at_timestamp(value) -> float | None:
+    if value is None or value == '':
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.endswith('Z'):
+            raw = raw[:-1] + '+00:00'
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    raise ValueError('unsupported expires_at value')
+
+
+def _token_record_expired(record: dict) -> bool:
+    try:
+        expires_at = _expires_at_timestamp(record.get('expires_at'))
+    except Exception:
+        return True
+    return expires_at is not None and time.time() > expires_at
+
+
+def _normalize_origin(value: str | None) -> str:
+    return str(value or '').strip().rstrip('/').lower()
+
+
+def _token_origin_allowed(record: dict, origin: str | None) -> bool:
+    allowed = record.get('allowed_origins')
+    if not allowed:
+        return True
+    if isinstance(allowed, str):
+        allowed_values = [allowed]
+    elif isinstance(allowed, list):
+        allowed_values = allowed
+    else:
+        return False
+    normalized = {_normalize_origin(item) for item in allowed_values if str(item or '').strip()}
+    if '*' in normalized:
+        return True
+    request_origin = _normalize_origin(origin)
+    if not request_origin:
+        return True
+    return request_origin in normalized
+
+
+def verify_api_token(plain_token, origin: str | None = None) -> dict | None:
+    """Return the matching token record, or None when the token is invalid."""
+    if not isinstance(plain_token, str) or not plain_token:
+        return None
+    candidate_hash = _hash_api_token(plain_token)
+    for record in load_api_token_records():
+        if not _token_record_enabled(record) or _token_record_expired(record):
+            continue
+        expected = str(record.get('token_hash') or '').strip().lower()
+        if not expected.startswith('sha256:'):
+            continue
+        if hmac.compare_digest(candidate_hash, expected) and _token_origin_allowed(record, origin):
+            return record
+    return None
+
+
 def create_session() -> str:
     """Create a new auth session. Returns signed cookie value."""
     token = secrets.token_hex(32)
@@ -224,8 +330,12 @@ def check_auth(handler, parsed) -> bool:
         return True
     # Not authorized
     if parsed.path.startswith('/api/'):
+        from api.helpers import send_cors_headers
+
         handler.send_response(401)
         handler.send_header('Content-Type', 'application/json')
+        handler.send_header('Cache-Control', 'no-store')
+        send_cors_headers(handler)
         handler.end_headers()
         handler.wfile.write(b'{"error":"Authentication required"}')
     else:
@@ -266,11 +376,18 @@ def set_auth_cookie(handler, cookie_value) -> None:
     cookie = http.cookies.SimpleCookie()
     cookie[COOKIE_NAME] = cookie_value
     cookie[COOKIE_NAME]['httponly'] = True
-    cookie[COOKIE_NAME]['samesite'] = 'Lax'
+    same_site = os.getenv('HERMES_WEBUI_COOKIE_SAMESITE', '').strip()
+    same_site = {'lax': 'Lax', 'strict': 'Strict', 'none': 'None'}.get(same_site.lower(), 'Lax')
+    cookie[COOKIE_NAME]['samesite'] = same_site
     cookie[COOKIE_NAME]['path'] = '/'
     cookie[COOKIE_NAME]['max-age'] = str(SESSION_TTL)
     # Set Secure flag when connection is HTTPS
-    if getattr(handler.request, 'getpeercert', None) is not None or handler.headers.get('X-Forwarded-Proto', '') == 'https':
+    if (
+        _env_truthy('HERMES_WEBUI_COOKIE_SECURE')
+        or same_site == 'None'
+        or getattr(handler.request, 'getpeercert', None) is not None
+        or handler.headers.get('X-Forwarded-Proto', '') == 'https'
+    ):
         cookie[COOKIE_NAME]['secure'] = True
     handler.send_header('Set-Cookie', cookie[COOKIE_NAME].OutputString())
 

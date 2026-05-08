@@ -770,8 +770,14 @@ def _allowed_public_origins() -> set[str]:
     return result
 
 
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 def _check_csrf(handler) -> bool:
     """Reject cross-origin POST requests. Returns True if OK."""
+    if _env_truthy('HERMES_WEBUI_CORS_ALLOW_ALL'):
+        return True
     origin = handler.headers.get("Origin", "")
     referer = handler.headers.get("Referer", "")
     host = handler.headers.get("Host", "")
@@ -3448,7 +3454,7 @@ def handle_get(handler, parsed) -> bool:
 def handle_post(handler, parsed) -> bool:
     """Handle all POST routes. Returns True if handled, False for 404."""
     # CSRF: reject cross-origin browser requests
-    if not _check_csrf(handler):
+    if parsed.path != "/api/auth/token-login" and not _check_csrf(handler):
         return j(handler, {"error": "Cross-origin request rejected"}, status=403)
 
     if parsed.path == "/api/upload":
@@ -4568,6 +4574,23 @@ def handle_post(handler, parsed) -> bool:
         return _handle_session_import_cli(handler, body)
 
     # ── Auth endpoints (POST) ──
+    if parsed.path == "/api/auth/token-login":
+        from api.auth import create_session, set_auth_cookie, verify_api_token
+
+        record = verify_api_token(body.get("token"), handler.headers.get("Origin"))
+        if not record:
+            return bad(handler, "Invalid token", 401)
+        cookie_val = create_session()
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Cache-Control", "no-store")
+        _security_headers(handler)
+        set_auth_cookie(handler, cookie_val)
+        handler.end_headers()
+        payload = {"ok": True, "token_id": str(record.get("id") or "")}
+        handler.wfile.write(json.dumps(payload).encode())
+        return True
+
     if parsed.path == "/api/auth/login":
         from api.auth import (
             verify_password,

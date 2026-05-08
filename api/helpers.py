@@ -54,6 +54,25 @@ def _security_headers(handler):
         'Permissions-Policy',
         'camera=(), microphone=(self), geolocation=(), clipboard-write=(self)'
     )
+    send_cors_headers(handler)
+
+
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def send_cors_headers(handler) -> None:
+    """Add credentialed CORS headers when explicitly enabled."""
+    if not _env_truthy('HERMES_WEBUI_CORS_ALLOW_ALL'):
+        return
+    origin = handler.headers.get('Origin', '').strip()
+    if not origin:
+        return
+    handler.send_header('Access-Control-Allow-Origin', origin)
+    handler.send_header('Access-Control-Allow-Credentials', 'true')
+    handler.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+    handler.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    handler.send_header('Vary', 'Origin')
 
 
 def _accepts_gzip(handler) -> bool:

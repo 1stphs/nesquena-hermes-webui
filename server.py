@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 from api.auth import check_auth
 from api.config import HOST, PORT, STATE_DIR, SESSION_DIR, DEFAULT_WORKSPACE
-from api.helpers import j, get_profile_cookie
+from api.helpers import j, get_profile_cookie, send_cors_headers
 from api.profiles import set_request_profile, clear_request_profile
 from api.routes import handle_delete, handle_get, handle_patch, handle_post
 from api.startup import auto_install_agent_deps, fix_credential_permissions
@@ -160,6 +160,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         self._handle_write(handle_post)
+
+    def do_OPTIONS(self) -> None:
+        self._req_t0 = time.time()
+        try:
+            self.send_response(204)
+            self.send_header('Cache-Control', 'no-store')
+            send_cors_headers(self)
+            self.end_headers()
+        except Exception as e:
+            print(f'[webui] ERROR {self.command} {self.path}\n' + traceback.format_exc(), flush=True)
+            return j(self, {'error': 'Internal server error'}, status=500)
 
     def do_PATCH(self) -> None:
         self._handle_write(handle_patch)
