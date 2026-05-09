@@ -3339,6 +3339,127 @@ def handle_get(handler, parsed) -> bool:
             {"profiles": list_profiles_api(), "active": get_active_profile_name()},
         )
 
+    if parsed.path == "/api/profile/default":
+        from api.profiles import list_profiles_api
+
+        profiles = list_profiles_api()
+        profile = (
+            next((p for p in profiles if p.get("is_default")), None)
+            or next((p for p in profiles if p.get("name") == "default"), None)
+            or (profiles[0] if profiles else None)
+        )
+        if not profile:
+            return bad(handler, "No profile available", 404)
+
+        name = str(profile.get("name") or "default").strip() or "default"
+        raw_path = str(profile.get("path") or "").strip()
+        path = ""
+        if raw_path:
+            try:
+                path = str(Path(raw_path).expanduser().resolve())
+            except Exception:
+                path = raw_path
+
+        return j(
+            handler,
+            {
+                "path": path,
+                "avatar": str(profile.get("avatar") or ""),
+                "profile_key": str(profile.get("profile_key") or name),
+                "profile_name": str(profile.get("profile_name") or name),
+                "webui_profile_id": str(
+                    profile.get("webui_profile_id") or profile.get("id") or name
+                ),
+            },
+        )
+
+    if parsed.path == "/api/profile/file":
+        from api.profiles import (
+            _PROFILE_ID_RE,
+            get_active_profile_name,
+            get_active_hermes_home,
+            get_hermes_home_for_profile,
+            list_profiles_api,
+        )
+
+        qs = parse_qs(parsed.query)
+        requested_path = qs.get("path", [""])[0].strip()
+        if not requested_path:
+            return bad(handler, "path is required")
+
+        requested_profile = qs.get("profile", [""])[0].strip()
+        if requested_profile and requested_profile != "default" and not _PROFILE_ID_RE.fullmatch(requested_profile):
+            return bad(handler, "invalid profile", 400)
+        if requested_profile:
+            profile_name = requested_profile
+            profile_home = Path(get_hermes_home_for_profile(requested_profile)).expanduser().resolve()
+        else:
+            profile_name = get_active_profile_name() or "default"
+            profile_home = Path(get_active_hermes_home()).expanduser().resolve()
+
+        request_path = Path(requested_path).expanduser()
+        target = request_path.resolve() if request_path.is_absolute() else (profile_home / request_path).resolve()
+        try:
+            target.relative_to(profile_home)
+        except ValueError:
+            return bad(handler, "Invalid profile file path", 400)
+        if not target.exists() or not target.is_file():
+            return bad(handler, "Profile file not found", 404)
+
+        size = target.stat().st_size
+        if size > MAX_FILE_BYTES:
+            return bad(handler, f"File too large ({size} bytes, max {MAX_FILE_BYTES})", 413)
+
+        try:
+            relative_path = target.relative_to(profile_home).as_posix()
+        except ValueError:
+            relative_path = requested_path
+
+        profile_info = None
+        for item in list_profiles_api():
+            if item.get("name") == profile_name:
+                profile_info = item
+                break
+            try:
+                item_path = Path(str(item.get("path") or "")).expanduser().resolve()
+            except Exception:
+                continue
+            if item_path == profile_home:
+                profile_info = item
+                break
+        if profile_info and profile_info.get("name"):
+            profile_name = str(profile_info.get("name"))
+
+        default_key = re.sub(
+            r"[^a-zA-Z0-9_-]+",
+            "_",
+            Path(relative_path).with_suffix("").as_posix(),
+        ).strip("_").lower() or profile_name
+        display_name = qs.get("profile_name", [""])[0].strip() or target.stem or profile_name
+        profile_key = qs.get("profile_key", [""])[0].strip() or default_key
+
+        content = target.read_text(encoding="utf-8", errors="replace")
+        return j(
+            handler,
+            {
+                "path": str(target),
+                "avatar": qs.get("avatar", [""])[0].strip() or str((profile_info or {}).get("avatar") or ""),
+                "profile_key": profile_key,
+                "profile_name": display_name,
+                "webui_profile_id": qs.get("webui_profile_id", [""])[0].strip()
+                or f"{profile_name}:{relative_path}",
+                "source": "registration",
+                "is_default": bool((profile_info or {}).get("is_default", profile_name == "default")),
+                "sort": 0,
+                "status": "active",
+                "profile": profile_name,
+                "relative_path": relative_path,
+                "content": content,
+                "size": size,
+                "lines": content.count("\n") + 1,
+            },
+        )
+
     if parsed.path == "/api/profile/active":
         from api.profiles import get_active_profile_name, get_active_hermes_home
 
