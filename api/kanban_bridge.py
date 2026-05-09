@@ -9,6 +9,18 @@ Supported operations:
 - Task dependency links (create, delete)
 - SSE live event stream for real-time updates
 - Comments and worker dispatch integration
+
+中文说明：WebUI 的 Hermes Kanban bridge（看板桥接层）。
+
+这个模块在 ``/api/kanban/*`` 下暴露完整的 CRUD API，同时保持 Hermes Agent
+的 ``hermes_cli.kanban_db`` 作为唯一 source of truth（真相源）。
+
+支持的操作：
+- Task CRUD（创建、读取、局部更新、批量更新、归档）
+- Multi-board management（多看板管理：列表、创建、归档、切换）
+- Task dependency links（任务依赖链接：创建、删除）
+- SSE live event stream（实时事件流），用于实时更新
+- Comments（评论）和 worker dispatch（工作器派发）集成
 """
 
 from __future__ import annotations

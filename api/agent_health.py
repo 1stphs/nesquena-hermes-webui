@@ -5,6 +5,14 @@ setups use WebUI only, while self-hosted messaging deployments run a separate
 Hermes gateway daemon that records runtime metadata in the Hermes Agent home.
 This module turns those existing safe runtime signals into a small UI-facing
 heartbeat without shelling out or adding psutil as a hard dependency.
+
+中文说明：Hermes agent/gateway（代理/网关）心跳载荷辅助函数（#716）。
+
+WebUI 进程并不总是和长期运行的 Hermes gateway（网关）成对部署。有些
+安装只使用 WebUI，而自托管消息部署会运行单独的 Hermes gateway daemon
+（后台守护进程），并把运行时元数据记录到 Hermes Agent home。这个模块
+把这些已有的安全运行时信号转换成一个面向 UI 的小型 heartbeat（心跳）
+状态，不通过 shell 调用外部命令，也不把 psutil 作为硬依赖。
 """
 
 from __future__ import annotations

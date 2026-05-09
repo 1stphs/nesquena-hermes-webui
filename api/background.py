@@ -1,4 +1,8 @@
-"""Background and ephemeral task tracking for /background and /btw commands."""
+"""Background and ephemeral task tracking for /background and /btw commands.
+
+中文说明：为 /background 和 /btw 命令跟踪 background（后台）任务和
+ephemeral（临时）任务。
+"""
 from __future__ import annotations
 
 import logging

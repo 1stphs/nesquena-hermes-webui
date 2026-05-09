@@ -1,5 +1,8 @@
 """
 Hermes Web UI -- File upload: multipart parser and upload handler.
+
+中文说明：Hermes Web UI 的文件上传模块：multipart parser（multipart 解析器）
+和 upload handler（上传处理器）。
 """
 import mimetypes
 import re as _re

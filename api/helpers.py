@@ -1,5 +1,7 @@
 """
 Hermes Web UI -- HTTP helper functions.
+
+中文说明：Hermes Web UI 的 HTTP helper functions（HTTP 辅助函数）。
 """
 import json as _json
 import os

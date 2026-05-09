@@ -4,6 +4,13 @@ Hermes Web UI -- Filesystem checkpoint (rollback) API.
 Provides endpoints to list, diff, and restore filesystem checkpoints
 created by the Hermes agent's CheckpointManager.  Checkpoints live at
 ``{hermes_home}/checkpoints/<hash>/`` as shadow git repositories.
+
+中文说明：Hermes Web UI 的 filesystem checkpoint（文件系统检查点/回滚）API。
+
+提供 endpoint（端点）用于 list（列出）、diff（比较）和 restore（恢复）
+Hermes agent 的 CheckpointManager 创建的文件系统 checkpoints（检查点）。
+Checkpoints 位于 ``{hermes_home}/checkpoints/<hash>/``，形式是 shadow git
+repositories（影子 git 仓库）。
 """
 
 import hashlib

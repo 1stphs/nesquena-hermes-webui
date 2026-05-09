@@ -6,6 +6,16 @@ profile has its own workspace configuration.  State files live at
 ``{profile_home}/webui_state/workspaces.json`` and
 ``{profile_home}/webui_state/last_workspace.txt``.  The global STATE_DIR
 paths are used as fallback when no profile module is available.
+
+中文说明：Hermes Web UI 的 workspace（工作区）和 file system helpers（文件系统
+辅助函数）。
+
+Workspace lists（工作区列表）和 last-used workspace（上次使用的工作区）按
+profile（配置档案）存储，因此每个 profile 都有自己的 workspace configuration
+（工作区配置）。状态文件位于
+``{profile_home}/webui_state/workspaces.json`` 和
+``{profile_home}/webui_state/last_workspace.txt``。当 profile module（配置档案
+模块）不可用时，会使用全局 STATE_DIR 路径作为 fallback（回退）。
 """
 import json
 import logging

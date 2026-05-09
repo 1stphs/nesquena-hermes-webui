@@ -1,4 +1,8 @@
-"""Hermes Web UI -- Session model and in-memory session store."""
+"""Hermes Web UI -- Session model and in-memory session store.
+
+中文说明：Hermes Web UI 的 Session model（会话模型）和 in-memory session
+store（内存会话存储）。
+"""
 import collections
 import datetime
 import hashlib

@@ -3,6 +3,14 @@
 The browser only needs coarse CPU/RAM/disk usage. Keep this module intentionally
 small and dependency-free: no process lists, command strings, user identities,
 environment variables, or filesystem topology leave the server.
+
+中文说明：为 WebUI VPS panel（VPS 面板）提供安全的 aggregate host resource
+metrics（聚合主机资源指标）（#693）。
+
+浏览器只需要粗粒度的 CPU/RAM/disk usage（CPU/内存/磁盘使用率）。这个模块
+刻意保持小而无依赖：process lists（进程列表）、command strings（命令字符串）、
+user identities（用户身份）、environment variables（环境变量）或 filesystem
+topology（文件系统拓扑）都不会离开服务端。
 """
 
 from __future__ import annotations

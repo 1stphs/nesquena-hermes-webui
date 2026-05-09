@@ -2,6 +2,10 @@
 Hermes Web UI -- Optional password authentication.
 Off by default. Enable by setting HERMES_WEBUI_PASSWORD env var
 or configuring a password in the Settings panel.
+
+中文说明：Hermes Web UI 的可选密码认证。
+默认关闭。可以通过设置 HERMES_WEBUI_PASSWORD 环境变量，
+或在 Settings（设置）面板里配置密码来启用。
 """
 import hashlib
 import hmac

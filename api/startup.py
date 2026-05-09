@@ -1,4 +1,7 @@
-"""Hermes Web UI -- startup helpers."""
+"""Hermes Web UI -- startup helpers.
+
+中文说明：Hermes Web UI 的 startup helpers（启动辅助函数）。
+"""
 from __future__ import annotations
 import os, stat, subprocess, sys
 from pathlib import Path

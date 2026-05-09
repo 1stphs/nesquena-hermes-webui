@@ -40,6 +40,48 @@ The SSE `metering` event payload:
     "low":  31.4,
     "active": 1,
   }
+
+中文说明：Hermes Web UI 的 streaming performance metering（流式性能计量）。
+
+它会跟踪所有活跃 WebUI streams（流）上的 Tokens Per Second（TPS，每秒
+token 数）。Metering data（计量数据）通过 SSE events（SSE 事件）发出，
+这样正在流式输出的 assistant message（助手消息）可以在当前 turn（轮次）
+运行时更新自己的 header（头部信息）。
+
+架构
+────────────
+每个 streaming session（流式会话）都会独立跟踪。单个流的 TPS 为：
+
+    stream_tps = total_stream_deltas / (last_delta_ts - first_delta_ts)
+
+global tps（全局 TPS）是所有当前活跃 streams 的 TPS 平均值。无论同时运行
+多少会话、每个会话已经流式输出多久，这都能正确表示系统的实时吞吐能力。
+
+对于 HIGH/LOW 跟踪，每个 stats snapshot（统计快照）都会把当前 global tps
+（仅当 > 0 时，跳过空闲期）写入滚动的 60 分钟历史。该历史的 max/min 给出
+过去一小时观察到的峰值/低值吞吐。
+
+streaming.py 里的 ticker 会调用 get_interval()：当 streams 正在接收输出
+deltas（增量）时返回 1.0，让消息 header 以 1 Hz 更新；空闲时返回 10.0，
+让 ticker 退出且不发出空闲读数。
+
+api/streaming.py 中的用法
+─────────────────────────────
+  from api.metering import meter
+
+  meter().begin_session(stream_id)                     # 流开始
+  meter().record_token(stream_id, running_output_deltas)
+  meter().record_reasoning(stream_id, running_reasoning_deltas)
+
+SSE `metering` event payload（事件载荷）：
+  {
+    "tps": 47.3,              # 真实读数出现前省略或为 null
+    "tps_available": true,    # false 时前端必须隐藏 TPS
+    "estimated": false,       # 永远不要显示基于字节/字符大小的估算
+    "high": 52.1,
+    "low":  31.4,
+    "active": 1,
+  }
 """
 
 from __future__ import annotations

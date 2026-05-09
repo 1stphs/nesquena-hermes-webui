@@ -1,6 +1,11 @@
 """
 Hermes Web UI -- Route handlers for GET and POST endpoints.
 Extracted from server.py (Sprint 11) so server.py is a thin shell.
+
+中文说明：Hermes Web UI 的 GET 和 POST endpoints（端点）route handlers
+（路由处理器）。
+这些处理器从 server.py 中拆出（Sprint 11），让 server.py 保持为 thin shell
+（薄壳入口）。
 """
 
 import html as _html

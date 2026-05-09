@@ -3,6 +3,12 @@
 This module is the single integration point with hermes_cli.commands.
 If hermes-agent is unavailable the endpoint degrades to an empty list
 so the frontend can still load with WEBUI_ONLY commands.
+
+中文说明：把 hermes-agent 的 COMMAND_REGISTRY 暴露给 webui frontend（前端）。
+
+这个模块是对接 hermes_cli.commands 的唯一 integration point（集成点）。
+如果 hermes-agent 不可用，endpoint（端点）会降级返回空列表，让前端仍然
+可以加载 WEBUI_ONLY commands（仅 WebUI 命令）。
 """
 from __future__ import annotations
 import logging

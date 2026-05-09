@@ -2,6 +2,11 @@
 
 This mirrors the approval flow structure, but the response is a free-form
 clarification string instead of an approval decision.
+
+中文说明：WebUI 的 clarify（澄清）提示状态。
+
+它复用了 approval flow（审批流程）的结构，但返回的是自由文本形式的
+clarification（澄清说明），而不是 approve/reject（批准/拒绝）决定。
 """
 
 from __future__ import annotations

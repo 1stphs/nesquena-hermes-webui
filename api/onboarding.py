@@ -1,4 +1,7 @@
-"""Hermes Web UI -- first-run onboarding helpers."""
+"""Hermes Web UI -- first-run onboarding helpers.
+
+中文说明：Hermes Web UI 首次运行 onboarding（引导配置）的辅助函数。
+"""
 
 from __future__ import annotations
 

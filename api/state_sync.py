@@ -12,6 +12,20 @@ locked, or the schema doesn't match, the WebUI continues normally.
 The bridge uses absolute token counts (not deltas) because the WebUI
 Session object already accumulates totals across turns. This avoids
 any double-counting risk.
+
+中文说明：Hermes Web UI 的可选 state.db sync bridge（状态库同步桥接）。
+
+它会把 WebUI session metadata（会话元数据，包括 token usage、title、model）
+同步到 hermes-agent state.db，让 /insights、session lists（会话列表）和
+cost tracking（成本跟踪）包含 WebUI activity（活动）。
+
+这个功能通过 'sync_to_insights' setting（设置）选择启用，默认关闭。所有
+操作都包在 try/except 中：如果 state.db 不可用、被锁定或 schema（结构）
+不匹配，WebUI 会继续正常运行。
+
+该 bridge 使用 absolute token counts（绝对 token 数）而不是 deltas（增量），
+因为 WebUI Session object（会话对象）已经跨 turn（轮次）累计总数。这可以
+避免 double-counting（重复计数）风险。
 """
 import logging
 import os

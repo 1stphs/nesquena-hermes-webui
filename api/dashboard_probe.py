@@ -4,6 +4,15 @@ The official `hermes dashboard` binds to 127.0.0.1:9119 by default and exposes
 GET /api/status as a public, read-only identity/status endpoint.  Keep all
 probing server-side to avoid browser CORS/mixed-content failures, and only allow
 loopback targets so a user-controlled setting cannot become an SSRF primitive.
+
+中文说明：对官方 Hermes Agent dashboard（仪表盘）的安全 server-side
+probe（服务端探测）。
+
+官方 `hermes dashboard` 默认绑定到 127.0.0.1:9119，并暴露 GET /api/status
+作为公开只读的 identity/status（身份/状态）端点。所有探测都保留在服务端，
+以避免浏览器 CORS（跨源资源共享）或 mixed-content（混合内容）失败；同时
+只允许 loopback（回环）目标，避免用户可控配置变成 SSRF primitive
+（服务端请求伪造原语）。
 """
 
 from __future__ import annotations

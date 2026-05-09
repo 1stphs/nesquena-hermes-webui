@@ -3,6 +3,12 @@
 Provides CRUD operations for configuring provider API keys post-onboarding.
 Closes #586 (allow provider key update) and part of #604 (model picker
 multi-provider support).
+
+中文说明：Hermes Web UI 的 provider management endpoints（供应商管理端点）。
+
+用于在 onboarding（首次配置/引导）之后配置 provider API keys（供应商 API
+密钥）的 CRUD 操作。关闭 #586（允许更新 provider key），并完成 #604 的一部分
+（model picker 多供应商支持）。
 """
 
 from __future__ import annotations

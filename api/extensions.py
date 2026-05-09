@@ -3,6 +3,12 @@
 This module intentionally provides a small, self-hosted extension surface:
 configured same-origin script/style injection plus sandboxed static file serving.
 It is disabled by default and never executes or fetches third-party URLs.
+
+中文说明：可选启用的 WebUI extension hooks（扩展钩子）。
+
+这个模块刻意只提供一个很小的 self-hosted extension surface（自托管扩展面）：
+已配置的 same-origin（同源）script/style 注入，以及 sandboxed（沙箱化）的
+静态文件服务。它默认禁用，并且永远不会执行或拉取第三方 URL。
 """
 
 import html

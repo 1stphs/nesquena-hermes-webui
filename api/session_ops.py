@@ -4,6 +4,13 @@ JSON Session store (api/models.py), not on hermes-agent's SQLite.
 
 Behavior parity reference: gateway/run.py:_handle_*_command in
 the hermes-agent repo.
+
+中文说明：为 slash commands（斜杠命令）/retry、/undo 提供 session-mutation
+operations（会话变更操作），并为 /status、/usage 提供 read-only aggregators
+（只读聚合器）。它操作的是 webui 自己的 JSON Session store（api/models.py），
+不是 hermes-agent 的 SQLite。
+
+行为对齐参考：hermes-agent 仓库中的 gateway/run.py:_handle_*_command。
 """
 from __future__ import annotations
 import logging

@@ -4,6 +4,15 @@ The browser receives only WebUI-local flow metadata (flow_id, user_code,
 verification_uri, high-level status). Provider device/auth codes and OAuth
 tokens stay server-side and are persisted to the active Hermes profile's
 ``auth.json`` credential_pool.
+
+中文说明：用于 onboarding（首次配置/引导）的 in-app OAuth flow（应用内
+OAuth 流程）实现。
+
+浏览器只接收 WebUI-local flow metadata（WebUI 本地流程元数据），包括
+flow_id、user_code、verification_uri 和 high-level status（高层状态）。
+Provider device/auth codes（供应商设备/授权码）以及 OAuth tokens（令牌）
+保留在服务端，并持久化到当前活跃 Hermes profile（配置档案）的
+``auth.json`` credential_pool。
 """
 
 from __future__ import annotations

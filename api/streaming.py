@@ -1,6 +1,10 @@
 """
 Hermes Web UI -- SSE streaming engine and agent thread runner.
 Includes Sprint 10 cancel support via CANCEL_FLAGS.
+
+中文说明：Hermes Web UI 的 SSE streaming engine（SSE 流式引擎）和 agent
+thread runner（代理线程运行器）。
+包含通过 CANCEL_FLAGS 实现的 Sprint 10 cancel（取消）支持。
 """
 import base64
 import contextlib

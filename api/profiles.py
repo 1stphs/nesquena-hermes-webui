@@ -7,6 +7,16 @@ HERMES_HOME directory is used for config, skills, memory, cron, and API keys.
 Profile switches update os.environ['HERMES_HOME'] and monkey-patch module-level
 cached paths in hermes-agent modules (skills_tool, cron/jobs) that snapshot
 HERMES_HOME at import time.
+
+中文说明：Hermes Web UI 的 profile state management（配置档案状态管理）。
+它包装 hermes_cli.profiles，为 web UI 提供 profile switching（配置档案切换）。
+
+Web UI 维护一个进程级的 “active profile”（活跃配置档案），用于决定 config
+（配置）、skills（技能）、memory（记忆）、cron（定时任务）和 API keys
+（API 密钥）使用哪个 HERMES_HOME 目录。切换 profile 时会更新
+os.environ['HERMES_HOME']，并 monkey-patch（运行时替换）hermes-agent 模块
+里在导入时快照 HERMES_HOME 的 module-level cached paths（模块级缓存路径），
+例如 skills_tool、cron/jobs。
 """
 import json
 import logging

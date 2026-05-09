@@ -19,6 +19,26 @@ Three integration points:
 
 3. ``inspect_session_recovery_status(sid)`` — read-only audit returning
    message counts for the live JSON, the .bak, and a recommendation.
+
+中文说明：从 .bak snapshots（备份快照）恢复 session（会话），这是防止 #1558
+这类 data-loss bugs（数据丢失问题）的最后防线。
+
+``Session.save()`` 会在一次即将写入的保存会缩短 messages array（消息数组）
+时，把之前的状态写成 ``<sid>.json.bak`` snapshot（快照）。本模块会读取这些
+snapshots，并恢复任何 live file（当前文件）消息数少于备份的 session。
+
+三个 integration points（集成点）：
+
+1. ``recover_all_sessions_on_startup()`` —— server.py 启动时调用，扫描 session
+   目录，并恢复任何 JSON 消息数少于 .bak 的 session。Idempotent（幂等）：
+   干净运行时无操作。
+
+2. ``recover_session(sid)`` —— 支撑 ``POST /api/session/recover`` endpoint 的
+   单会话辅助函数。如果用户的 session 在 server restart（服务重启）期间打开，
+   可以手动重新运行恢复。
+
+3. ``inspect_session_recovery_status(sid)`` —— read-only audit（只读审计），
+   返回 live JSON、.bak 的消息数以及建议。
 """
 from __future__ import annotations
 

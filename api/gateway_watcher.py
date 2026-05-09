@@ -7,6 +7,15 @@ detected, it pushes notifications to all subscribed SSE clients.
 
 This enables real-time session list updates in the sidebar without
 requiring any changes to hermes-agent.
+
+中文说明：Hermes Web UI 的 gateway session watcher（网关会话监听器）。
+
+后台 daemon thread（守护线程）每 5 秒轮询 state.db，检查 gateway sessions
+（telegram、discord、slack 等网关会话）的变化。检测到变化后，它会向所有
+已订阅的 SSE clients（SSE 客户端）推送通知。
+
+这让侧边栏的 session list（会话列表）可以实时更新，同时不需要修改
+hermes-agent。
 """
 import hashlib
 import json

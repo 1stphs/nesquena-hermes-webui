@@ -7,6 +7,16 @@ at most twice per hour regardless of client count.
 
 Skips repos that are not git checkouts (e.g. Docker baked images where
 .git does not exist).
+
+中文说明：Hermes Web UI 的 self-update checker（自更新检查器）。
+
+检查 webui 和 hermes-agent git repositories（git 仓库）是否落后于各自的
+upstream branches（上游分支）。结果会在 server-side（服务端）缓存
+30 分钟 TTL（生存时间），因此无论客户端数量多少，git fetch 每小时最多运行
+两次。
+
+会跳过不是 git checkouts（git 检出目录）的仓库，例如没有 .git 的 Docker
+baked images（预构建镜像）。
 """
 import subprocess
 import threading

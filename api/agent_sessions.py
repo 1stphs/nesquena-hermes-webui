@@ -1,4 +1,7 @@
-"""Shared helpers for reading Hermes Agent sessions from state.db."""
+"""Shared helpers for reading Hermes Agent sessions from state.db.
+
+中文说明：用于从 state.db 读取 Hermes Agent sessions（会话）的共享辅助函数。
+"""
 import logging
 import sqlite3
 from contextlib import closing

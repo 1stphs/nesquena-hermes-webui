@@ -4,6 +4,13 @@ The terminal is intentionally independent from the agent execution path.  It
 starts a shell with an explicit cwd/env per process and never mutates
 process-global os.environ, which avoids expanding the session-env race tracked
 in the agent execution layer.
+
+中文说明：Hermes Web UI 的 embedded workspace terminal（内嵌工作区终端）支持。
+
+这个 terminal（终端）刻意独立于 agent execution path（代理执行路径）。它会为
+每个进程用明确的 cwd/env 启动 shell，并且永远不修改 process-global
+os.environ（进程级全局环境变量），从而避免扩大 agent execution layer（代理
+执行层）中跟踪的 session-env race（会话环境竞态）。
 """
 
 from __future__ import annotations

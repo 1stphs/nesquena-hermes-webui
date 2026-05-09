@@ -7,6 +7,15 @@ Discovery order for all paths:
   2. Filesystem heuristics (sibling checkout, parent dir, common install locations)
   3. Hardened defaults relative to $HOME
   4. Fail loudly with a human-readable fix-it message if required modules are missing
+
+中文说明：Hermes Web UI 的共享配置、常量和全局状态。
+会被所有其他 api/* 模块以及 server.py 导入。
+
+所有路径的 discovery order（发现顺序）：
+  1. 显式环境变量
+  2. 文件系统启发式规则（相邻 checkout、父目录、常见安装位置）
+  3. 基于 $HOME 的加固默认值
+  4. 如果缺少必需模块，则用人类可读的修复提示明确失败
 """
 
 import collections
