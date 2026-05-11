@@ -42,6 +42,7 @@ docs/*
 !docs/ui-ux/**
 !docs/docker.md
 !docs/deploy-172.md
+!docs/api-docs.md
 !docs/supervisor.md
 !docs/troubleshooting.md
 
