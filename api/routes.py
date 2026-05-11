@@ -4707,14 +4707,16 @@ def handle_post(handler, parsed) -> bool:
         if not record:
             return bad(handler, "Invalid token", 401)
         cookie_val = create_session()
+        payload = {"ok": True, "token_id": str(record.get("id") or "")}
+        raw = json.dumps(payload).encode("utf-8")
         handler.send_response(200)
-        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Content-Length", str(len(raw)))
         handler.send_header("Cache-Control", "no-store")
         _security_headers(handler)
         set_auth_cookie(handler, cookie_val)
         handler.end_headers()
-        payload = {"ok": True, "token_id": str(record.get("id") or "")}
-        handler.wfile.write(json.dumps(payload).encode())
+        handler.wfile.write(raw)
         return True
 
     if parsed.path == "/api/auth/login":

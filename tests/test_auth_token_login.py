@@ -108,6 +108,7 @@ def test_token_login_success_sets_session_cookie(tmp_path):
     assert result is True
     assert handler.status == 200
     assert handler.json_body() == {"ok": True, "token_id": "digital-employee-local-test"}
+    assert handler.header_value("Content-Length") == str(len(handler.wfile.getvalue()))
 
     set_cookie = handler.header_value("Set-Cookie")
     assert set_cookie and "hermes_session=" in set_cookie
