@@ -4258,6 +4258,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/profile/create-agent":
         return _handle_profile_agent_create(handler, body)
 
+    if parsed.path == "/api/profile/update-agent":
+        return _handle_profile_agent_update(handler, body)
+
     if parsed.path == "/api/profile/create":
         name = body.get("name", "").strip()
         if not name:
@@ -8109,7 +8112,12 @@ def _recommended_profile_agent_skills(catalog: list[dict], limit: int = 8) -> li
     return recommended[:limit]
 
 
-def _normalize_profile_agent_skills(raw_skills, catalog: list[dict]) -> list[str]:
+def _normalize_profile_agent_skills(
+    raw_skills,
+    catalog: list[dict],
+    *,
+    required: bool = True,
+) -> list[str]:
     if isinstance(raw_skills, str):
         values = [part.strip() for part in raw_skills.split(",")]
     elif isinstance(raw_skills, list):
@@ -8134,8 +8142,10 @@ def _normalize_profile_agent_skills(raw_skills, catalog: list[dict]) -> list[str
         selected_seen.add(key)
         selected.append(value)
 
-    if not selected:
+    if not selected and required:
         raise ValueError("skills is required")
+    if not selected:
+        return []
 
     available = {
         str(skill.get("name") or "").lower(): str(skill.get("name") or "")
@@ -8229,6 +8239,40 @@ def _write_profile_agent_files(profile_path: Path, agent: dict) -> dict:
     }
 
 
+def _read_profile_agent_metadata(profile_path: Path) -> dict:
+    metadata_path = Path(profile_path).expanduser() / "webui" / "agent.json"
+    if not metadata_path.exists():
+        return {}
+    try:
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError("existing agent metadata is invalid") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def _resolve_profile_agent_update_target(body: dict) -> tuple[str, Path]:
+    requested_profile = str(
+        body.get("profile_id")
+        or body.get("profile")
+        or body.get("profile_key")
+        or ""
+    ).strip()
+
+    if requested_profile:
+        from api.profiles import _PROFILE_ID_RE, get_hermes_home_for_profile
+
+        if requested_profile != "default" and not _PROFILE_ID_RE.fullmatch(requested_profile):
+            raise ValueError("invalid profile_id")
+        return requested_profile, Path(get_hermes_home_for_profile(requested_profile)).expanduser()
+
+    from api.profiles import get_active_profile_name, get_active_hermes_home
+
+    return (
+        get_active_profile_name() or "default",
+        Path(get_active_hermes_home()).expanduser(),
+    )
+
+
 def _handle_profile_agent_skills(handler, parsed):
     qs = parse_qs(parsed.query)
     query = qs.get("q", [""])[0].strip()
@@ -8316,6 +8360,88 @@ def _handle_profile_agent_create(handler, body):
         return bad(handler, str(e), 400)
     except OSError as e:
         logger.exception("Failed to write profile agent files")
+        return bad(handler, _sanitize_error(e), 500)
+
+
+def _handle_profile_agent_update(handler, body):
+    try:
+        profile_name = _profile_agent_text(
+            body,
+            ("profile_name", "display_name", "name"),
+            "name",
+            max_len=_PROFILE_AGENT_NAME_MAX,
+        )
+        description = _profile_agent_text(
+            body,
+            ("description", "summary", "one_liner"),
+            "description",
+            max_len=_PROFILE_AGENT_DESCRIPTION_MAX,
+        )
+        prompt = _profile_agent_text(
+            body,
+            ("prompt", "system_prompt"),
+            "prompt",
+            max_len=_PROFILE_AGENT_PROMPT_MAX,
+        )
+        if "skills" not in body and "skill_names" not in body:
+            raise ValueError("skills is required")
+        catalog = _load_profile_agent_skills_catalog()
+        skills = _normalize_profile_agent_skills(
+            body.get("skills", body.get("skill_names")),
+            catalog,
+            required=False,
+        )
+        active_profile_name, profile_path = _resolve_profile_agent_update_target(body)
+        profile_path = profile_path.resolve()
+        if not profile_path.exists():
+            raise FileNotFoundError(f"profile not found: {active_profile_name}")
+
+        existing = _read_profile_agent_metadata(profile_path)
+
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        profile_id = str(existing.get("profile_id") or active_profile_name or "default")
+        avatar = (
+            _profile_agent_text(
+                body,
+                ("avatar", "avatar_url", "icon"),
+                "avatar",
+                required=False,
+                max_len=_PROFILE_AGENT_AVATAR_MAX,
+            )
+            if any(key in body for key in ("avatar", "avatar_url", "icon"))
+            else str(existing.get("avatar") or "")
+        )
+        status = str(existing.get("status") or "active").strip().lower()
+        if status not in _PROFILE_AGENT_STATUSES:
+            status = "active"
+
+        agent = {
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "avatar": avatar,
+            "description": description,
+            "prompt": prompt,
+            "skills": skills,
+            "status": status,
+            "created_at": str(existing.get("created_at") or now),
+            "updated_at": now,
+        }
+        paths = _write_profile_agent_files(profile_path, agent)
+
+        return j(handler, {
+            "ok": True,
+            "profile": {
+                "name": active_profile_name,
+                "path": str(profile_path),
+            },
+            "agent": {**agent, **paths},
+        })
+    except (ValueError, FileNotFoundError, RuntimeError) as e:
+        return bad(handler, str(e), 400)
+    except OSError as e:
+        logger.exception("Failed to update profile agent files")
         return bad(handler, _sanitize_error(e), 500)
 
 
