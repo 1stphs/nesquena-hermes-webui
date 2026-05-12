@@ -3339,6 +3339,9 @@ def handle_get(handler, parsed) -> bool:
             {"profiles": list_profiles_api(), "active": get_active_profile_name()},
         )
 
+    if parsed.path == "/api/profile/create-agent/skills":
+        return _handle_profile_agent_skills(handler, parsed)
+
     if parsed.path == "/api/profile/default":
         from api.profiles import list_profiles_api
 
@@ -3383,10 +3386,6 @@ def handle_get(handler, parsed) -> bool:
         )
 
         qs = parse_qs(parsed.query)
-        requested_path = qs.get("path", [""])[0].strip()
-        if not requested_path:
-            return bad(handler, "path is required")
-
         requested_profile = qs.get("profile", [""])[0].strip()
         if requested_profile and requested_profile != "default" and not _PROFILE_ID_RE.fullmatch(requested_profile):
             return bad(handler, "invalid profile", 400)
@@ -3397,18 +3396,13 @@ def handle_get(handler, parsed) -> bool:
             profile_name = get_active_profile_name() or "default"
             profile_home = Path(get_active_hermes_home()).expanduser().resolve()
 
+        requested_path = qs.get("path", [""])[0].strip() or "profiles/default.md"
         request_path = Path(requested_path).expanduser()
         target = request_path.resolve() if request_path.is_absolute() else (profile_home / request_path).resolve()
         try:
             target.relative_to(profile_home)
         except ValueError:
             return bad(handler, "Invalid profile file path", 400)
-        if not target.exists() or not target.is_file():
-            return bad(handler, "Profile file not found", 404)
-
-        size = target.stat().st_size
-        if size > MAX_FILE_BYTES:
-            return bad(handler, f"File too large ({size} bytes, max {MAX_FILE_BYTES})", 413)
 
         try:
             relative_path = target.relative_to(profile_home).as_posix()
@@ -3438,7 +3432,6 @@ def handle_get(handler, parsed) -> bool:
         display_name = qs.get("profile_name", [""])[0].strip() or target.stem or profile_name
         profile_key = qs.get("profile_key", [""])[0].strip() or default_key
 
-        content = target.read_text(encoding="utf-8", errors="replace")
         return j(
             handler,
             {
@@ -3450,13 +3443,7 @@ def handle_get(handler, parsed) -> bool:
                 or f"{profile_name}:{relative_path}",
                 "source": "registration",
                 "is_default": bool((profile_info or {}).get("is_default", profile_name == "default")),
-                "sort": 0,
-                "status": "active",
-                "profile": profile_name,
-                "relative_path": relative_path,
-                "content": content,
-                "size": size,
-                "lines": content.count("\n") + 1,
+                "profile_path": str(profile_home),
             },
         )
 
@@ -4267,6 +4254,9 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, _sanitize_error(e), 404)
         except RuntimeError as e:
             return bad(handler, str(e), 409)
+
+    if parsed.path == "/api/profile/create-agent":
+        return _handle_profile_agent_create(handler, body)
 
     if parsed.path == "/api/profile/create":
         name = body.get("name", "").strip()
@@ -7999,6 +7989,334 @@ def _handle_handoff_summary(handler, body):
             "fallback": True,
             "warning": f"Summary generation used local fallback: {_sanitize_error(e)}",
         })
+
+
+_PROFILE_AGENT_NAME_MAX = 50
+_PROFILE_AGENT_DESCRIPTION_MAX = 80
+_PROFILE_AGENT_PROMPT_MAX = 1000
+_PROFILE_AGENT_AVATAR_MAX = 200_000
+_PROFILE_AGENT_STATUSES = {"active", "draft"}
+_PROFILE_AGENT_RECOMMENDED_SKILLS = (
+    "web-search",
+    "doc-summary",
+    "document-summary",
+    "table-analysis",
+    "spreadsheet-analysis",
+    "meeting-notes",
+    "ocr-and-documents",
+    "google-workspace",
+)
+
+
+def _profile_agent_text(body: dict, keys: tuple[str, ...], label: str,
+                        *, required: bool = True, max_len: int | None = None) -> str:
+    value = ""
+    for key in keys:
+        if key in body and body.get(key) is not None:
+            value = str(body.get(key) or "").strip()
+            break
+    if required and not value:
+        raise ValueError(f"{label} is required")
+    if max_len is not None and len(value) > max_len:
+        raise ValueError(f"{label} must be at most {max_len} characters")
+    return value
+
+
+def _slugify_profile_agent_id(display_name: str, explicit_id: str = "") -> str:
+    raw = str(explicit_id or "").strip().lower()
+    if raw:
+        raw = raw.replace(" ", "-")
+        raw = re.sub(r"[^a-z0-9_-]+", "-", raw)
+    else:
+        raw = str(display_name or "").strip().lower()
+        raw = re.sub(r"[^a-z0-9_-]+", "-", raw)
+    raw = re.sub(r"-{2,}", "-", raw).strip("-_")
+    if not raw:
+        raw = f"agent-{uuid.uuid4().hex[:8]}"
+    if len(raw) > 64:
+        raw = raw[:64].strip("-_")
+    if raw == "default" or not re.fullmatch(r"^[a-z0-9][a-z0-9_-]{0,63}$", raw):
+        raise ValueError(
+            "profile_id must use lowercase letters, numbers, hyphens, underscores, "
+            "start with a letter or number, and be at most 64 characters"
+        )
+    return raw
+
+
+def _normalize_profile_agent_status(body: dict) -> str:
+    if bool(body.get("draft")):
+        return "draft"
+    status = str(body.get("status") or "active").strip().lower()
+    if status not in _PROFILE_AGENT_STATUSES:
+        raise ValueError("status must be active or draft")
+    return status
+
+
+def _load_profile_agent_skills_catalog() -> list[dict]:
+    try:
+        from tools.skills_tool import skills_list as _skills_list
+    except Exception:
+        return []
+
+    raw = _skills_list()
+    data = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(data, dict):
+        return []
+
+    result: list[dict] = []
+    seen: set[str] = set()
+    for item in data.get("skills", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        result.append({
+            "name": name,
+            "description": str(item.get("description") or ""),
+            "category": str(item.get("category") or ""),
+        })
+    return result
+
+
+def _profile_agent_skill_matches(skill: dict, query: str) -> bool:
+    if not query:
+        return True
+    haystack = " ".join(
+        str(skill.get(key) or "").lower()
+        for key in ("name", "description", "category")
+    )
+    return query.lower() in haystack
+
+
+def _recommended_profile_agent_skills(catalog: list[dict], limit: int = 8) -> list[dict]:
+    by_name = {str(skill.get("name") or ""): skill for skill in catalog}
+    recommended: list[dict] = []
+    seen: set[str] = set()
+    for name in _PROFILE_AGENT_RECOMMENDED_SKILLS:
+        skill = by_name.get(name)
+        if skill and name not in seen:
+            recommended.append(skill)
+            seen.add(name)
+    for skill in catalog:
+        name = str(skill.get("name") or "")
+        if len(recommended) >= limit:
+            break
+        if name and name not in seen:
+            recommended.append(skill)
+            seen.add(name)
+    return recommended[:limit]
+
+
+def _normalize_profile_agent_skills(raw_skills, catalog: list[dict]) -> list[str]:
+    if isinstance(raw_skills, str):
+        values = [part.strip() for part in raw_skills.split(",")]
+    elif isinstance(raw_skills, list):
+        values = []
+        for part in raw_skills:
+            if isinstance(part, dict):
+                value = part.get("name") or part.get("id") or part.get("skill")
+                values.append(str(value or "").strip())
+            else:
+                values.append(str(part).strip())
+    else:
+        values = []
+
+    selected: list[str] = []
+    selected_seen: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        key = value.lower()
+        if key in selected_seen:
+            continue
+        selected_seen.add(key)
+        selected.append(value)
+
+    if not selected:
+        raise ValueError("skills is required")
+
+    available = {
+        str(skill.get("name") or "").lower(): str(skill.get("name") or "")
+        for skill in catalog
+        if str(skill.get("name") or "").strip()
+    }
+    if not available:
+        raise ValueError("No skills are available to mount")
+
+    unknown = [name for name in selected if name.lower() not in available]
+    if unknown:
+        raise ValueError(f"Unknown skill(s): {', '.join(unknown)}")
+
+    return [available[name.lower()] for name in selected]
+
+
+def _profile_agent_create_options(body: dict) -> dict:
+    clone_from = body.get("clone_from")
+    if clone_from is not None:
+        clone_from = str(clone_from).strip() or None
+        if clone_from and not re.fullmatch(r"^[a-z0-9][a-z0-9_-]{0,63}$", clone_from):
+            raise ValueError("Invalid clone_from name")
+
+    base_url = body.get("base_url", "")
+    base_url = str(base_url).strip() if base_url else None
+    if base_url and not base_url.startswith(("http://", "https://")):
+        raise ValueError("base_url must start with http:// or https://")
+
+    api_key = body.get("api_key", "")
+    api_key = str(api_key).strip() if api_key else None
+
+    return {
+        "clone_from": clone_from,
+        "clone_config": bool(body.get("clone_config", False)),
+        "base_url": base_url,
+        "api_key": api_key,
+    }
+
+
+def _profile_agent_markdown(agent: dict) -> str:
+    frontmatter = {
+        "profile_id": agent["profile_id"],
+        "profile_key": agent["profile_id"],
+        "profile_name": agent["profile_name"],
+        "avatar": agent["avatar"],
+        "description": agent["description"],
+        "status": agent["status"],
+        "skills": agent["skills"],
+        "created_at": agent["created_at"],
+        "updated_at": agent["updated_at"],
+    }
+    try:
+        import yaml as _yaml
+
+        metadata = _yaml.safe_dump(
+            frontmatter,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+        ).strip()
+    except Exception:
+        metadata = json.dumps(frontmatter, ensure_ascii=False, indent=2)
+    return f"---\n{metadata}\n---\n\n{agent['prompt'].rstrip()}\n"
+
+
+def _write_profile_agent_files(profile_path: Path, agent: dict) -> dict:
+    profile_path = Path(profile_path).expanduser().resolve()
+    profile_path.mkdir(parents=True, exist_ok=True)
+
+    soul_path = profile_path / "SOUL.md"
+    soul_path.write_text(agent["prompt"].rstrip() + "\n", encoding="utf-8")
+
+    agent_dir = profile_path / "profiles"
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    agent_file = agent_dir / "default.md"
+    agent_file.write_text(_profile_agent_markdown(agent), encoding="utf-8")
+
+    webui_dir = profile_path / "webui"
+    webui_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = webui_dir / "agent.json"
+    metadata_path.write_text(
+        json.dumps(agent, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    return {
+        "profile_path": str(profile_path),
+        "soul_path": str(soul_path),
+        "agent_file_path": str(agent_file),
+        "metadata_path": str(metadata_path),
+    }
+
+
+def _handle_profile_agent_skills(handler, parsed):
+    qs = parse_qs(parsed.query)
+    query = qs.get("q", [""])[0].strip()
+    catalog = _load_profile_agent_skills_catalog()
+    filtered = [
+        skill for skill in catalog
+        if _profile_agent_skill_matches(skill, query)
+    ]
+    return j(handler, {
+        "query": query,
+        "skills": filtered,
+        "recommended": _recommended_profile_agent_skills(catalog),
+        "count": len(filtered),
+    })
+
+
+def _handle_profile_agent_create(handler, body):
+    try:
+        profile_name = _profile_agent_text(
+            body,
+            ("profile_name", "display_name", "name"),
+            "name",
+            max_len=_PROFILE_AGENT_NAME_MAX,
+        )
+        description = _profile_agent_text(
+            body,
+            ("description", "summary", "one_liner"),
+            "description",
+            max_len=_PROFILE_AGENT_DESCRIPTION_MAX,
+        )
+        prompt = _profile_agent_text(
+            body,
+            ("prompt", "system_prompt"),
+            "prompt",
+            max_len=_PROFILE_AGENT_PROMPT_MAX,
+        )
+        avatar = _profile_agent_text(
+            body,
+            ("avatar", "avatar_url", "icon"),
+            "avatar",
+            max_len=_PROFILE_AGENT_AVATAR_MAX,
+        )
+        catalog = _load_profile_agent_skills_catalog()
+        skills = _normalize_profile_agent_skills(
+            body.get("skills", body.get("skill_names")),
+            catalog,
+        )
+        profile_id = _slugify_profile_agent_id(
+            profile_name,
+            str(body.get("profile_id") or body.get("profile_key") or "").strip(),
+        )
+        status = _normalize_profile_agent_status(body)
+        create_options = _profile_agent_create_options(body)
+
+        from api.profiles import create_profile_api
+
+        profile = create_profile_api(profile_id, **create_options)
+        raw_profile_path = str(profile.get("path") or "").strip()
+        if not raw_profile_path:
+            raise RuntimeError("created profile did not return a path")
+        profile_path = Path(raw_profile_path).expanduser()
+
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        agent = {
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "avatar": avatar,
+            "description": description,
+            "prompt": prompt,
+            "skills": skills,
+            "status": status,
+            "created_at": now,
+            "updated_at": now,
+        }
+        paths = _write_profile_agent_files(profile_path, agent)
+
+        return j(handler, {
+            "ok": True,
+            "profile": profile,
+            "agent": {**agent, **paths},
+        })
+    except (ValueError, FileExistsError, RuntimeError) as e:
+        return bad(handler, str(e), 400)
+    except OSError as e:
+        logger.exception("Failed to write profile agent files")
+        return bad(handler, _sanitize_error(e), 500)
 
 
 def _handle_skill_save(handler, body):

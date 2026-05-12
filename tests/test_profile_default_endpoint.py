@@ -112,8 +112,6 @@ def test_profile_default_endpoint_prefers_explicit_profile_fields(monkeypatch, t
 def test_profile_file_endpoint_returns_profile_record_fields(monkeypatch, tmp_path):
     profile_home = tmp_path / ".hermes"
     profile_file = profile_home / "profiles" / "default.md"
-    profile_file.parent.mkdir(parents=True)
-    profile_file.write_text("hello\nprofile\n", encoding="utf-8")
 
     import api.profiles as profiles
 
@@ -133,21 +131,54 @@ def test_profile_file_endpoint_returns_profile_record_fields(monkeypatch, tmp_pa
     )
 
     handler = _FakeHandler()
-    routes.handle_get(handler, urlparse("/api/profile/file?path=profiles/default.md"))
+    routes.handle_get(handler, urlparse("/api/profile/file"))
 
     assert handler.status == 200
     payload = handler.json_body()
-    assert payload["path"] == str(profile_file.resolve())
-    assert payload["avatar"] == ""
-    assert payload["profile_key"] == "profiles_default"
-    assert payload["profile_name"] == "default"
-    assert payload["webui_profile_id"] == "default:profiles/default.md"
-    assert payload["source"] == "registration"
-    assert payload["is_default"] is True
-    assert payload["sort"] == 0
-    assert payload["status"] == "active"
-    assert payload["relative_path"] == "profiles/default.md"
-    assert payload["content"] == "hello\nprofile\n"
+    assert payload == {
+        "path": str(profile_file.resolve()),
+        "avatar": "",
+        "profile_key": "profiles_default",
+        "profile_name": "default",
+        "webui_profile_id": "default:profiles/default.md",
+        "source": "registration",
+        "is_default": True,
+        "profile_path": str(profile_home.resolve()),
+    }
+
+
+def test_profile_file_endpoint_uses_requested_profile_home(monkeypatch, tmp_path):
+    profile_home = tmp_path / ".hermes" / "profiles" / "user_123456789"
+
+    import api.profiles as profiles
+
+    monkeypatch.setattr(profiles, "get_hermes_home_for_profile", lambda name: profile_home)
+    monkeypatch.setattr(
+        profiles,
+        "list_profiles_api",
+        lambda: [
+            {
+                "name": "user_123456789",
+                "path": str(profile_home),
+                "is_default": False,
+            }
+        ],
+    )
+
+    handler = _FakeHandler()
+    routes.handle_get(handler, urlparse("/api/profile/file?profile=user_123456789"))
+
+    assert handler.status == 200
+    assert handler.json_body() == {
+        "path": str((profile_home / "profiles" / "default.md").resolve()),
+        "avatar": "",
+        "profile_key": "profiles_default",
+        "profile_name": "default",
+        "webui_profile_id": "user_123456789:profiles/default.md",
+        "source": "registration",
+        "is_default": False,
+        "profile_path": str(profile_home.resolve()),
+    }
 
 
 def test_profile_file_endpoint_blocks_paths_outside_profile(monkeypatch, tmp_path):
