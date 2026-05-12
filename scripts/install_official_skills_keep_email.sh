@@ -253,16 +253,16 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 log "Installing official optional skills"
-while IFS= read -r skill_id; do
+while IFS= read -r skill_id <&3; do
   [[ -z "$skill_id" || "$skill_id" =~ ^# ]] && continue
   log "Installing $skill_id"
-  if "$HERMES_CLI" skills install "$skill_id" >> "$BACKUP_DIR/install.log" 2>&1; then
+  if "$HERMES_CLI" skills install "$skill_id" </dev/null >> "$BACKUP_DIR/install.log" 2>&1; then
     printf '%s\n' "$skill_id" >> "$INSTALLED_FILE"
   else
     printf '%s\n' "$skill_id" >> "$FAILED_FILE"
     log "Install failed for $skill_id; continuing"
   fi
-done < "$DISCOVERED_FILE"
+done 3< "$DISCOVERED_FILE"
 
 log "Running hub audit"
 "$HERMES_CLI" skills audit > "$BACKUP_DIR/audit.log" 2>&1 || log "Audit returned non-zero; see $BACKUP_DIR/audit.log"
