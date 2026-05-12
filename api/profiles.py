@@ -828,8 +828,31 @@ def list_profiles_api() -> list:
             'provider': p.provider,
             'has_env': p.has_env,
             'skill_count': p.skill_count,
+            'avatar': _profile_avatar_for_api(p),
         })
     return result
+
+
+def _profile_avatar_for_api(profile_info) -> str:
+    """Return the WebUI avatar metadata for a profile, if one is available."""
+    direct = getattr(profile_info, 'avatar', '') or ''
+    if direct:
+        return str(direct)
+
+    raw_path = getattr(profile_info, 'path', None)
+    if not raw_path:
+        return ''
+
+    metadata_path = Path(raw_path).expanduser() / 'webui' / 'agent.json'
+    if not metadata_path.exists():
+        return ''
+    try:
+        data = json.loads(metadata_path.read_text(encoding='utf-8'))
+    except Exception:
+        return ''
+    if not isinstance(data, dict):
+        return ''
+    return str(data.get('avatar') or '')
 
 
 def _default_profile_dict() -> dict:
@@ -844,6 +867,7 @@ def _default_profile_dict() -> dict:
         'provider': None,
         'has_env': (_DEFAULT_HERMES_HOME / '.env').exists(),
         'skill_count': 0,
+        'avatar': '',
     }
 
 

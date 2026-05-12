@@ -327,14 +327,15 @@ GET /api/profile/create-agent/skills?q=doc
   "profiles": [
     {
       "name": "default",
-      "path": "/home/hermeswebui/.hermes",
+      "path": "/home/user/.hermes",
       "is_default": true,
       "is_active": true,
       "gateway_running": false,
-      "model": null,
-      "provider": null,
+      "model": "gpt-5.4",
+      "provider": "openai",
       "has_env": true,
-      "skill_count": 0
+      "skill_count": 12,
+      "avatar": "/uploads/agent.png"
     }
   ],
   "active": "default"
@@ -355,6 +356,7 @@ GET /api/profile/create-agent/skills?q=doc
 | `profiles[].provider` | `string 或 null` | 当前 Profile 配置的模型供应商。 |
 | `profiles[].has_env` | `boolean` | 当前 Profile 是否存在环境配置文件。 |
 | `profiles[].skill_count` | `number` | 当前 Profile 下可用技能数量。 |
+| `profiles[].avatar` | `string` | 当前 Profile / 智能体头像地址或上传资源路径。 |
 | `active` | `string` | 当前激活的 Profile 名称。 |
 
 联调备注：
@@ -365,10 +367,28 @@ GET /api/profile/create-agent/skills?q=doc
 ### NocoBase Webhook：用户注册
 
 - 接口地址：`https://www.foxuai.com/api/webhook:trigger/3ahenbutb7a`
-- 请求方式：待联调确认。
-- 主要作用：用户注册接口。前端提交注册状态和注册相关信息，NocoBase 负责进行用户数据存储。
+- 请求方式：待联调确认；前端按 JSON 请求体传入用户名、邮箱和密码。
+- 主要作用：用户注册接口。前端提交 `name`、`email` 和 `password`，NocoBase 负责进行用户数据存储。
 - 返回数据：前端根据 NocoBase 返回结果判断注册是否成功，具体返回结构待联调确认。
 - 数据流说明：前端发起用户注册请求，NocoBase 接收并保存用户数据，然后向前端返回处理状态。
+
+请求体结构如下，字段值仅作结构示例：
+
+```json
+{
+  "name": "",
+  "email": "",
+  "password": "<password>"
+}
+```
+
+请求字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | `string` | 用户注册名称或账号展示名称。 |
+| `email` | `string` | 用户注册邮箱，用于登录和识别用户。 |
+| `password` | `string` | 用户注册密码，属于敏感字段，文档中只记录占位符。 |
 
 示例返回结构如下，字段值仅作结构示例，实际字段以后端联调结果为准：
 
@@ -396,16 +416,33 @@ GET /api/profile/create-agent/skills?q=doc
 联调备注：
 
 - 前端提交注册信息时，只传递完成注册所需的业务字段。
+- 当前注册请求入参为 `name`、`email` 和 `password`，不要在日志、错误提示或文档中输出真实密码。
 - NocoBase 负责保存用户数据，前端以接口返回状态更新注册结果展示。
-- 若后续需要补充手机号、邮箱、用户名、第三方用户 ID 等请求字段，只记录字段名、类型和用途，不在本文档中写入真实用户隐私数据。
+- 若后续需要补充手机号、第三方用户 ID 等请求字段，只记录字段名、类型和用途，不在本文档中写入真实密码、token 或用户隐私数据。
 
 ### NocoBase Webhook：用户登录
 
 - 接口地址：`https://www.foxuai.com/api/webhook:trigger/ugyoa0123ft`
-- 请求方式：待联调确认。
-- 主要作用：用户登录接口。前端提交登录相关信息，NocoBase 处理登录校验并向前端返回登录状态。
+- 请求方式：待联调确认；前端按 JSON 请求体传入邮箱和密码。
+- 主要作用：用户登录接口。前端提交 `email` 和 `password`，NocoBase 处理登录校验并向前端返回登录状态。
 - 返回数据：前端根据 NocoBase 返回结果判断登录是否成功，具体返回结构待联调确认。
 - 数据流说明：前端发起用户登录请求，NocoBase 校验用户数据后返回处理状态，前端据此更新登录结果展示。
+
+请求体结构如下，字段值仅作结构示例：
+
+```json
+{
+  "email": "user@example.com",
+  "password": "<password>"
+}
+```
+
+请求字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `email` | `string` | 用户登录邮箱，用于定位登录用户。 |
+| `password` | `string` | 用户登录密码，属于敏感字段，文档中只记录占位符。 |
 
 示例返回结构如下，字段值仅作结构示例，实际字段以后端联调结果为准：
 
@@ -433,5 +470,6 @@ GET /api/profile/create-agent/skills?q=doc
 联调备注：
 
 - 前端提交登录信息时，只传递完成登录校验所需的业务字段。
+- 当前登录请求入参为 `email` 和 `password`，不要在日志、错误提示或文档中输出真实密码。
 - 前端以接口返回状态更新登录成功、登录失败或异常提示。
-- 若后续需要补充账号、手机号、邮箱、密码、验证码、登录 token 等请求或响应字段，只记录字段名、类型和用途，不在本文档中写入真实密码、验证码、token 或用户隐私数据。
+- 若后续需要补充账号、手机号、验证码、登录 token 等请求或响应字段，只记录字段名、类型和用途，不在本文档中写入真实密码、验证码、token 或用户隐私数据。
