@@ -4225,6 +4225,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/skills/delete":
         return _handle_skill_delete(handler, body)
 
+    if parsed.path == "/api/skills/install-community":
+        return _handle_skill_install_community(handler, body)
+
     # ── Memory (POST) ──
     if parsed.path == "/api/memory/write":
         return _handle_memory_write(handler, body)
@@ -8487,6 +8490,98 @@ def _handle_skill_delete(handler, body):
     skill_dir = matches[0].parent
     shutil.rmtree(str(skill_dir))
     return j(handler, {"ok": True, "name": body["name"]})
+
+
+def _community_skills_root() -> Path:
+    return Path(
+        os.getenv("HERMES_COMMUNITY_SKILLS_DIR", "/var/www/hermes-community-skills")
+    ).expanduser().resolve()
+
+
+def _body_first_path(body: dict, *keys: str) -> str:
+    for key in keys:
+        value = body.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _handle_skill_install_community(handler, body):
+    source_raw = _body_first_path(
+        body,
+        "source_path",
+        "skill_path",
+        "community_skill_path",
+        "path",
+    )
+    target_raw = _body_first_path(
+        body,
+        "profile_skills_path",
+        "target_skills_path",
+        "skills_path",
+        "target_path",
+    )
+    if not source_raw:
+        return bad(handler, "source_path is required")
+    if not target_raw:
+        return bad(handler, "profile_skills_path is required")
+
+    try:
+        community_root = _community_skills_root()
+        source_dir = Path(source_raw).expanduser().resolve()
+        target_skills_dir = Path(target_raw).expanduser().resolve()
+        source_dir.relative_to(community_root)
+    except ValueError:
+        return bad(handler, "source_path must be inside the community skills directory", 400)
+    except OSError as e:
+        return bad(handler, _sanitize_error(e), 400)
+
+    if not source_dir.exists() or not source_dir.is_dir():
+        return bad(handler, "Skill source not found", 404)
+    if not (source_dir / "SKILL.md").is_file():
+        return bad(handler, "Skill source must contain SKILL.md", 400)
+    if target_skills_dir.name != "skills":
+        return bad(handler, "profile_skills_path must be a skills directory", 400)
+
+    skill_name = source_dir.name
+    if not skill_name or skill_name in (".", "..") or "/" in skill_name or "\\" in skill_name:
+        return bad(handler, "Invalid skill directory name", 400)
+
+    destination = target_skills_dir / skill_name
+    overwrite = bool(body.get("overwrite", False))
+    if destination.exists() and not overwrite:
+        return bad(handler, "Skill already installed", 409)
+
+    temp_destination = target_skills_dir / f".{skill_name}.installing-{uuid.uuid4().hex}"
+    try:
+        target_skills_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source_dir, temp_destination, symlinks=True)
+        if destination.exists():
+            if destination.is_dir() and not destination.is_symlink():
+                shutil.rmtree(destination)
+            else:
+                destination.unlink()
+        temp_destination.rename(destination)
+    except OSError as e:
+        try:
+            if temp_destination.exists():
+                shutil.rmtree(temp_destination)
+        except OSError:
+            pass
+        logger.exception("Failed to install community skill")
+        return bad(handler, _sanitize_error(e), 500)
+
+    return j(
+        handler,
+        {
+            "ok": True,
+            "name": skill_name,
+            "source_path": str(source_dir),
+            "profile_skills_path": str(target_skills_dir),
+            "installed_path": str(destination),
+            "overwritten": overwrite,
+        },
+    )
 
 
 def _handle_memory_write(handler, body):
