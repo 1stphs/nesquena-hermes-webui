@@ -16,6 +16,7 @@ FAILED_FILE="$BACKUP_DIR/failed-official-skills.txt"
 INSTALLED_FILE="$BACKUP_DIR/installed-official-skills.txt"
 BROWSE_LOG="$BACKUP_DIR/hermes-skills-browse-official.log"
 DRY_RUN="${DRY_RUN:-0}"
+HERMES_BIN="${HERMES_BIN:-}"
 
 usage() {
   cat <<'USAGE'
@@ -28,6 +29,7 @@ Environment:
   HERMES_HOME      Hermes home. Default: parent of SKILLS_DIR
   BACKUP_ROOT      Backup root. Default: $HERMES_HOME/skills-backups
   DRY_RUN          1 = print plan only, do not move/install. Default: 0
+  HERMES_BIN       Explicit hermes CLI path. Auto-detected when unset.
 
 The script:
   1. Backs up the current skills directory.
@@ -57,12 +59,40 @@ run_or_echo() {
   fi
 }
 
+resolve_hermes_bin() {
+  local candidates=()
+  if [[ -n "$HERMES_BIN" ]]; then
+    candidates+=("$HERMES_BIN")
+  fi
+  if command -v hermes >/dev/null 2>&1; then
+    candidates+=("$(command -v hermes)")
+  fi
+  candidates+=(
+    "/var/www/hermes-agent-src/hermes"
+    "/var/www/hermes-agent-src/venv/bin/hermes"
+    "/root/.local/bin/hermes"
+    "/usr/local/bin/hermes"
+    "$HERMES_HOME/hermes-agent/hermes"
+    "$HERMES_HOME/hermes-agent/venv/bin/hermes"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" && -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
 
-command -v hermes >/dev/null 2>&1 || die "hermes command not found in PATH"
+HERMES_CLI="$(resolve_hermes_bin)" || die "hermes command not found. Set HERMES_BIN=/path/to/hermes or add hermes to PATH"
 
 export HERMES_HOME
 
@@ -86,6 +116,7 @@ mkdir -p "$SKILLS_DIR"
 log "Hermes home: $HERMES_HOME"
 log "Skills dir:  $SKILLS_DIR"
 log "Backup dir:  $BACKUP_DIR"
+log "Hermes CLI:  $HERMES_CLI"
 
 if [[ -d "$SKILLS_DIR" ]]; then
   log "Backing up current skills directory"
@@ -111,7 +142,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   log "Skipping live discovery in DRY_RUN mode"
   : > "$DISCOVERED_FILE"
 else
-  if ! hermes skills browse --source official > "$BROWSE_LOG" 2>&1; then
+  if ! "$HERMES_CLI" skills browse --source official > "$BROWSE_LOG" 2>&1; then
     tail -80 "$BROWSE_LOG" >&2 || true
     die "failed to browse official skills; see $BROWSE_LOG"
   fi
@@ -139,7 +170,7 @@ log "Installing official optional skills"
 while IFS= read -r skill_id; do
   [[ -z "$skill_id" || "$skill_id" =~ ^# ]] && continue
   log "Installing $skill_id"
-  if hermes skills install "$skill_id" >> "$BACKUP_DIR/install.log" 2>&1; then
+  if "$HERMES_CLI" skills install "$skill_id" >> "$BACKUP_DIR/install.log" 2>&1; then
     printf '%s\n' "$skill_id" >> "$INSTALLED_FILE"
   else
     printf '%s\n' "$skill_id" >> "$FAILED_FILE"
@@ -148,10 +179,10 @@ while IFS= read -r skill_id; do
 done < "$DISCOVERED_FILE"
 
 log "Running hub audit"
-hermes skills audit > "$BACKUP_DIR/audit.log" 2>&1 || log "Audit returned non-zero; see $BACKUP_DIR/audit.log"
+"$HERMES_CLI" skills audit > "$BACKUP_DIR/audit.log" 2>&1 || log "Audit returned non-zero; see $BACKUP_DIR/audit.log"
 
 log "Listing hub-installed skills"
-hermes skills list --source hub > "$BACKUP_DIR/hub-installed-skills.txt" 2>&1 || log "Hub list returned non-zero; see $BACKUP_DIR/hub-installed-skills.txt"
+"$HERMES_CLI" skills list --source hub > "$BACKUP_DIR/hub-installed-skills.txt" 2>&1 || log "Hub list returned non-zero; see $BACKUP_DIR/hub-installed-skills.txt"
 
 log "Remaining top-level entries in $SKILLS_DIR"
 find "$SKILLS_DIR" -mindepth 1 -maxdepth 2 -name SKILL.md -print | sort
