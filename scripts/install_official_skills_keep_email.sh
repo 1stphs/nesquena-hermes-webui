@@ -37,7 +37,7 @@ The script:
   1. Backs up the current skills directory.
   2. Moves all top-level entries except KEEP_SKILL_NAME and .bundled_manifest.
   3. Uses `hermes skills browse --source official` to discover official optional skills.
-  4. Installs each official optional skill with `hermes skills install`.
+  4. Copies each official optional skill from the local Hermes Agent source into SKILLS_DIR.
   5. Runs `hermes skills audit` and `hermes skills list --source hub`.
 USAGE
 }
@@ -126,6 +126,27 @@ discover_official_from_agent_dir() {
         printf 'official/%s/%s\n' "$category" "$skill"
       done \
     | sort -u
+}
+
+copy_official_skill_from_agent_dir() {
+  local agent_dir="$1"
+  local skill_id="$2"
+  local rest category skill src dest
+
+  rest="${skill_id#official/}"
+  category="${rest%%/*}"
+  skill="${rest#*/}"
+
+  [[ -n "$category" && -n "$skill" && "$category" != "$rest" ]] || return 1
+  [[ "$category" != *"/"* && "$skill" != *"/"* && "$category" != *".."* && "$skill" != *".."* ]] || return 1
+
+  src="$agent_dir/optional-skills/$category/$skill"
+  dest="$SKILLS_DIR/$category/$skill"
+  [[ -d "$src" && -f "$src/SKILL.md" ]] || return 1
+
+  mkdir -p "$(dirname "$dest")"
+  rm -rf "$dest"
+  cp -R "$src" "$dest"
 }
 
 discover_official_from_browse() {
@@ -256,7 +277,9 @@ log "Installing official optional skills"
 while IFS= read -r skill_id <&3; do
   [[ -z "$skill_id" || "$skill_id" =~ ^# ]] && continue
   log "Installing $skill_id"
-  if "$HERMES_CLI" skills install "$skill_id" </dev/null >> "$BACKUP_DIR/install.log" 2>&1; then
+  if [[ -n "$AGENT_DIR" ]] && copy_official_skill_from_agent_dir "$AGENT_DIR" "$skill_id" >> "$BACKUP_DIR/install.log" 2>&1; then
+    printf '%s\n' "$skill_id" >> "$INSTALLED_FILE"
+  elif "$HERMES_CLI" skills install "$skill_id" </dev/null >> "$BACKUP_DIR/install.log" 2>&1; then
     printf '%s\n' "$skill_id" >> "$INSTALLED_FILE"
   else
     printf '%s\n' "$skill_id" >> "$FAILED_FILE"
