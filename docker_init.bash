@@ -338,7 +338,15 @@ else
     fi
   done
   if [ -n "$_agent_src" ]; then
-    uv pip install "$_agent_src[all]" --trusted-host pypi.org --trusted-host files.pythonhosted.org || error_exit "Failed to install hermes-agent's requirements"
+    if ! uv pip install "$_agent_src[all]" --trusted-host pypi.org --trusted-host files.pythonhosted.org; then
+      echo ""
+      echo "!! WARNING: Failed to install hermes-agent's requirements."
+      echo "!! The WebUI will start with reduced functionality (no model auto-detection,"
+      echo "!! no personality routing, no CLI session imports)."
+      echo "!! Check the mounted hermes-agent dependencies or package index before relying"
+      echo "!! on agent-backed features."
+      echo ""
+    fi
   else
     echo ""
     echo "!! WARNING: hermes-agent source not found."
