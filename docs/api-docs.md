@@ -8,6 +8,105 @@
 
 ## 接口记录
 
+### NocoBase Webhook：通讯录列表展示
+
+- 接口地址：`https://www.foxuai.com/api/webhook:trigger/qyrh1cp4mcr`
+- 请求方式：待联调确认。
+- 主要作用：用于前端展示通讯录列表。
+- 返回数据：返回通讯录列表展示所需的账号、手机号、邮箱、用户状态和部门字段。
+- 数据流说明：前端调用该接口获取通讯录列表数据，并按返回字段渲染通讯录列表；NocoBase 负责查询和组装通讯录数据。
+
+请求参数如下：
+
+| 字段 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| 无 | - | - | - | 该接口当前按通讯录列表展示场景记录为无请求参数；若后续支持搜索、分页或部门筛选，再补充对应 query 或请求体字段。 |
+
+示例返回结构如下，字段值仅作结构示例，实际是否返回数组、分页信息或 `data` 包裹以后端联调结果为准：
+
+```json
+[
+  {
+    "登录账号": "{{$jobsMapByNodeKey.uzpza7ql3lc.name}}",
+    "手机号": "{{$jobsMapByNodeKey.uzpza7ql3lc.phone}}",
+    "邮箱": "{{$jobsMapByNodeKey.uzpza7ql3lc.email}}",
+    "用户状态": "{{$jobsMapByNodeKey.uzpza7ql3lc.status}}",
+    "部门": "{{$jobsMapByNodeKey.uzpza7ql3lc.department}}"
+  }
+]
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `登录账号` | `string` | 通讯录用户的登录账号或账号展示名称。 |
+| `手机号` | `string` | 通讯录用户的手机号。 |
+| `邮箱` | `string` | 通讯录用户的邮箱地址。 |
+| `用户状态` | `string` | 通讯录用户当前状态。 |
+| `部门` | `string` | 通讯录用户所属部门。 |
+
+联调备注：
+
+- 前端以接口返回的通讯录记录作为列表数据源，字段展示名可直接沿用返回字段。
+- 若后续需要支持分页、搜索、部门筛选或状态筛选，应补充请求参数和分页返回结构。
+- 若该 NocoBase webhook 后续需要鉴权、请求头或请求参数，补充到本文档时只记录字段名和用途，不写入真实密钥、token 或 cookie。
+
+### WebUI：Skills 列表展示
+
+- 接口地址：`http://172.234.237.195:8787/api/skills`
+- 请求方式：`GET`
+- 主要作用：用于前端展示 WebUI 当前可用的 Skills 列表，例如 Skills 管理页、创建任务或创建智能体时的候选技能列表。
+- 返回数据：返回当前 WebUI 可用 Skills 的元数据列表。
+- 数据流说明：前端调用该接口读取 Skills 的 `name`、`description` 和 `category`，用于列表展示、分类分组和本地搜索过滤；该接口只返回列表元数据，不返回 `SKILL.md` 完整内容，也不执行、创建、修改或删除 Skill。
+
+请求参数如下：
+
+| 字段 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| 无 | - | - | - | 该接口当前不需要请求参数。若前端需要搜索，可在拿到 `skills` 后按 `name`、`description` 和 `category` 做本地过滤。 |
+
+示例请求：
+
+```http
+GET /api/skills
+```
+
+示例返回结构如下，字段值仅作结构示例：
+
+```json
+{
+  "skills": [
+    {
+      "name": "doc-summary",
+      "description": "Summarize files and documents",
+      "category": "productivity"
+    },
+    {
+      "name": "web-search",
+      "description": "Search webpages and summarize sources",
+      "category": "research"
+    }
+  ]
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `skills` | `array<object>` | 当前 WebUI 可用的 Skills 列表。 |
+| `skills[].name` | `string` | Skill 的真实名称。前端后续提交挂载 Skills 时应提交该值，不要提交中文展示名。 |
+| `skills[].description` | `string` | Skill 描述，用于列表副标题、搜索匹配或详情预览入口。 |
+| `skills[].category` | `string` | Skill 分类。前端可按该字段分组展示；为空时可归入通用分类。 |
+
+联调备注：
+
+- 该接口用于前端展示 Skills 列表和选择候选项，不负责读取 Skill 文件内容。
+- 如需读取某个 Skill 的完整内容，应使用 WebUI `GET /api/skills/content?name=<skill-name>`。
+- 公网 WebUI 未登录访问时会返回 `401 Authentication required`；前端应在已登录 WebUI 会话下调用。
+- 前端展示中文标签时，可在前端维护中文展示名与真实 `name` 的映射，提交时只提交真实 `name`。
+
 ### WebUI：创建智能体 Skills 推荐与搜索
 
 - 接口地址：`http://172.234.237.195:8787/api/profile/create-agent/skills`
