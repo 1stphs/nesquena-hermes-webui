@@ -182,14 +182,11 @@ GET /api/profile/create-agent/skills?q=doc
 
 ```json
 {
-  "user_id": "",
-  "profile_id": "market-analyst",
+  "profile_name": "market-analyst",
   "avatar": "/uploads/market.png",
-  "name": "市场分析助手",
   "description": "用简短的话描述智能体的核心能力或用途",
   "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析，能够基于数据和事实输出结构化的分析与建议。",
-  "skills": ["web-search", "doc-summary", "table-analysis", "meeting-notes"],
-  "status": "active"
+  "skills": ["web-search", "doc-summary", "table-analysis", "meeting-notes"]
 }
 ```
 
