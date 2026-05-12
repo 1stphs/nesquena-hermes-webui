@@ -17,6 +17,7 @@ INSTALLED_FILE="$BACKUP_DIR/installed-official-skills.txt"
 BROWSE_LOG="$BACKUP_DIR/hermes-skills-browse-official.log"
 DRY_RUN="${DRY_RUN:-0}"
 HERMES_BIN="${HERMES_BIN:-}"
+HERMES_AGENT_DIR="${HERMES_AGENT_DIR:-}"
 
 usage() {
   cat <<'USAGE'
@@ -30,6 +31,7 @@ Environment:
   BACKUP_ROOT      Backup root. Default: $HERMES_HOME/skills-backups
   DRY_RUN          1 = print plan only, do not move/install. Default: 0
   HERMES_BIN       Explicit hermes CLI path. Auto-detected when unset.
+  HERMES_AGENT_DIR Explicit hermes-agent source dir. Auto-detected when unset.
 
 The script:
   1. Backs up the current skills directory.
@@ -87,12 +89,94 @@ resolve_hermes_bin() {
   return 1
 }
 
+resolve_agent_dir() {
+  local candidates=()
+  if [[ -n "$HERMES_AGENT_DIR" ]]; then
+    candidates+=("$HERMES_AGENT_DIR")
+  fi
+  candidates+=(
+    "/var/www/hermes-agent-src"
+    "$HERMES_HOME/hermes-agent"
+    "$(dirname "$HERMES_CLI")"
+    "$(dirname "$(dirname "$HERMES_CLI")")"
+    "$(dirname "$(dirname "$(dirname "$HERMES_CLI")")")"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -d "$candidate" && -d "$candidate/optional-skills" ]]; then
+      cd "$candidate" >/dev/null 2>&1 && pwd
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+discover_official_from_agent_dir() {
+  local agent_dir="$1"
+  local optional_dir="$agent_dir/optional-skills"
+  [[ -d "$optional_dir" ]] || return 1
+
+  find "$optional_dir" -mindepth 3 -maxdepth 3 -type f -name SKILL.md \
+    | while IFS= read -r skill_file; do
+        skill_dir="$(dirname "$skill_file")"
+        category="$(basename "$(dirname "$skill_dir")")"
+        skill="$(basename "$skill_dir")"
+        printf 'official/%s/%s\n' "$category" "$skill"
+      done \
+    | sort -u
+}
+
+discover_official_from_browse() {
+  local page=1
+  local total_pages=1
+  local page_log
+
+  : > "$BROWSE_LOG"
+  while [[ "$page" -le "$total_pages" ]]; do
+    page_log="$BACKUP_DIR/hermes-skills-browse-official-page-$page.log"
+    if ! "$HERMES_CLI" skills browse --source official --page "$page" > "$page_log" 2>&1; then
+      tail -80 "$page_log" >&2 || true
+      return 1
+    fi
+
+    {
+      printf '\n===== page %s =====\n' "$page"
+      cat "$page_log"
+    } >> "$BROWSE_LOG"
+
+    if [[ "$page" == "1" ]]; then
+      total_pages="$(
+        grep -Eo 'page[[:space:]]+[0-9]+/[0-9]+' "$page_log" \
+          | head -1 \
+          | sed -E 's/.*\/([0-9]+)/\1/' \
+          || true
+      )"
+      [[ -n "$total_pages" ]] || total_pages=1
+    fi
+
+    awk '
+      /^[[:space:]]*│[[:space:]]*[0-9]+[[:space:]]*│/ {
+        line=$0
+        sub(/^[[:space:]]*│[[:space:]]*[0-9]+[[:space:]]*│[[:space:]]*/, "", line)
+        sub(/[[:space:]]*│.*/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if (line != "" && line !~ /…/ && line !~ /\.\.\./) print line
+      }
+    ' "$page_log"
+
+    page=$((page + 1))
+  done | sort -u
+}
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
 
 HERMES_CLI="$(resolve_hermes_bin)" || die "hermes command not found. Set HERMES_BIN=/path/to/hermes or add hermes to PATH"
+AGENT_DIR="$(resolve_agent_dir || true)"
 
 export HERMES_HOME
 
@@ -117,6 +201,7 @@ log "Hermes home: $HERMES_HOME"
 log "Skills dir:  $SKILLS_DIR"
 log "Backup dir:  $BACKUP_DIR"
 log "Hermes CLI:  $HERMES_CLI"
+[[ -n "$AGENT_DIR" ]] && log "Agent dir:   $AGENT_DIR"
 
 if [[ -d "$SKILLS_DIR" ]]; then
   log "Backing up current skills directory"
@@ -142,17 +227,18 @@ if [[ "$DRY_RUN" == "1" ]]; then
   log "Skipping live discovery in DRY_RUN mode"
   : > "$DISCOVERED_FILE"
 else
-  if ! "$HERMES_CLI" skills browse --source official > "$BROWSE_LOG" 2>&1; then
-    tail -80 "$BROWSE_LOG" >&2 || true
-    die "failed to browse official skills; see $BROWSE_LOG"
+  if [[ -n "$AGENT_DIR" ]]; then
+    discover_official_from_agent_dir "$AGENT_DIR" > "$DISCOVERED_FILE" || true
   fi
 
-  grep -Eo 'official/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+' "$BROWSE_LOG" \
-    | sort -u > "$DISCOVERED_FILE" || true
+  if [[ ! -s "$DISCOVERED_FILE" ]]; then
+    log "Could not discover official IDs from local optional-skills; falling back to browse output"
+    discover_official_from_browse > "$DISCOVERED_FILE" || die "failed to browse official skills; see $BROWSE_LOG"
+  fi
 
   if [[ ! -s "$DISCOVERED_FILE" ]]; then
     tail -120 "$BROWSE_LOG" >&2 || true
-    die "no official skill identifiers found in browse output; see $BROWSE_LOG"
+    die "no official skills discovered; see $BROWSE_LOG"
   fi
 fi
 
