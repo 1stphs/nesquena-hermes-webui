@@ -18,6 +18,8 @@ BROWSE_LOG="$BACKUP_DIR/hermes-skills-browse-official.log"
 DRY_RUN="${DRY_RUN:-0}"
 HERMES_BIN="${HERMES_BIN:-}"
 HERMES_AGENT_DIR="${HERMES_AGENT_DIR:-}"
+HERMES_AGENT_REPO="${HERMES_AGENT_REPO:-NousResearch/hermes-agent}"
+HERMES_AGENT_REF="${HERMES_AGENT_REF:-main}"
 
 usage() {
   cat <<'USAGE'
@@ -32,13 +34,15 @@ Environment:
   DRY_RUN          1 = print plan only, do not move/install. Default: 0
   HERMES_BIN       Explicit hermes CLI path. Auto-detected when unset.
   HERMES_AGENT_DIR Explicit hermes-agent source dir. Auto-detected when unset.
+  HERMES_AGENT_REPO GitHub repo for official optional skills. Default: NousResearch/hermes-agent
+  HERMES_AGENT_REF  Git ref for official optional skills. Default: main
 
 The script:
   1. Backs up the current skills directory.
   2. Moves all top-level entries except KEEP_SKILL_NAME and .bundled_manifest.
-  3. Uses `hermes skills browse --source official` to discover official optional skills.
-  4. Copies each official optional skill from the local Hermes Agent source into SKILLS_DIR.
-  5. Runs `hermes skills audit` and `hermes skills list --source hub`.
+  3. Uses GitHub API to discover official optional skills.
+  4. Downloads each official optional skill directly into SKILLS_DIR.
+  5. Runs `hermes skills audit` and `hermes skills list --source hub` when available.
 USAGE
 }
 
@@ -128,27 +132,6 @@ discover_official_from_agent_dir() {
     | sort -u
 }
 
-copy_official_skill_from_agent_dir() {
-  local agent_dir="$1"
-  local skill_id="$2"
-  local rest category skill src dest
-
-  rest="${skill_id#official/}"
-  category="${rest%%/*}"
-  skill="${rest#*/}"
-
-  [[ -n "$category" && -n "$skill" && "$category" != "$rest" ]] || return 1
-  [[ "$category" != *"/"* && "$skill" != *"/"* && "$category" != *".."* && "$skill" != *".."* ]] || return 1
-
-  src="$agent_dir/optional-skills/$category/$skill"
-  dest="$SKILLS_DIR/$category/$skill"
-  [[ -d "$src" && -f "$src/SKILL.md" ]] || return 1
-
-  mkdir -p "$(dirname "$dest")"
-  rm -rf "$dest"
-  cp -R "$src" "$dest"
-}
-
 discover_official_from_browse() {
   local page=1
   local total_pages=1
@@ -191,6 +174,119 @@ discover_official_from_browse() {
   done | sort -u
 }
 
+download_official_skills_from_github() {
+  python3 - "$HERMES_AGENT_REPO" "$HERMES_AGENT_REF" "$SKILLS_DIR" "$DISCOVERED_FILE" "$INSTALLED_FILE" "$FAILED_FILE" "$BACKUP_DIR/github-download.log" <<'PY'
+import base64
+import json
+import os
+import shutil
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+repo, ref, skills_dir, discovered_file, installed_file, failed_file, log_file = sys.argv[1:]
+skills_root = Path(skills_dir)
+token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+
+
+def log(message):
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(message + "\n")
+
+
+def github_get(url):
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "hermes-webui-skills-installer",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def safe_part(value):
+    return value and "/" not in value and ".." not in value
+
+
+quoted_ref = urllib.parse.quote(ref, safe="")
+tree_url = f"https://api.github.com/repos/{repo}/git/trees/{quoted_ref}?recursive=1"
+tree_payload = github_get(tree_url)
+tree = tree_payload.get("tree") or []
+
+skill_dirs = set()
+for item in tree:
+    path = item.get("path") or ""
+    parts = path.split("/")
+    if (
+        len(parts) == 4
+        and parts[0] == "optional-skills"
+        and parts[3] == "SKILL.md"
+        and safe_part(parts[1])
+        and safe_part(parts[2])
+    ):
+        skill_dirs.add((parts[1], parts[2]))
+
+if not skill_dirs:
+    raise SystemExit("no optional skills found in GitHub tree")
+
+with open(discovered_file, "w", encoding="utf-8") as f:
+    for category, skill in sorted(skill_dirs):
+        f.write(f"official/{category}/{skill}\n")
+
+by_dir = {}
+for item in tree:
+    path = item.get("path") or ""
+    parts = path.split("/")
+    if len(parts) >= 4 and parts[0] == "optional-skills":
+        key = (parts[1], parts[2])
+        if key in skill_dirs and item.get("type") == "blob":
+            by_dir.setdefault(key, []).append(item)
+
+skills_root.mkdir(parents=True, exist_ok=True)
+
+for category, skill in sorted(skill_dirs):
+    skill_id = f"official/{category}/{skill}"
+    dest_root = skills_root / category / skill
+    try:
+        if dest_root.exists():
+            shutil.rmtree(dest_root)
+        dest_root.mkdir(parents=True, exist_ok=True)
+
+        for item in by_dir.get((category, skill), []):
+            rel_parts = item["path"].split("/")[3:]
+            if not rel_parts:
+                continue
+            rel_path = Path(*rel_parts)
+            if rel_path.is_absolute() or ".." in rel_path.parts:
+                raise RuntimeError(f"unsafe path from GitHub tree: {item['path']}")
+
+            blob = github_get(item["url"])
+            encoding = blob.get("encoding")
+            content = blob.get("content") or ""
+            if encoding != "base64":
+                raise RuntimeError(f"unsupported blob encoding for {item['path']}: {encoding}")
+            data = base64.b64decode(content)
+            target = dest_root / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+
+        if not (dest_root / "SKILL.md").exists():
+            raise RuntimeError(f"downloaded skill missing SKILL.md: {skill_id}")
+        with open(installed_file, "a", encoding="utf-8") as f:
+            f.write(skill_id + "\n")
+        log(f"installed {skill_id} -> {dest_root}")
+    except Exception as exc:
+        with open(failed_file, "a", encoding="utf-8") as f:
+            f.write(skill_id + "\n")
+        log(f"failed {skill_id}: {exc}")
+
+PY
+}
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
@@ -221,6 +317,7 @@ mkdir -p "$SKILLS_DIR"
 log "Hermes home: $HERMES_HOME"
 log "Skills dir:  $SKILLS_DIR"
 log "Backup dir:  $BACKUP_DIR"
+log "GitHub repo: $HERMES_AGENT_REPO@$HERMES_AGENT_REF"
 log "Hermes CLI:  $HERMES_CLI"
 [[ -n "$AGENT_DIR" ]] && log "Agent dir:   $AGENT_DIR"
 
@@ -248,18 +345,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
   log "Skipping live discovery in DRY_RUN mode"
   : > "$DISCOVERED_FILE"
 else
-  if [[ -n "$AGENT_DIR" ]]; then
-    discover_official_from_agent_dir "$AGENT_DIR" > "$DISCOVERED_FILE" || true
-  fi
-
+  download_official_skills_from_github || die "failed to download official skills from GitHub; see $BACKUP_DIR/github-download.log"
   if [[ ! -s "$DISCOVERED_FILE" ]]; then
-    log "Could not discover official IDs from local optional-skills; falling back to browse output"
-    discover_official_from_browse > "$DISCOVERED_FILE" || die "failed to browse official skills; see $BROWSE_LOG"
-  fi
-
-  if [[ ! -s "$DISCOVERED_FILE" ]]; then
-    tail -120 "$BROWSE_LOG" >&2 || true
-    die "no official skills discovered; see $BROWSE_LOG"
+    die "no official skills discovered from GitHub; see $BACKUP_DIR/github-download.log"
   fi
 fi
 
@@ -273,19 +361,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-log "Installing official optional skills"
-while IFS= read -r skill_id <&3; do
-  [[ -z "$skill_id" || "$skill_id" =~ ^# ]] && continue
-  log "Installing $skill_id"
-  if [[ -n "$AGENT_DIR" ]] && copy_official_skill_from_agent_dir "$AGENT_DIR" "$skill_id" >> "$BACKUP_DIR/install.log" 2>&1; then
-    printf '%s\n' "$skill_id" >> "$INSTALLED_FILE"
-  elif "$HERMES_CLI" skills install "$skill_id" </dev/null >> "$BACKUP_DIR/install.log" 2>&1; then
-    printf '%s\n' "$skill_id" >> "$INSTALLED_FILE"
-  else
-    printf '%s\n' "$skill_id" >> "$FAILED_FILE"
-    log "Install failed for $skill_id; continuing"
-  fi
-done 3< "$DISCOVERED_FILE"
+log "Official optional skills downloaded directly into $SKILLS_DIR"
 
 log "Running hub audit"
 "$HERMES_CLI" skills audit > "$BACKUP_DIR/audit.log" 2>&1 || log "Audit returned non-zero; see $BACKUP_DIR/audit.log"
