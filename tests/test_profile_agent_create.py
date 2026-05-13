@@ -390,6 +390,44 @@ def test_profile_change_soul_replaces_profile_soul(tmp_path):
     assert (profile_path / "SOUL.md").read_text(encoding="utf-8") == body["content"]
 
 
+def test_profile_change_soul_accepts_hermes_logical_path(tmp_path, monkeypatch):
+    from api import profiles
+
+    profile_path = tmp_path / "profiles" / "logical-agent"
+    profile_path.mkdir(parents=True)
+    (profile_path / "SOUL.md").write_text("old soul\n", encoding="utf-8")
+    monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", tmp_path)
+
+    body = {
+        "path": "/.hermes/profiles/logical-agent",
+        "content": "new soul",
+    }
+    handler = _FakeHandler(body)
+    routes.handle_post(handler, urlparse("/api/profile/change_soul"))
+
+    assert handler.status == 200
+    assert (profile_path / "SOUL.md").read_text(encoding="utf-8") == body["content"]
+
+
+def test_profile_change_soul_accepts_server_absolute_hermes_path(tmp_path, monkeypatch):
+    from api import profiles
+
+    profile_path = tmp_path / "profiles" / "server-agent"
+    profile_path.mkdir(parents=True)
+    (profile_path / "SOUL.md").write_text("old soul\n", encoding="utf-8")
+    monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", tmp_path)
+
+    body = {
+        "path": "/root/.hermes/profiles/server-agent",
+        "content": "new soul",
+    }
+    handler = _FakeHandler(body)
+    routes.handle_post(handler, urlparse("/api/profile/change_soul"))
+
+    assert handler.status == 200
+    assert (profile_path / "SOUL.md").read_text(encoding="utf-8") == body["content"]
+
+
 def test_profile_change_soul_allows_empty_content(tmp_path):
     profile_path = tmp_path / "profiles" / "empty-soul"
     profile_path.mkdir(parents=True)

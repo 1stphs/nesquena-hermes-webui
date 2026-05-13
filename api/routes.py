@@ -8265,12 +8265,51 @@ def _read_profile_agent_metadata(profile_path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _coerce_profile_soul_candidate(value: str) -> Path:
+    normalized = value.replace("\\", "/").strip()
+    lowered = normalized.lower()
+    suffix = None
+    for prefix in ("/.hermes", ".hermes"):
+        if lowered == prefix:
+            suffix = ""
+            break
+        if lowered.startswith(prefix + "/"):
+            suffix = normalized[len(prefix):].lstrip("/")
+            break
+
+    literal = Path(value).expanduser()
+    if suffix is None and literal.exists():
+        return literal
+
+    if suffix is None:
+        marker = "/.hermes"
+        marker_with_sep = marker + "/"
+        idx = lowered.find(marker_with_sep)
+        if idx >= 0:
+            suffix = normalized[idx + len(marker):].lstrip("/")
+        elif lowered.endswith(marker):
+            suffix = ""
+
+    if suffix is None:
+        return literal
+
+    from api.profiles import _DEFAULT_HERMES_HOME
+
+    base_home = Path(_DEFAULT_HERMES_HOME).expanduser().resolve()
+    candidate = (base_home / suffix).resolve()
+    try:
+        candidate.relative_to(base_home)
+    except ValueError as exc:
+        raise ValueError("path must stay within Hermes home") from exc
+    return candidate
+
+
 def _resolve_profile_soul_path(raw_path: str) -> Path:
     value = str(raw_path or "").strip()
     if not value:
         raise ValueError("path is required")
 
-    candidate = Path(value).expanduser()
+    candidate = _coerce_profile_soul_candidate(value)
     if candidate.name.lower() == "soul.md":
         profile_path = candidate.parent
         soul_path = candidate
