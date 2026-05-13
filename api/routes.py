@@ -8666,6 +8666,38 @@ def _body_first_path(body: dict, *keys: str) -> str:
     return ""
 
 
+def _coerce_hermes_home_path(value: str) -> Path:
+    normalized = str(value or "").strip().replace("\\", "/")
+    lowered = normalized.lower()
+    suffix = None
+    for prefix in ("/.hermes", ".hermes"):
+        if lowered == prefix:
+            suffix = ""
+            break
+        if lowered.startswith(prefix + "/"):
+            suffix = normalized[len(prefix):].lstrip("/")
+            break
+
+    if suffix is None:
+        marker = "/.hermes"
+        marker_with_sep = marker + "/"
+        idx = lowered.find(marker_with_sep)
+        if idx >= 0:
+            suffix = normalized[idx + len(marker):].lstrip("/")
+        elif lowered.endswith(marker):
+            suffix = ""
+
+    if suffix is None:
+        return Path(value).expanduser().resolve()
+
+    from api.profiles import _DEFAULT_HERMES_HOME
+
+    base_home = Path(_DEFAULT_HERMES_HOME).expanduser().resolve()
+    candidate = (base_home / suffix).resolve()
+    candidate.relative_to(base_home)
+    return candidate
+
+
 def _handle_skill_install_community(handler, body):
     source_raw = _body_first_path(
         body,
@@ -8689,7 +8721,7 @@ def _handle_skill_install_community(handler, body):
     try:
         community_root = _community_skills_root()
         source_dir = Path(source_raw).expanduser().resolve()
-        target_skills_dir = Path(target_raw).expanduser().resolve()
+        target_skills_dir = _coerce_hermes_home_path(target_raw)
         source_dir.relative_to(community_root)
     except ValueError:
         return bad(handler, "source_path must be inside the community skills directory", 400)
@@ -8761,7 +8793,7 @@ def _handle_skill_uninstall_profile(handler, body):
         return bad(handler, "Invalid skill name")
 
     try:
-        target_skills_dir = Path(target_raw).expanduser().resolve()
+        target_skills_dir = _coerce_hermes_home_path(target_raw)
         if target_skills_dir.name != "skills":
             return bad(handler, "profile_skills_path must be a skills directory", 400)
         destination = (target_skills_dir / skill_name).resolve()

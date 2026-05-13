@@ -75,6 +75,29 @@ def test_install_community_skill_copies_directory(monkeypatch, tmp_path):
     assert (installed / "assets" / "prompt.txt").read_text(encoding="utf-8") == "commit helper"
 
 
+def test_install_community_skill_accepts_server_absolute_hermes_path(monkeypatch, tmp_path):
+    from api import profiles
+
+    hermes_home = tmp_path / ".hermes"
+    community_root = tmp_path / "hermes-community-skills"
+    skill_dir = community_root / "algorithmic-art"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Algorithmic Art\n", encoding="utf-8")
+    monkeypatch.setenv("HERMES_COMMUNITY_SKILLS_DIR", str(community_root))
+    monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", hermes_home)
+
+    payload, status = _post_install({
+        "source_path": str(skill_dir),
+        "profile_skills_path": "/root/.hermes/profiles/312321/skills",
+    })
+
+    installed = hermes_home / "profiles" / "312321" / "skills" / "algorithmic-art"
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["profile_skills_path"] == str(installed.parent.resolve())
+    assert (installed / "SKILL.md").read_text(encoding="utf-8") == "# Algorithmic Art\n"
+
+
 def test_install_community_skill_rejects_source_outside_root(monkeypatch, tmp_path):
     community_root = tmp_path / "hermes-community-skills"
     community_root.mkdir()
@@ -151,6 +174,27 @@ def test_uninstall_profile_skill_removes_directory(tmp_path):
     assert payload["ok"] is True
     assert payload["name"] == "git-commit-ai"
     assert payload["removed_path"] == str(installed.resolve())
+    assert not installed.exists()
+
+
+def test_uninstall_profile_skill_accepts_server_absolute_hermes_path(monkeypatch, tmp_path):
+    from api import profiles
+
+    hermes_home = tmp_path / ".hermes"
+    target_skills = hermes_home / "profiles" / "312321" / "skills"
+    installed = target_skills / "algorithmic-art"
+    installed.mkdir(parents=True)
+    (installed / "SKILL.md").write_text("# Algorithmic Art\n", encoding="utf-8")
+    monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", hermes_home)
+
+    payload, status = _post_uninstall({
+        "profile_skills_path": "/root/.hermes/profiles/312321/skills",
+        "name": "algorithmic-art",
+    })
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["profile_skills_path"] == str(target_skills.resolve())
     assert not installed.exists()
 
 
