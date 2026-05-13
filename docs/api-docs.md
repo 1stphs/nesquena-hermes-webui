@@ -122,7 +122,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 - 请求方式：待联调确认；前端按 JSON 请求体传入创建所需字段。
 - 主要作用：前端调用该接口后，NocoBase 保持当前 webhook 地址不变，按下方字段调用 WebUI 的 `POST /api/profile/create-agent`，在 Profile 目录中创建一个新智能体，然后同步更新 `Hermes-Profile` 表，新增 Profile 数据并绑定到当前用户。
 - 返回数据：前端根据 NocoBase 返回结果判断创建是否成功，具体返回结构待联调确认。
-- 数据流说明：前端传入智能体基础展示信息、角色设定 Prompt 和是否默认；NocoBase 触发 WebUI 创建流程，并将创建成功后的 Profile / 智能体数据写入 `Hermes-Profile` 表。当前用户绑定关系由 NocoBase 根据登录态或流程上下文处理，不要求前端在请求体中传 `user_id`，也不再传入 `skills` 字段。
+- 数据流说明：前端传入智能体基础展示信息、角色设定 Prompt 和是否默认；NocoBase 触发 WebUI 创建流程，WebUI 创建时默认从 `company-assistant` 克隆 Profile 配置，并将创建成功后的 Profile / 智能体数据写入 `Hermes-Profile` 表。当前用户绑定关系由 NocoBase 根据登录态或流程上下文处理，不要求前端在请求体中传 `user_id`，也不再传入 `skills` 字段。
 
 请求体结构如下，字段值仅作结构示例：
 
@@ -132,7 +132,9 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
   "avatar": "/uploads/market.png",
   "description": "用简短的话描述智能体的核心能力或用途",
   "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析，能够基于数据和事实输出结构化的分析与建议。",
-  "is_default": false
+  "is_default": false,
+  "clone_from": "company-assistant",
+  "clone_config": true
 }
 ```
 
@@ -145,6 +147,8 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 | `description` | `string` | 一句话描述，对应 WebUI 创建接口的 `description` / `summary` / `one_liner` 字段，最长 80 个字符。 |
 | `prompt` | `string` | 角色设定 Prompt，对应 WebUI 创建接口的 `prompt` / `system_prompt` 字段，最长 1000 个字符。 |
 | `is_default` | `boolean` | 是否将新建 Profile 设置为默认 Profile，具体生效规则待联调确认。 |
+| `clone_from` | `string` | WebUI 创建 Profile 时克隆配置的来源 Profile；当前默认使用 `company-assistant`。 |
+| `clone_config` | `boolean` | 是否克隆来源 Profile 的配置文件；当前默认使用 `true`。 |
 
 示例返回结构如下，字段值仅作结构示例，实际字段以后端联调结果为准：
 
@@ -195,7 +199,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 
 联调备注：
 
-- 创建接口不再要求前端传入模型接口配置字段；若后续需要扩展 `base_url`、`api_key`、`clone_from` 或 `clone_config`，应按 WebUI 创建接口的可选字段单独补充，并避免在日志、错误提示或文档中输出真实密钥。
+- 创建接口不再要求前端传入模型接口配置字段；WebUI 当前默认使用 `clone_from: "company-assistant"` 和 `clone_config: true` 克隆配置。若后续需要扩展 `base_url` 或 `api_key`，应按 WebUI 创建接口的可选字段单独补充，并避免在日志、错误提示或文档中输出真实密钥。
 - 创建接口请求体按截图字段记录为 `profile_name`、`avatar`、`description`、`prompt`、`is_default`；不再要求前端传 `user_id`、`profile_id`、`name`、`status`、`draft` 或 `skills`。
 - 创建时不再提交 `skills`，新建智能体元数据中的 `skills` 默认为空数组；后续如需“已创建后增删 Skills”，使用下方“编辑用户绑定智能体 Profile Skills”接口。
 - 创建流程需要同时确认 WebUI Profile 目录中的智能体创建结果，以及 NocoBase `Hermes-Profile` 表中 Profile 数据和用户绑定关系的新增结果。
@@ -304,7 +308,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 
 ```json
 {
-  "skills": ["skill_web_search", "skill_doc_summary", "skill_table_analysis"],
+  "skills": ["id1","id2","id3","id4"],
   "profile_id": "market-analyst"
 }
 ```
@@ -446,7 +450,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
       "profile_name": "市场分析助手",
       "description": "用简短的话描述智能体的核心能力或用途",
       "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析。",
-      "skills": ["web-search", "doc-summary"],
+      "skills": ["id1","id2","id3","id4"],
       "avatar": "/uploads/market.png",
       "skill_count": 2
     }

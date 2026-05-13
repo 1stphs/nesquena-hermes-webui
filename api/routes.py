@@ -8171,8 +8171,11 @@ def _normalize_profile_agent_skills(
     return [available[name.lower()] for name in selected]
 
 
+_PROFILE_AGENT_DEFAULT_CLONE_FROM = "company-assistant"
+
+
 def _profile_agent_create_options(body: dict) -> dict:
-    clone_from = body.get("clone_from")
+    clone_from = body.get("clone_from", _PROFILE_AGENT_DEFAULT_CLONE_FROM)
     if clone_from is not None:
         clone_from = str(clone_from).strip() or None
         if clone_from and not re.fullmatch(r"^[a-z0-9][a-z0-9_-]{0,63}$", clone_from):
@@ -8188,7 +8191,7 @@ def _profile_agent_create_options(body: dict) -> dict:
 
     return {
         "clone_from": clone_from,
-        "clone_config": bool(body.get("clone_config", False)),
+        "clone_config": bool(body.get("clone_config", True)),
         "base_url": base_url,
         "api_key": api_key,
     }
