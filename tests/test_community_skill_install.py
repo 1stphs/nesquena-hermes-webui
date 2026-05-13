@@ -46,6 +46,12 @@ def _post_install(body):
     return handler.json_body(), handler.status
 
 
+def _post_uninstall(body):
+    handler = _FakeHandler(body)
+    routes.handle_post(handler, urlparse("/api/skills/uninstall-profile"))
+    return handler.json_body(), handler.status
+
+
 def test_install_community_skill_copies_directory(monkeypatch, tmp_path):
     community_root = tmp_path / "hermes-community-skills"
     skill_dir = community_root / "git-commit-ai"
@@ -127,3 +133,48 @@ def test_install_community_skill_requires_skill_md(monkeypatch, tmp_path):
 
     assert status == 400
     assert payload["error"] == "Skill source must contain SKILL.md"
+
+
+def test_uninstall_profile_skill_removes_directory(tmp_path):
+    target_skills = tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"
+    installed = target_skills / "git-commit-ai"
+    (installed / "assets").mkdir(parents=True)
+    (installed / "SKILL.md").write_text("# Git Commit AI\n", encoding="utf-8")
+    (installed / "assets" / "prompt.txt").write_text("commit helper", encoding="utf-8")
+
+    payload, status = _post_uninstall({
+        "profile_skills_path": str(target_skills),
+        "name": "git-commit-ai",
+    })
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["name"] == "git-commit-ai"
+    assert payload["removed_path"] == str(installed.resolve())
+    assert not installed.exists()
+
+
+def test_uninstall_profile_skill_rejects_invalid_name(tmp_path):
+    target_skills = tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"
+    target_skills.mkdir(parents=True)
+
+    payload, status = _post_uninstall({
+        "profile_skills_path": str(target_skills),
+        "name": "../outside",
+    })
+
+    assert status == 400
+    assert payload["error"] == "Invalid skill name"
+
+
+def test_uninstall_profile_skill_requires_installed_skill(tmp_path):
+    target_skills = tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"
+    target_skills.mkdir(parents=True)
+
+    payload, status = _post_uninstall({
+        "profile_skills_path": str(target_skills),
+        "name": "missing-skill",
+    })
+
+    assert status == 404
+    assert payload["error"] == "Skill not found"

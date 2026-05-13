@@ -4228,6 +4228,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/skills/install-community":
         return _handle_skill_install_community(handler, body)
 
+    if parsed.path == "/api/skills/uninstall-profile":
+        return _handle_skill_uninstall_profile(handler, body)
+
     # ── Memory (POST) ──
     if parsed.path == "/api/memory/write":
         return _handle_memory_write(handler, body)
@@ -8580,6 +8583,53 @@ def _handle_skill_install_community(handler, body):
             "profile_skills_path": str(target_skills_dir),
             "installed_path": str(destination),
             "overwritten": overwrite,
+        },
+    )
+
+
+def _handle_skill_uninstall_profile(handler, body):
+    skill_name = str(body.get("name") or body.get("skill_name") or "").strip()
+    target_raw = _body_first_path(
+        body,
+        "profile_skills_path",
+        "target_skills_path",
+        "skills_path",
+        "target_path",
+    )
+    if not skill_name:
+        return bad(handler, "name is required")
+    if not target_raw:
+        return bad(handler, "profile_skills_path is required")
+    if skill_name in (".", "..") or "/" in skill_name or "\\" in skill_name or ".." in skill_name:
+        return bad(handler, "Invalid skill name")
+
+    try:
+        target_skills_dir = Path(target_raw).expanduser().resolve()
+        if target_skills_dir.name != "skills":
+            return bad(handler, "profile_skills_path must be a skills directory", 400)
+        destination = (target_skills_dir / skill_name).resolve()
+        destination.relative_to(target_skills_dir)
+    except ValueError:
+        return bad(handler, "Invalid skill path", 400)
+    except OSError as e:
+        return bad(handler, _sanitize_error(e), 400)
+
+    if not destination.exists() or not destination.is_dir() or not (destination / "SKILL.md").is_file():
+        return bad(handler, "Skill not found", 404)
+
+    try:
+        shutil.rmtree(destination)
+    except OSError as e:
+        logger.exception("Failed to uninstall profile skill")
+        return bad(handler, _sanitize_error(e), 500)
+
+    return j(
+        handler,
+        {
+            "ok": True,
+            "name": skill_name,
+            "profile_skills_path": str(target_skills_dir),
+            "removed_path": str(destination),
         },
     )
 

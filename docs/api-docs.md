@@ -176,7 +176,7 @@ GET /api/profile/create-agent/skills?q=doc
 - 请求方式：待联调确认；前端按 JSON 请求体传入创建所需字段。
 - 主要作用：前端调用该接口后，NocoBase 保持当前 webhook 地址不变，按下方字段调用 WebUI 的 `POST /api/profile/create-agent`，在 Profile 目录中创建一个新智能体，然后同步更新 `Hermes-Profile` 表，新增 Profile 数据并绑定到当前用户。
 - 返回数据：前端根据 NocoBase 返回结果判断创建是否成功，具体返回结构待联调确认。
-- 数据流说明：前端传入当前用户标识、智能体基础展示信息、角色设定 Prompt 和挂载 Skills；NocoBase 触发 WebUI 创建流程，并将创建成功后的 Profile / 智能体数据写入 `Hermes-Profile` 表。
+- 数据流说明：前端传入智能体基础展示信息、角色设定 Prompt、挂载 Skills 和是否默认；NocoBase 触发 WebUI 创建流程，并将创建成功后的 Profile / 智能体数据写入 `Hermes-Profile` 表。当前用户绑定关系由 NocoBase 根据登录态或流程上下文处理，不要求前端在请求体中传 `user_id`。
 
 请求体结构如下，字段值仅作结构示例：
 
@@ -186,7 +186,8 @@ GET /api/profile/create-agent/skills?q=doc
   "avatar": "/uploads/market.png",
   "description": "用简短的话描述智能体的核心能力或用途",
   "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析，能够基于数据和事实输出结构化的分析与建议。",
-  "skills": ["web-search", "doc-summary", "table-analysis", "meeting-notes"]
+  "skills": ["web-search", "doc-summary", "table-analysis", "meeting-notes"],
+  "is_default": false
 }
 ```
 
@@ -194,15 +195,12 @@ GET /api/profile/create-agent/skills?q=doc
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `user_id` | `string` | 当前用户标识，用于将新建 Profile 绑定到当前用户。 |
-| `profile_id` | `string` | 可选。智能体对应的 Profile 标识；建议使用小写字母、数字、连字符或下划线，例如 `market-analyst`。不传时由 WebUI 根据名称生成。 |
+| `profile_name` | `string` | 智能体 / Profile 展示名称，对应 WebUI 创建接口的 `profile_name` 字段，最长 50 个字符。 |
 | `avatar` | `string` | 智能体头像地址或前端上传后得到的头像标识。 |
-| `name` | `string` | 智能体名称，对应 WebUI 创建接口的 `name` / `profile_name` / `display_name` 字段，最长 50 个字符。 |
 | `description` | `string` | 一句话描述，对应 WebUI 创建接口的 `description` / `summary` / `one_liner` 字段，最长 80 个字符。 |
 | `prompt` | `string` | 角色设定 Prompt，对应 WebUI 创建接口的 `prompt` / `system_prompt` 字段，最长 1000 个字符。 |
 | `skills` | `array<string>` | 挂载的 Skills 名称列表。NocoBase 调用 WebUI 创建接口时应透传该字段；WebUI 会校验这些 skill 是否存在于 skills 库，并写入新建智能体的 `agent.skills`。 |
-| `status` | `string` | 可选。智能体状态，取值为 `active` 或 `draft`，默认 `active`。 |
-| `draft` | `boolean` | 可选。若传 `true`，等价于 `status: "draft"`。 |
+| `is_default` | `boolean` | 是否将新建 Profile 设置为默认 Profile，具体生效规则待联调确认。 |
 
 示例返回结构如下，字段值仅作结构示例，实际字段以后端联调结果为准：
 
@@ -223,7 +221,8 @@ GET /api/profile/create-agent/skills?q=doc
       "avatar": "/uploads/market.png",
       "description": "用简短的话描述智能体的核心能力或用途",
       "skills": ["web-search", "doc-summary", "table-analysis", "meeting-notes"],
-      "status": "active"
+      "status": "active",
+      "is_default": false
     }
   }
 }
@@ -248,14 +247,99 @@ GET /api/profile/create-agent/skills?q=doc
 | `data.agent.description` | `string` | 智能体一句话描述。 |
 | `data.agent.skills` | `array<string>` | 已写入当前创建智能体元数据中的 Skills 名称列表。 |
 | `data.agent.status` | `string` | 智能体状态。 |
+| `data.agent.is_default` | `boolean` | 是否为默认 Profile，字段名称和是否返回待联调确认。 |
 
 联调备注：
 
 - 创建接口不再要求前端传入模型接口配置字段；若后续需要扩展 `base_url`、`api_key`、`clone_from` 或 `clone_config`，应按 WebUI 创建接口的可选字段单独补充，并避免在日志、错误提示或文档中输出真实密钥。
+- 创建接口请求体按截图字段记录为 `profile_name`、`avatar`、`description`、`prompt`、`skills`、`is_default`，不再要求前端传 `user_id`、`profile_id`、`name`、`status` 或 `draft`。
 - 挂载 Skills 的候选列表由 WebUI `GET /api/profile/create-agent/skills?q=<关键字>` 提供；该查询接口只用于推荐和搜索，不创建智能体。
-- 创建时提交的 `skills` 会写入当前新建智能体的 `webui/agent.json` 和 `profiles/default.md` 元数据中；后续如需“已创建后增删 Skills”，需要单独补充更新接口。
+- 创建时提交的 `skills` 会写入当前新建智能体的 `webui/agent.json` 和 `profiles/default.md` 元数据中；后续如需“已创建后增删 Skills”，使用下方“编辑用户绑定智能体 Profile Skills”接口。
 - 创建流程需要同时确认 WebUI Profile 目录中的智能体创建结果，以及 NocoBase `Hermes-Profile` 表中 Profile 数据和用户绑定关系的新增结果。
 - 若 WebUI 创建成功但 NocoBase 写表失败，建议后端返回可区分的错误状态，方便前端提示、重试或触发补偿清理。
+
+### NocoBase Webhook：编辑用户绑定智能体 Profile Skills
+
+- 接口地址：`https://www.foxuai.com/api/webhook:trigger/onqtsk997ty`
+- 请求方式：待联调确认；前端按 JSON 请求体传入编辑所需字段。
+- 主要作用：用于编辑已创建 Profile 中智能体挂载的 Skills，同时同步保留智能体名称、描述和角色设定 Prompt。
+- 返回数据：前端根据 NocoBase 返回结果判断编辑是否成功，具体返回结构待联调确认。
+- 数据流说明：前端传入目标 Profile 标识、智能体基础信息、角色设定 Prompt 和新的 Skills 列表；NocoBase 调用 WebUI 的 `POST /api/profile/update-agent` 更新该 Profile 下的 `SOUL.md`、`profiles/default.md` 和 `webui/agent.json`，并按需同步更新 `Hermes-Profile` 表中的展示数据。
+
+请求体结构如下，字段值仅作结构示例：
+
+```json
+{
+  "profile_id": "market-analyst",
+  "avatar": "/uploads/market.png",
+  "name": "市场分析助手",
+  "description": "用简短的话描述智能体的核心能力或用途",
+  "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析，能够基于数据和事实输出结构化的分析与建议。",
+  "skills": ["web-search", "doc-summary", "table-analysis"]
+}
+```
+
+请求字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `profile_id` | `string` | 否 | 要编辑的 Profile 标识；也兼容 `profile`、`profile_key`。不传时 WebUI 默认更新当前激活 Profile。建议前端明确传入，避免误更新当前激活 Profile。 |
+| `avatar` | `string` | 否 | 智能体头像地址或前端上传后得到的头像标识；不传时 WebUI 保留已有头像。 |
+| `name` | `string` | 是 | 智能体名称，对应 WebUI 更新接口的 `name` / `profile_name` / `display_name` 字段，最长 50 个字符。 |
+| `description` | `string` | 是 | 一句话描述，对应 WebUI 更新接口的 `description` / `summary` / `one_liner` 字段，最长 80 个字符。 |
+| `prompt` | `string` | 是 | 角色设定 Prompt，对应 WebUI 更新接口的 `prompt` / `system_prompt` 字段，最长 1000 个字符。 |
+| `skills` | `array<string>` | 是 | 更新后的 Skills 名称列表。WebUI 会校验这些 skill 是否存在于 skills 库，并写入当前 Profile 的智能体元数据。字段名兼容 `skill_names`。 |
+
+示例返回结构如下，字段值仅作结构示例，实际字段以后端联调结果为准：
+
+```json
+{
+  "ok": true,
+  "status": "success",
+  "message": "编辑成功",
+  "data": {
+    "profile": {
+      "name": "market-analyst",
+      "path": "/home/hermeswebui/.hermes/profiles/market-analyst"
+    },
+    "agent": {
+      "profile_id": "market-analyst",
+      "profile_name": "市场分析助手",
+      "avatar": "/uploads/market.png",
+      "description": "用简短的话描述智能体的核心能力或用途",
+      "skills": ["web-search", "doc-summary", "table-analysis"],
+      "status": "active"
+    }
+  }
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ok` | `boolean` | 表示本次编辑请求是否处理成功。 |
+| `status` | `string` | 编辑处理状态，例如 `success` 或 `failed`，具体枚举待联调确认。 |
+| `message` | `string` | 面向前端展示或调试的状态说明。 |
+| `data` | `object 或 null` | 编辑成功后返回的相关数据，具体结构待联调确认。 |
+| `data.profile` | `object` | 被编辑的 Profile 基础信息。 |
+| `data.profile.name` | `string` | 被编辑的 Profile 标识。 |
+| `data.profile.path` | `string` | 被编辑 Profile 在 WebUI 服务器上的本地目录路径。 |
+| `data.agent` | `object` | 更新后的智能体展示与配置元数据。 |
+| `data.agent.profile_id` | `string` | 智能体对应的 Profile 标识。 |
+| `data.agent.profile_name` | `string` | 智能体展示名称。 |
+| `data.agent.avatar` | `string` | 智能体头像。 |
+| `data.agent.description` | `string` | 智能体一句话描述。 |
+| `data.agent.skills` | `array<string>` | 更新后写入当前智能体元数据中的 Skills 名称列表。 |
+| `data.agent.status` | `string` | 智能体状态。 |
+
+联调备注：
+
+- 该接口用于编辑已创建 Profile 的 Skills；不是 Skills 候选列表接口，也不是创建新智能体接口。
+- 前端提交 `skills` 时应提交 Skill 真实 `name`，不要提交中文展示名。
+- WebUI 更新接口当前要求 `name`、`description`、`prompt` 和 `skills` 一起提交；如果前端只改 Skills，也需要把当前智能体已有的名称、描述和 Prompt 一并传回，避免缺字段导致更新失败。
+- 若传入未知 Skill，WebUI 会返回错误，例如 `Unknown skill(s): <skill-name>`，并不会写入 Profile 文件。
+- 若该 NocoBase webhook 后续需要鉴权、请求头或请求参数，补充到本文档时只记录字段名和用途，不写入真实密钥、token 或 cookie。
 
 ### NocoBase Webhook：删除用户绑定智能体
 
