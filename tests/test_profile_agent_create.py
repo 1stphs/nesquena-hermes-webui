@@ -73,6 +73,58 @@ def test_profile_create_agent_skills_endpoint_filters_catalog(monkeypatch):
     assert payload["recommended"][0]["name"] == "web-search"
 
 
+def test_profile_agents_endpoint_lists_agent_details(monkeypatch, tmp_path):
+    profile_path = tmp_path / "profiles" / "market-analyst"
+    profile_path.mkdir(parents=True)
+    agent = {
+        "profile_name": "市场分析助手",
+        "description": "市场分析",
+        "prompt": "你是一位专业的市场分析助手。",
+        "skills": ["web-search", "doc-summary"],
+        "avatar": "/uploads/market.png",
+    }
+    (profile_path / "webui").mkdir()
+    (profile_path / "webui" / "agent.json").write_text(
+        json.dumps(agent, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    import api.profiles as profiles
+
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "market-analyst")
+    monkeypatch.setattr(
+        profiles,
+        "list_profiles_api",
+        lambda: [
+            {
+                "name": "market-analyst",
+                "path": str(profile_path),
+                "skill_count": 2,
+                "avatar": "/fallback-avatar.png",
+            }
+        ],
+    )
+
+    handler = _FakeHandler()
+    routes.handle_get(handler, urlparse("/api/profile/agents"))
+
+    assert handler.status == 200
+    payload = handler.json_body()
+    assert payload == {
+        "profiles": [
+            {
+                "profile_name": "市场分析助手",
+                "description": "市场分析",
+                "prompt": "你是一位专业的市场分析助手。",
+                "skills": ["web-search", "doc-summary"],
+                "avatar": "/uploads/market.png",
+                "skill_count": 2,
+            }
+        ],
+        "active": "market-analyst",
+    }
+
+
 def test_profile_create_agent_writes_agent_files(monkeypatch, tmp_path):
     created = {}
 

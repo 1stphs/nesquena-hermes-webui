@@ -3339,6 +3339,9 @@ def handle_get(handler, parsed) -> bool:
             {"profiles": list_profiles_api(), "active": get_active_profile_name()},
         )
 
+    if parsed.path == "/api/profile/agents":
+        return _handle_profile_agents_list(handler)
+
     if parsed.path == "/api/profile/create-agent/skills":
         return _handle_profile_agent_skills(handler, parsed)
 
@@ -8256,6 +8259,38 @@ def _read_profile_agent_metadata(profile_path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _profile_agent_detail_from_profile(profile: dict) -> dict:
+    raw_path = str(profile.get("path") or "").strip()
+    metadata: dict = {}
+    if raw_path:
+        try:
+            metadata = _read_profile_agent_metadata(Path(raw_path))
+        except ValueError:
+            metadata = {}
+
+    skills = metadata.get("skills")
+    if not isinstance(skills, list):
+        skills = []
+
+    skill_count = profile.get("skill_count")
+    if not isinstance(skill_count, int):
+        skill_count = len(skills)
+
+    return {
+        "profile_name": str(
+            metadata.get("profile_name")
+            or profile.get("profile_name")
+            or profile.get("name")
+            or ""
+        ),
+        "description": str(metadata.get("description") or ""),
+        "prompt": str(metadata.get("prompt") or ""),
+        "skills": [str(skill) for skill in skills],
+        "avatar": str(metadata.get("avatar") or profile.get("avatar") or ""),
+        "skill_count": skill_count,
+    }
+
+
 def _resolve_profile_agent_update_target(body: dict) -> tuple[str, Path]:
     requested_profile = str(
         body.get("profile_id")
@@ -8292,6 +8327,20 @@ def _handle_profile_agent_skills(handler, parsed):
         "skills": filtered,
         "recommended": _recommended_profile_agent_skills(catalog),
         "count": len(filtered),
+    })
+
+
+def _handle_profile_agents_list(handler):
+    from api.profiles import list_profiles_api, get_active_profile_name
+
+    profiles = [
+        _profile_agent_detail_from_profile(profile)
+        for profile in list_profiles_api()
+        if isinstance(profile, dict)
+    ]
+    return j(handler, {
+        "profiles": profiles,
+        "active": get_active_profile_name(),
     })
 
 
