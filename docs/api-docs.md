@@ -203,7 +203,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 
 ### WebUI：编辑智能体 Profile
 
-- 接口地址：`/api/profile/update-agent`
+- 接口地址：`http://172.234.237.195:8787/api/profile/update-agent`
 - 请求方式：`POST`
 - 主要作用：编辑已存在 Profile 中的智能体展示信息、角色设定 Prompt 和挂载 Skills。
 - 返回数据：返回更新后的 Profile 基础信息和智能体元数据；返回结构以 [api/routes.py](/Users/cxg/Desktop/Hermes/api/routes.py) 中 `_handle_profile_agent_update` 为准。
