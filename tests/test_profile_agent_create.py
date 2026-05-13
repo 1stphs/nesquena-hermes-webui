@@ -222,6 +222,40 @@ def test_profile_create_agent_allows_omitting_skills(monkeypatch, tmp_path):
     assert agent_json["skills"] == []
 
 
+def test_profile_create_agent_allows_omitting_avatar(monkeypatch, tmp_path):
+    def fake_create_profile_api(name, **kwargs):
+        profile_path = tmp_path / "profiles" / name
+        profile_path.mkdir(parents=True)
+        return {
+            "name": name,
+            "path": str(profile_path),
+            "is_default": False,
+            "skill_count": 0,
+        }
+
+    import api.profiles as profiles
+
+    monkeypatch.setattr(profiles, "create_profile_api", fake_create_profile_api)
+
+    body = {
+        "profile_id": "avatar-free-agent",
+        "name": "Avatar Free Agent",
+        "description": "Creates without an avatar",
+        "prompt": "You help users without needing an avatar.",
+    }
+    handler = _FakeHandler(body)
+    routes.handle_post(handler, urlparse("/api/profile/create-agent"))
+
+    assert handler.status == 200
+    payload = handler.json_body()
+    assert payload["ok"] is True
+    assert payload["agent"]["avatar"] == ""
+
+    profile_path = tmp_path / "profiles" / "avatar-free-agent"
+    agent_json = json.loads((profile_path / "webui" / "agent.json").read_text(encoding="utf-8"))
+    assert agent_json["avatar"] == ""
+
+
 def test_profile_create_agent_rejects_unknown_skills(monkeypatch):
     called = False
 
@@ -335,3 +369,59 @@ def test_profile_update_agent_rejects_unknown_skills_without_writing(monkeypatch
     assert handler.status == 400
     assert "Unknown skill(s): missing-skill" in handler.json_body()["error"]
     assert (profile_path / "SOUL.md").read_text(encoding="utf-8") == "old prompt\n"
+
+
+def test_profile_change_soul_replaces_profile_soul(tmp_path):
+    profile_path = tmp_path / "profiles" / "market-analyst"
+    profile_path.mkdir(parents=True)
+    (profile_path / "SOUL.md").write_text("old soul\n", encoding="utf-8")
+
+    body = {
+        "path": str(profile_path),
+        "content": "new soul\nwith two lines",
+    }
+    handler = _FakeHandler(body)
+    routes.handle_post(handler, urlparse("/api/profile/change_soul"))
+
+    assert handler.status == 200
+    payload = handler.json_body()
+    assert payload["ok"] is True
+    assert payload["path"].endswith("SOUL.md")
+    assert (profile_path / "SOUL.md").read_text(encoding="utf-8") == body["content"]
+
+
+def test_profile_change_soul_allows_empty_content(tmp_path):
+    profile_path = tmp_path / "profiles" / "empty-soul"
+    profile_path.mkdir(parents=True)
+    (profile_path / "SOUL.md").write_text("old soul\n", encoding="utf-8")
+
+    handler = _FakeHandler({"path": str(profile_path), "content": ""})
+    routes.handle_post(handler, urlparse("/api/profile/change_soul"))
+
+    assert handler.status == 200
+    assert (profile_path / "SOUL.md").read_text(encoding="utf-8") == ""
+
+
+def test_profile_change_soul_rejects_non_soul_file_path(tmp_path):
+    profile_path = tmp_path / "profiles" / "market-analyst"
+    profile_path.mkdir(parents=True)
+    config_path = profile_path / "config.yaml"
+    config_path.write_text("old: true\n", encoding="utf-8")
+
+    handler = _FakeHandler({"path": str(config_path), "content": "new"})
+    routes.handle_post(handler, urlparse("/api/profile/change_soul"))
+
+    assert handler.status == 400
+    assert "SOUL.md" in handler.json_body()["error"]
+    assert config_path.read_text(encoding="utf-8") == "old: true\n"
+
+
+def test_profile_change_soul_requires_existing_soul_file(tmp_path):
+    profile_path = tmp_path / "profiles" / "missing-soul"
+    profile_path.mkdir(parents=True)
+
+    handler = _FakeHandler({"path": str(profile_path), "content": "new"})
+    routes.handle_post(handler, urlparse("/api/profile/change_soul"))
+
+    assert handler.status == 404
+    assert "SOUL.md not found" in handler.json_body()["error"]

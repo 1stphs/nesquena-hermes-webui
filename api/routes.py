@@ -4270,6 +4270,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/profile/update-agent":
         return _handle_profile_agent_update(handler, body)
 
+    if parsed.path in ("/api/profile/change_soul", "/api/profile/change-soul"):
+        return _handle_profile_change_soul(handler, body)
+
     if parsed.path == "/api/profile/create":
         name = body.get("name", "").strip()
         if not name:
@@ -8262,6 +8265,65 @@ def _read_profile_agent_metadata(profile_path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _resolve_profile_soul_path(raw_path: str) -> Path:
+    value = str(raw_path or "").strip()
+    if not value:
+        raise ValueError("path is required")
+
+    candidate = Path(value).expanduser()
+    if candidate.name.lower() == "soul.md":
+        profile_path = candidate.parent
+        soul_path = candidate
+    else:
+        if candidate.exists() and not candidate.is_dir():
+            raise ValueError("path must point to a profile directory or SOUL.md")
+        profile_path = candidate
+        soul_path = candidate / "SOUL.md"
+
+    profile_path = profile_path.resolve()
+    if not profile_path.exists() or not profile_path.is_dir():
+        raise FileNotFoundError("profile path not found")
+
+    soul_path = soul_path.resolve()
+    if soul_path.name.lower() != "soul.md":
+        raise ValueError("path must point to a profile directory or SOUL.md")
+    try:
+        soul_path.relative_to(profile_path)
+    except ValueError as exc:
+        raise ValueError("SOUL.md must stay within the profile directory") from exc
+    if not soul_path.exists():
+        raise FileNotFoundError("SOUL.md not found")
+    if not soul_path.is_file():
+        raise ValueError("SOUL.md is not a file")
+    return soul_path
+
+
+def _handle_profile_change_soul(handler, body):
+    try:
+        raw_path = body.get("path")
+        if raw_path is None:
+            raw_path = body.get("profile_path")
+        if raw_path is None:
+            raw_path = body.get("soul_path")
+        if "content" not in body or body.get("content") is None:
+            raise ValueError("content is required")
+
+        soul_path = _resolve_profile_soul_path(raw_path)
+        content = str(body.get("content"))
+        soul_path.write_text(content, encoding="utf-8")
+        return j(handler, {
+            "ok": True,
+            "path": str(soul_path),
+        })
+    except FileNotFoundError as e:
+        return bad(handler, str(e), 404)
+    except ValueError as e:
+        return bad(handler, str(e), 400)
+    except OSError as e:
+        logger.exception("Failed to update profile SOUL.md")
+        return bad(handler, _sanitize_error(e), 500)
+
+
 def _profile_agent_detail_from_profile(profile: dict) -> dict:
     raw_path = str(profile.get("path") or "").strip()
     metadata: dict = {}
@@ -8371,6 +8433,7 @@ def _handle_profile_agent_create(handler, body):
             body,
             ("avatar", "avatar_url", "icon"),
             "avatar",
+            required=False,
             max_len=_PROFILE_AGENT_AVATAR_MAX,
         )
         if "skills" in body or "skill_names" in body:

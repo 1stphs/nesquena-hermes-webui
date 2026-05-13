@@ -8,50 +8,6 @@
 
 ## 接口记录
 
-### NocoBase Webhook：通讯录列表展示
-
-- 接口地址：`https://www.foxuai.com/api/webhook:trigger/qyrh1cp4mcr`
-- 请求方式：待联调确认。
-- 主要作用：用于前端展示通讯录列表。
-- 返回数据：返回通讯录列表展示所需的账号、手机号、邮箱、用户状态和部门字段。
-- 数据流说明：前端调用该接口获取通讯录列表数据，并按返回字段渲染通讯录列表；NocoBase 负责查询和组装通讯录数据。
-
-请求参数如下：
-
-| 字段 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| 无 | - | - | - | 该接口当前按通讯录列表展示场景记录为无请求参数；若后续支持搜索、分页或部门筛选，再补充对应 query 或请求体字段。 |
-
-示例返回结构如下，字段值仅作结构示例，实际是否返回数组、分页信息或 `data` 包裹以后端联调结果为准：
-
-```json
-[
-  {
-    "登录账号": "{{$jobsMapByNodeKey.uzpza7ql3lc.name}}",
-    "手机号": "{{$jobsMapByNodeKey.uzpza7ql3lc.phone}}",
-    "邮箱": "{{$jobsMapByNodeKey.uzpza7ql3lc.email}}",
-    "用户状态": "{{$jobsMapByNodeKey.uzpza7ql3lc.status}}",
-    "部门": "{{$jobsMapByNodeKey.uzpza7ql3lc.department}}"
-  }
-]
-```
-
-字段说明：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `登录账号` | `string` | 通讯录用户的登录账号或账号展示名称。 |
-| `手机号` | `string` | 通讯录用户的手机号。 |
-| `邮箱` | `string` | 通讯录用户的邮箱地址。 |
-| `用户状态` | `string` | 通讯录用户当前状态。 |
-| `部门` | `string` | 通讯录用户所属部门。 |
-
-联调备注：
-
-- 前端以接口返回的通讯录记录作为列表数据源，字段展示名可直接沿用返回字段。
-- 若后续需要支持分页、搜索、部门筛选或状态筛选，应补充请求参数和分页返回结构。
-- 若该 NocoBase webhook 后续需要鉴权、请求头或请求参数，补充到本文档时只记录字段名和用途，不写入真实密钥、token 或 cookie。
-
 ### NocoBase：Skills 列表展示
 
 - 接口地址：`http://localhost:5173/nocobase/api/hermes_skills_templates:list?paginate=false`
@@ -129,7 +85,6 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 ```json
 {
   "profile_name": "market-analyst",
-  "avatar": "/uploads/market.png",
   "description": "用简短的话描述智能体的核心能力或用途",
   "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析，能够基于数据和事实输出结构化的分析与建议。",
   "is_default": false,
@@ -143,7 +98,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `profile_name` | `string` | 智能体 / Profile 展示名称，对应 WebUI 创建接口的 `profile_name` 字段，最长 50 个字符。 |
-| `avatar` | `string` | 智能体头像地址或前端上传后得到的头像标识。 |
+| `avatar` | `string` | 可选。智能体头像地址或前端上传后得到的头像标识；也可使用 `avatar_url` / `icon` 传入，未传时 WebUI 创建接口保存为空字符串。 |
 | `description` | `string` | 一句话描述，对应 WebUI 创建接口的 `description` / `summary` / `one_liner` 字段，最长 80 个字符。 |
 | `prompt` | `string` | 角色设定 Prompt，对应 WebUI 创建接口的 `prompt` / `system_prompt` 字段，最长 1000 个字符。 |
 | `is_default` | `boolean` | 是否将新建 Profile 设置为默认 Profile，具体生效规则待联调确认。 |
@@ -191,7 +146,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 | `data.agent` | `object` | WebUI 创建接口返回的智能体展示与配置元数据。 |
 | `data.agent.profile_id` | `string` | 智能体对应的 Profile 标识。 |
 | `data.agent.profile_name` | `string` | 智能体展示名称。 |
-| `data.agent.avatar` | `string` | 智能体头像。 |
+| `data.agent.avatar` | `string` | 智能体头像；创建请求未传头像时为空字符串。 |
 | `data.agent.description` | `string` | 智能体一句话描述。 |
 | `data.agent.skills` | `array<string>` | 创建接口未传入 Skills 时返回空数组；后续如需增删 Skills，使用编辑用户绑定智能体 Profile Skills 接口。 |
 | `data.agent.status` | `string` | 智能体状态。 |
@@ -200,101 +155,49 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 联调备注：
 
 - 创建接口不再要求前端传入模型接口配置字段；WebUI 当前默认使用 `clone_from: "company-assistant"` 和 `clone_config: true` 克隆配置。若后续需要扩展 `base_url` 或 `api_key`，应按 WebUI 创建接口的可选字段单独补充，并避免在日志、错误提示或文档中输出真实密钥。
-- 创建接口请求体按截图字段记录为 `profile_name`、`avatar`、`description`、`prompt`、`is_default`；不再要求前端传 `user_id`、`profile_id`、`name`、`status`、`draft` 或 `skills`。
+- 创建接口请求体按截图字段记录为 `profile_name`、`description`、`prompt`、`is_default`，`avatar` 为可选字段；不再要求前端传 `user_id`、`profile_id`、`name`、`status`、`draft` 或 `skills`。
 - 创建时不再提交 `skills`，新建智能体元数据中的 `skills` 默认为空数组；后续如需“已创建后增删 Skills”，使用下方“编辑用户绑定智能体 Profile Skills”接口。
 - 创建流程需要同时确认 WebUI Profile 目录中的智能体创建结果，以及 NocoBase `Hermes-Profile` 表中 Profile 数据和用户绑定关系的新增结果。
 - 若 WebUI 创建成功但 NocoBase 写表失败，建议后端返回可区分的错误状态，方便前端提示、重试或触发补偿清理。
 
-### WebUI：编辑智能体 Profile
+### NocoBase Webhook：编辑智能体
 
-- 接口地址：`http://172.234.237.195:8787/api/profile/update-agent`
+- 接口地址：`https://www.foxuai.com/api/webhook:trigger/7hfvjmyroug`
 - 请求方式：`POST`
-- 主要作用：编辑已存在 Profile 中的智能体展示信息、角色设定 Prompt 和挂载 Skills。
-- 返回数据：返回更新后的 Profile 基础信息和智能体元数据；返回结构以 [api/routes.py](/Users/cxg/Desktop/Hermes/api/routes.py) 中 `_handle_profile_agent_update` 为准。
-- 数据流说明：接口根据 `profile_id` / `profile` / `profile_key` 定位要编辑的 Profile；若未传目标 Profile，则默认更新当前激活 Profile。更新成功后会重写该 Profile 目录下的 `SOUL.md`、`profiles/default.md` 和 `webui/agent.json`。
+- 主要作用：用于编辑用户绑定的智能体基础信息和角色设定内容。
+- 请求 Header：需要在 headers 中传入 `x-user-id`，用于标识当前用户。
+- 返回数据：前端根据 NocoBase 返回结果判断编辑是否成功，具体返回结构以 NocoBase 联调结果为准。
 
 请求体结构如下，字段值仅作结构示例：
 
 ```json
 {
-  "profile_id": "market-analyst",
-  "profile_name": "市场分析助手",
-  "avatar": "/uploads/market.png",
-  "description": "用简短的话描述智能体的核心能力或用途",
-  "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析，能够基于数据和事实输出结构化的分析与建议。",
-  "skills": ["skill_web_search", "skill_doc_summary"]
+  "display_name": "市场分析助手",
+  "soul": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析。",
+  "description": "用于行业洞察、竞品研究与趋势分析",
+  "profile_name": "market-analyst"
 }
 ```
+
+请求 Header 说明：
+
+| Header | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `x-user-id` | `string` | 是 | 当前用户标识；NocoBase 根据该用户标识定位用户绑定的智能体 / Profile 数据。 |
 
 请求字段说明：
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `profile_id` | `string` | 否 | 要编辑的 Profile 标识。也可使用 `profile` 或 `profile_key` 传入同一含义；不传时更新当前激活 Profile。除 `default` 外，需符合 Profile ID 命名规则。 |
-| `profile_name` | `string` | 是 | 智能体展示名称。也可使用 `display_name` 或 `name` 传入，最长 50 个字符。 |
-| `avatar` | `string` | 否 | 智能体头像地址或前端上传后得到的头像标识。也可使用 `avatar_url` 或 `icon` 传入；不传时保留已有头像，最长 500 个字符。 |
-| `description` | `string` | 是 | 智能体一句话描述。也可使用 `summary` 或 `one_liner` 传入，最长 80 个字符。 |
-| `prompt` | `string` | 是 | 角色设定 Prompt。也可使用 `system_prompt` 传入，最长 1000 个字符。 |
-| `skills` | `array<string> 或 string` | 是 | 更新后的 Skills 列表。也可使用 `skill_names` 传入；支持字符串数组、逗号分隔字符串，或包含 `name` / `id` / `skill` 的对象数组。字段必须出现，但可传空数组表示清空挂载 Skills。 |
-
-示例返回结构如下，字段值仅作结构示例：
-
-```json
-{
-  "ok": true,
-  "profile": {
-    "name": "market-analyst",
-    "path": "/home/hermeswebui/.hermes/profiles/market-analyst"
-  },
-  "agent": {
-    "profile_id": "market-analyst",
-    "profile_name": "市场分析助手",
-    "avatar": "/uploads/market.png",
-    "description": "用简短的话描述智能体的核心能力或用途",
-    "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析。",
-    "skills": ["skill_web_search", "skill_doc_summary"],
-    "status": "active",
-    "created_at": "2026-05-13T00:00:00Z",
-    "updated_at": "2026-05-13T00:10:00Z",
-    "profile_path": "/home/hermeswebui/.hermes/profiles/market-analyst",
-    "soul_path": "/home/hermeswebui/.hermes/profiles/market-analyst/SOUL.md",
-    "agent_file_path": "/home/hermeswebui/.hermes/profiles/market-analyst/profiles/default.md",
-    "metadata_path": "/home/hermeswebui/.hermes/profiles/market-analyst/webui/agent.json"
-  }
-}
-```
-
-字段说明：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `ok` | `boolean` | 表示本次编辑是否成功。成功时为 `true`。 |
-| `profile` | `object` | 被编辑的 Profile 基础信息。 |
-| `profile.name` | `string` | 被编辑的 Profile 标识。 |
-| `profile.path` | `string` | 被编辑 Profile 在 WebUI 服务器上的本地绝对路径。 |
-| `agent` | `object` | 更新后的智能体展示与配置元数据。 |
-| `agent.profile_id` | `string` | 智能体对应的 Profile 标识，优先沿用已有 `webui/agent.json` 中的 `profile_id`。 |
-| `agent.profile_name` | `string` | 智能体展示名称。 |
-| `agent.avatar` | `string` | 智能体头像地址或上传资源路径；请求中未传头像时沿用已有值。 |
-| `agent.description` | `string` | 智能体一句话描述。 |
-| `agent.prompt` | `string` | 角色设定 Prompt。 |
-| `agent.skills` | `array<string>` | 更新后写入当前智能体元数据中的 Skills 标识列表。 |
-| `agent.status` | `string` | 智能体状态；该接口不从请求体更新状态，默认沿用已有状态，已有状态无效时回退为 `active`。 |
-| `agent.created_at` | `string` | 智能体原创建时间；已有元数据中没有该字段时使用本次更新时间。 |
-| `agent.updated_at` | `string` | 本次编辑写入时间，UTC ISO 格式。 |
-| `agent.profile_path` | `string` | 被写入的 Profile 本地目录绝对路径。 |
-| `agent.soul_path` | `string` | 本次重写的 `SOUL.md` 文件路径。 |
-| `agent.agent_file_path` | `string` | 本次重写的 `profiles/default.md` 文件路径。 |
-| `agent.metadata_path` | `string` | 本次重写的 `webui/agent.json` 文件路径。 |
+| `display_name` | `string` | 是 | 智能体展示名称。 |
+| `soul` | `string` | 是 | 智能体角色设定内容，对应 Profile 中的 Soul / Prompt 内容。 |
+| `description` | `string` | 是 | 智能体一句话描述。 |
+| `profile_name` | `string` | 是 | 要编辑的智能体 / Profile 标识或名称。 |
 
 联调备注：
 
-- 该接口会校验 `profile_name`、`description`、`prompt` 和 `skills` 字段；缺少必填字段时返回 400，例如 `name is required`、`description is required`、`prompt is required` 或 `skills is required`。
-- `skills` 会与 WebUI Skills catalog 做匹配校验；传入未知 Skill 时返回 400，例如 `Unknown skill(s): <skill-id>`。
-- `profile_id` 只用于定位要编辑的 Profile，不会把请求中的 `profile_id` 强制写入 `agent.profile_id`；返回的 `agent.profile_id` 优先沿用原有元数据。
-- 该接口直接更新 WebUI Profile 文件，不负责更新 NocoBase `Hermes-Profile` 表中的用户绑定关系；如需同步 NocoBase，应由 NocoBase 工作流在调用成功后单独处理。
-- 返回中的 `profile.path`、`agent.profile_path`、`agent.soul_path`、`agent.agent_file_path` 和 `agent.metadata_path` 都是 WebUI 服务器上的本地绝对路径，前端一般只用于调试或联调确认，不建议作为展示字段。
-- 请求中不要传入登录 token、会话 cookie、API key 或其他敏感信息；若头像字段使用上传资源地址，只记录资源路径或资源标识。
+- 前端调用该 NocoBase webhook 时，`x-user-id` 放在请求 headers 中，不放入 JSON 请求体。
+- 该接口用于编辑智能体基础信息和 Soul 内容；若只编辑挂载 Skills，使用下方“编辑用户绑定智能体 Profile Skills”接口。
 
 ### NocoBase Webhook：编辑用户绑定智能体 Profile Skills
 
@@ -427,58 +330,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 - 删除流程需要同时确认 WebUI Profile 中的智能体删除结果，以及 NocoBase `Hermes-Profile` 表中用户绑定关系的删除结果。
 - 若 WebUI 删除成功但 NocoBase 绑定关系删除失败，或反向失败，建议后端返回可区分的错误状态，方便前端提示和重试。
 
-### NocoBase Webhook：当前用户绑定的智能体管理
-
-- 接口地址：`https://www.foxuai.com/api/webhook:trigger/mmcg4p78dp1`
-- 请求方式：待联调确认。
-- 主要作用：用于前端展示当前用户可访问的智能体详情列表。
-- 返回数据：返回字段与 [api/routes.py](/Users/cxg/Desktop/Hermes/api/routes.py) 中 `GET /api/profile/agents` 接口保持一致。
-- 数据流说明：NocoBase 工作流调用 WebUI `GET /api/profile/agents` 获取全量智能体详情列表后，只按当前用户绑定关系做过滤；过滤后返回结构和字段名称不变，不额外转换为 NocoBase 表字段。
-
-请求参数如下：
-
-| 字段 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| 无 | - | - | - | 该接口当前按当前登录用户上下文过滤智能体列表；若后续需要显式传 `user_id` 或分页参数，再补充对应字段。 |
-
-示例返回结构如下，字段值仅作结构示例：
-
-```json
-{
-  "profiles": [
-    {
-      "profile_name": "市场分析助手",
-      "description": "用简短的话描述智能体的核心能力或用途",
-      "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析。",
-      "skills": ["id1","id2","id3","id4"],
-      "avatar": "/uploads/market.png",
-      "skill_count": 2
-    }
-  ],
-  "active": "market-analyst"
-}
-```
-
-字段说明：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `profiles` | `array<object>` | 当前用户可展示的智能体详情列表，过滤后仍保持 WebUI `GET /api/profile/agents` 的列表结构。 |
-| `profiles[].profile_name` | `string` | 智能体展示名称。 |
-| `profiles[].description` | `string` | 智能体简介。 |
-| `profiles[].prompt` | `string` | 智能体角色设定 Prompt。 |
-| `profiles[].skills` | `array<string>` | 智能体已挂载的 Skills 标识列表。 |
-| `profiles[].avatar` | `string` | 智能体头像地址或上传资源路径。 |
-| `profiles[].skill_count` | `number` | 智能体已挂载 Skills 的数量。 |
-| `active` | `string` | 当前激活的 Profile 名称。 |
-
-联调备注：
-
-- 该 NocoBase webhook 的功能与 WebUI `GET /api/profile/agents` 一致，区别是 NocoBase 工作流会基于用户绑定关系做过滤。
-- 前端应按 `profiles` 数组渲染智能体列表，不要依赖 `path`、`name`、`profile_id` 或 `webui_profile_id` 作为该接口的返回字段。
-- 若该 NocoBase webhook 后续需要鉴权、请求头或请求参数，补充到本文档时只记录字段名和用途，不写入真实密钥、token 或 cookie。
-
-### NocoBase Webhook：当前用户绑定的 Profiles
+### NocoBase Webhook：显示用户绑定的 Profiles
 
 - 接口地址：`https://www.foxuai.com/api/webhook:trigger/cz0i1c3gjn8`
 - 请求方式：待联调确认。
