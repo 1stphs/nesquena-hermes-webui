@@ -135,6 +135,41 @@ def test_profile_create_agent_writes_agent_files(monkeypatch, tmp_path):
     assert agent_json["status"] == "active"
 
 
+def test_profile_create_agent_allows_omitting_skills(monkeypatch, tmp_path):
+    def fake_create_profile_api(name, **kwargs):
+        profile_path = tmp_path / "profiles" / name
+        profile_path.mkdir(parents=True)
+        return {
+            "name": name,
+            "path": str(profile_path),
+            "is_default": False,
+            "skill_count": 0,
+        }
+
+    import api.profiles as profiles
+
+    monkeypatch.setattr(profiles, "create_profile_api", fake_create_profile_api)
+
+    body = {
+        "profile_id": "market-analyst",
+        "name": "市场分析助手",
+        "description": "市场分析",
+        "prompt": "你是一位专业的市场分析助手。",
+        "avatar": "/uploads/market.png",
+    }
+    handler = _FakeHandler(body)
+    routes.handle_post(handler, urlparse("/api/profile/create-agent"))
+
+    assert handler.status == 200
+    payload = handler.json_body()
+    assert payload["ok"] is True
+    assert payload["agent"]["skills"] == []
+
+    profile_path = tmp_path / "profiles" / "market-analyst"
+    agent_json = json.loads((profile_path / "webui" / "agent.json").read_text(encoding="utf-8"))
+    assert agent_json["skills"] == []
+
+
 def test_profile_create_agent_rejects_unknown_skills(monkeypatch):
     called = False
 

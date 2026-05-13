@@ -8321,11 +8321,14 @@ def _handle_profile_agent_create(handler, body):
             "avatar",
             max_len=_PROFILE_AGENT_AVATAR_MAX,
         )
-        catalog = _load_profile_agent_skills_catalog()
-        skills = _normalize_profile_agent_skills(
-            body.get("skills", body.get("skill_names")),
-            catalog,
-        )
+        if "skills" in body or "skill_names" in body:
+            catalog = _load_profile_agent_skills_catalog()
+            skills = _normalize_profile_agent_skills(
+                body.get("skills", body.get("skill_names")),
+                catalog,
+            )
+        else:
+            skills = []
         profile_id = _slugify_profile_agent_id(
             profile_name,
             str(body.get("profile_id") or body.get("profile_key") or "").strip(),
