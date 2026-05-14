@@ -85,6 +85,8 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 ```json
 {
   "profile_name": "market-analyst",
+  "display_name": "市场分析助手",
+  "avatar": "/uploads/market.png",
   "description": "用简短的话描述智能体的核心能力或用途",
   "prompt": "你是一位专业的市场分析助手，擅长行业洞察、竞品研究与趋势分析，能够基于数据和事实输出结构化的分析与建议。",
   "is_default": false,
@@ -97,7 +99,8 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `profile_name` | `string` | 智能体 / Profile 展示名称，对应 WebUI 创建接口的 `profile_name` 字段，最长 50 个字符。 |
+| `profile_name` | `string` | 智能体 / Profile 名称字段，对应 WebUI 创建接口的 `profile_name` 字段，最长 50 个字符。 |
+| `display_name` | `string` | 新增入参，智能体前端展示名称；NocoBase 调用 WebUI `POST /api/profile/create-agent` 时可映射到 WebUI 的 `profile_name` 展示字段，最长 50 个字符。 |
 | `avatar` | `string` | 可选。智能体头像地址或前端上传后得到的头像标识；也可使用 `avatar_url` / `icon` 传入，未传时 WebUI 创建接口保存为空字符串。 |
 | `description` | `string` | 一句话描述，对应 WebUI 创建接口的 `description` / `summary` / `one_liner` 字段，最长 80 个字符。 |
 | `prompt` | `string` | 角色设定 Prompt，对应 WebUI 创建接口的 `prompt` / `system_prompt` 字段，最长 1000 个字符。 |
@@ -155,7 +158,7 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 联调备注：
 
 - 创建接口不再要求前端传入模型接口配置字段；WebUI 当前默认使用 `clone_from: "company-assistant"` 和 `clone_config: true` 克隆配置。若后续需要扩展 `base_url` 或 `api_key`，应按 WebUI 创建接口的可选字段单独补充，并避免在日志、错误提示或文档中输出真实密钥。
-- 创建接口请求体按截图字段记录为 `profile_name`、`description`、`prompt`、`is_default`，`avatar` 为可选字段；不再要求前端传 `user_id`、`profile_id`、`name`、`status`、`draft` 或 `skills`。
+- 创建接口请求体按截图字段记录为 `profile_name`、`display_name`、`avatar`、`description`、`prompt`、`is_default`；不再要求前端传 `user_id`、`profile_id`、`name`、`status`、`draft` 或 `skills`。
 - 创建时不再提交 `skills`，新建智能体元数据中的 `skills` 默认为空数组；后续如需“已创建后增删 Skills”，使用下方“编辑用户绑定智能体 Profile Skills”接口。
 - 创建流程需要同时确认 WebUI Profile 目录中的智能体创建结果，以及 NocoBase `Hermes-Profile` 表中 Profile 数据和用户绑定关系的新增结果。
 - 若 WebUI 创建成功但 NocoBase 写表失败，建议后端返回可区分的错误状态，方便前端提示、重试或触发补偿清理。

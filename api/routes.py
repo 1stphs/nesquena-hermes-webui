@@ -8800,6 +8800,14 @@ def _community_skills_root() -> Path:
     ).expanduser().resolve()
 
 
+def _community_skill_roots() -> tuple[Path, ...]:
+    return (
+        _community_skills_root(),
+        Path("/var/www/hermes-built-in-skills").resolve(),
+        Path("/var/www/hermes-optional-skills").resolve(),
+    )
+
+
 def _body_first_path(body: dict, *keys: str) -> str:
     for key in keys:
         value = body.get(key)
@@ -8861,10 +8869,13 @@ def _handle_skill_install_community(handler, body):
         return bad(handler, "profile_skills_path is required")
 
     try:
-        community_root = _community_skills_root()
         source_dir = Path(source_raw).expanduser().resolve()
         target_skills_dir = _coerce_hermes_home_path(target_raw)
-        source_dir.relative_to(community_root)
+        if not any(
+            source_dir == root or source_dir.is_relative_to(root)
+            for root in _community_skill_roots()
+        ):
+            raise ValueError
     except ValueError:
         return bad(handler, "source_path must be inside the community skills directory", 400)
     except OSError as e:

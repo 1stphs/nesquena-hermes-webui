@@ -1,5 +1,7 @@
 import io
 import json
+import shutil
+from pathlib import Path
 from urllib.parse import urlparse
 
 from api import routes
@@ -58,7 +60,7 @@ def test_install_community_skill_copies_directory(monkeypatch, tmp_path):
     (skill_dir / "assets").mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# Git Commit AI\n", encoding="utf-8")
     (skill_dir / "assets" / "prompt.txt").write_text("commit helper", encoding="utf-8")
-    target_skills = tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"
+    target_skills = tmp_path / "profiles" / "xiongmao" / "skills"
     monkeypatch.setenv("HERMES_COMMUNITY_SKILLS_DIR", str(community_root))
 
     payload, status = _post_install({
@@ -108,11 +110,78 @@ def test_install_community_skill_rejects_source_outside_root(monkeypatch, tmp_pa
 
     payload, status = _post_install({
         "source_path": str(outside_skill),
-        "profile_skills_path": str(tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"),
+        "profile_skills_path": str(tmp_path / "profiles" / "xiongmao" / "skills"),
     })
 
     assert status == 400
     assert "community skills directory" in payload["error"]
+
+
+def test_install_community_skill_accepts_builtin_and_optional_roots(monkeypatch, tmp_path):
+    copied_sources = []
+    source_paths = {
+        root_name: str(Path(f"/var/www/{root_name}/git-commit-ai").resolve())
+        for root_name in ("hermes-built-in-skills", "hermes-optional-skills")
+    }
+    skill_md_paths = {
+        root_name: str((Path(source_path) / "SKILL.md").resolve())
+        for root_name, source_path in source_paths.items()
+    }
+    original_exists = Path.exists
+    original_is_dir = Path.is_dir
+    original_is_file = Path.is_file
+
+    def is_allowed_test_source(path):
+        return str(path) in source_paths.values()
+
+    def is_allowed_test_skill_md(path):
+        return str(path) in skill_md_paths.values()
+
+    def fake_exists(path):
+        if is_allowed_test_source(path) or is_allowed_test_skill_md(path):
+            return True
+        return original_exists(path)
+
+    def fake_is_dir(path):
+        if is_allowed_test_source(path):
+            return True
+        return original_is_dir(path)
+
+    def fake_is_file(path):
+        if is_allowed_test_skill_md(path):
+            return True
+        return original_is_file(path)
+
+    def fake_copytree(source, destination, symlinks=False):
+        copied_sources.append(str(source))
+        destination.mkdir(parents=True)
+        (destination / "SKILL.md").write_text("# Installed\n", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+    monkeypatch.setattr(Path, "is_dir", fake_is_dir)
+    monkeypatch.setattr(Path, "is_file", fake_is_file)
+    monkeypatch.setattr(shutil, "copytree", fake_copytree)
+
+    for root_name in ("hermes-built-in-skills", "hermes-optional-skills"):
+        skill_dir = source_paths[root_name]
+        target_skills = tmp_path / root_name / "profiles" / "xiongmao" / "skills"
+
+        payload, status = _post_install({
+            "source_path": skill_dir,
+            "profile_skills_path": str(target_skills),
+        })
+
+        installed = target_skills / "git-commit-ai"
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["source_path"] == skill_dir
+        assert payload["installed_path"] == str(installed.resolve())
+        assert (installed / "SKILL.md").read_text(encoding="utf-8") == "# Installed\n"
+
+    assert copied_sources == [
+        source_paths["hermes-built-in-skills"],
+        source_paths["hermes-optional-skills"],
+    ]
 
 
 def test_install_community_skill_conflict_requires_overwrite(monkeypatch, tmp_path):
@@ -120,7 +189,7 @@ def test_install_community_skill_conflict_requires_overwrite(monkeypatch, tmp_pa
     skill_dir = community_root / "git-commit-ai"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# New\n", encoding="utf-8")
-    target_skills = tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"
+    target_skills = tmp_path / "profiles" / "xiongmao" / "skills"
     installed = target_skills / "git-commit-ai"
     installed.mkdir(parents=True)
     (installed / "SKILL.md").write_text("# Old\n", encoding="utf-8")
@@ -151,7 +220,7 @@ def test_install_community_skill_requires_skill_md(monkeypatch, tmp_path):
 
     payload, status = _post_install({
         "source_path": str(skill_dir),
-        "profile_skills_path": str(tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"),
+        "profile_skills_path": str(tmp_path / "profiles" / "xiongmao" / "skills"),
     })
 
     assert status == 400
@@ -159,7 +228,7 @@ def test_install_community_skill_requires_skill_md(monkeypatch, tmp_path):
 
 
 def test_uninstall_profile_skill_removes_directory(tmp_path):
-    target_skills = tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"
+    target_skills = tmp_path / "profiles" / "xiongmao" / "skills"
     installed = target_skills / "git-commit-ai"
     (installed / "assets").mkdir(parents=True)
     (installed / "SKILL.md").write_text("# Git Commit AI\n", encoding="utf-8")
@@ -199,7 +268,7 @@ def test_uninstall_profile_skill_accepts_server_absolute_hermes_path(monkeypatch
 
 
 def test_uninstall_profile_skill_rejects_invalid_name(tmp_path):
-    target_skills = tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"
+    target_skills = tmp_path / "profiles" / "xiongmao" / "skills"
     target_skills.mkdir(parents=True)
 
     payload, status = _post_uninstall({
@@ -212,7 +281,7 @@ def test_uninstall_profile_skill_rejects_invalid_name(tmp_path):
 
 
 def test_uninstall_profile_skill_requires_installed_skill(tmp_path):
-    target_skills = tmp_path / ".hermes" / "profiles" / "xiongmao" / "skills"
+    target_skills = tmp_path / "profiles" / "xiongmao" / "skills"
     target_skills.mkdir(parents=True)
 
     payload, status = _post_uninstall({
