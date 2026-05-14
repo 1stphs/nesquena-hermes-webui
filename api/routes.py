@@ -3450,6 +3450,9 @@ def handle_get(handler, parsed) -> bool:
             },
         )
 
+    if parsed.path == "/api/profile/soul":
+        return _handle_profile_soul_read(handler, parsed)
+
     if parsed.path == "/api/profile/active":
         from api.profiles import get_active_profile_name, get_active_hermes_home
 
@@ -4270,7 +4273,7 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/profile/update-agent":
         return _handle_profile_agent_update(handler, body)
 
-    if parsed.path in ("/api/profile/change_soul", "/api/profile/change-soul"):
+    if parsed.path in ("/api/profile/soul", "/api/profile/change_soul", "/api/profile/change-soul"):
         return _handle_profile_change_soul(handler, body)
 
     if parsed.path == "/api/profile/create":
@@ -8337,22 +8340,54 @@ def _resolve_profile_soul_path(raw_path: str) -> Path:
     return soul_path
 
 
+def _profile_soul_path_from_body(body: dict) -> str:
+    raw_path = body.get("path")
+    if raw_path is None:
+        raw_path = body.get("profile_path")
+    if raw_path is None:
+        raw_path = body.get("soul_path")
+    return str(raw_path or "")
+
+
+def _profile_soul_path_from_query(parsed) -> str:
+    qs = parse_qs(parsed.query)
+    raw_path = qs.get("path", [None])[0]
+    if raw_path is None:
+        raw_path = qs.get("profile_path", [None])[0]
+    if raw_path is None:
+        raw_path = qs.get("soul_path", [None])[0]
+    return str(raw_path or "")
+
+
+def _handle_profile_soul_read(handler, parsed):
+    try:
+        soul_path = _resolve_profile_soul_path(_profile_soul_path_from_query(parsed))
+        return j(handler, {
+            "path": str(soul_path),
+            "profile_path": str(soul_path.parent),
+            "content": soul_path.read_text(encoding="utf-8"),
+        })
+    except FileNotFoundError as e:
+        return bad(handler, str(e), 404)
+    except ValueError as e:
+        return bad(handler, str(e), 400)
+    except OSError as e:
+        logger.exception("Failed to read profile SOUL.md")
+        return bad(handler, _sanitize_error(e), 500)
+
+
 def _handle_profile_change_soul(handler, body):
     try:
-        raw_path = body.get("path")
-        if raw_path is None:
-            raw_path = body.get("profile_path")
-        if raw_path is None:
-            raw_path = body.get("soul_path")
         if "content" not in body or body.get("content") is None:
             raise ValueError("content is required")
 
-        soul_path = _resolve_profile_soul_path(raw_path)
+        soul_path = _resolve_profile_soul_path(_profile_soul_path_from_body(body))
         content = str(body.get("content"))
         soul_path.write_text(content, encoding="utf-8")
         return j(handler, {
             "ok": True,
             "path": str(soul_path),
+            "profile_path": str(soul_path.parent),
         })
     except FileNotFoundError as e:
         return bad(handler, str(e), 404)

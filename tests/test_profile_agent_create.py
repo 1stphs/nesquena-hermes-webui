@@ -1,6 +1,6 @@
 import io
 import json
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from api import routes
 
@@ -388,6 +388,40 @@ def test_profile_change_soul_replaces_profile_soul(tmp_path):
     assert payload["ok"] is True
     assert payload["path"].endswith("SOUL.md")
     assert (profile_path / "SOUL.md").read_text(encoding="utf-8") == body["content"]
+
+
+def test_profile_soul_endpoint_reads_profile_soul(tmp_path):
+    profile_path = tmp_path / "profiles" / "reader-agent"
+    profile_path.mkdir(parents=True)
+    soul_path = profile_path / "SOUL.md"
+    soul_path.write_text("current soul\nwith context", encoding="utf-8")
+
+    handler = _FakeHandler()
+    routes.handle_get(handler, urlparse(f"/api/profile/soul?path={quote(str(profile_path))}"))
+
+    assert handler.status == 200
+    payload = handler.json_body()
+    assert payload == {
+        "path": str(soul_path.resolve()),
+        "profile_path": str(profile_path.resolve()),
+        "content": "current soul\nwith context",
+    }
+
+
+def test_profile_soul_endpoint_updates_profile_soul(tmp_path):
+    profile_path = tmp_path / "profiles" / "writer-agent"
+    profile_path.mkdir(parents=True)
+    (profile_path / "SOUL.md").write_text("old soul\n", encoding="utf-8")
+
+    handler = _FakeHandler({"path": str(profile_path), "content": "fresh soul"})
+    routes.handle_post(handler, urlparse("/api/profile/soul"))
+
+    assert handler.status == 200
+    payload = handler.json_body()
+    assert payload["ok"] is True
+    assert payload["path"].endswith("SOUL.md")
+    assert payload["profile_path"] == str(profile_path.resolve())
+    assert (profile_path / "SOUL.md").read_text(encoding="utf-8") == "fresh soul"
 
 
 def test_profile_change_soul_accepts_hermes_logical_path(tmp_path, monkeypatch):
