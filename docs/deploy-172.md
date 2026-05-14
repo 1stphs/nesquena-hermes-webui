@@ -26,7 +26,7 @@ Current production relationship on `172.234.237.195`:
 
 | Port | Container | Image | Purpose |
 |---:|---|---|---|
-| `8787` | `hermes-webui` | `hermes-webui-token-login:<commit>` | Hermes WebUI / Dashboard API. The Vue frontend should call this layer through `/api/*`. |
+| `8787` | `hermes-webui` | `hermes-webui-token-login:latest` | Hermes WebUI / Dashboard API. The Vue frontend should call this layer through `/api/*`. |
 | `8642` | `hermes` | `nousresearch/hermes-agent:latest` | Hermes OpenAI-compatible `/v1` API Server. Publicly reachable, requires API key. |
 | `8643` | `hermes-foxu` | `nousresearch/hermes-agent:latest` | Another Hermes OpenAI-compatible `/v1` API Server. Publicly reachable, requires API key. |
 
@@ -48,12 +48,13 @@ OpenAI-compatible client -> http://172.234.237.195:8643/v1/*
 Current server layout:
 
 ```text
-compose dir: /var/www/hermes-agent-webui
-source dir:  /var/www/nesquena-hermes-webui
-workspace:   /var/www/hermes-agent-webui/workspace
-Hermes home: /root/.hermes
-WebUI state: /root/.hermes/webui-mvp
-agent src:   /var/www/hermes-agent-src
+active compose dir: /var/www/nesquena-hermes-webui
+active compose file: /var/www/nesquena-hermes-webui/docker-compose.yml
+source dir:         /var/www/nesquena-hermes-webui
+Hermes home:        /root/.hermes
+WebUI state:        /root/.hermes/webui-mvp
+workspace:          /root/.hermes/workspace
+agent src:          /var/www/hermes-agent-src
 ```
 
 The WebUI container sees those paths as:
@@ -61,8 +62,8 @@ The WebUI container sees those paths as:
 ```text
 /home/hermeswebui/.hermes
 /home/hermeswebui/.hermes/webui-mvp
+/home/hermeswebui/.hermes/workspace
 /home/hermeswebui/.hermes/hermes-agent
-/workspace
 ```
 
 Current important mounts:
@@ -70,7 +71,9 @@ Current important mounts:
 ```text
 /root/.hermes:/home/hermeswebui/.hermes
 /var/www/hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
-/var/www/hermes-agent-webui/workspace:/workspace
+/var/www/hermes-community-skills:/var/www/hermes-community-skills:ro
+/var/www/hermes-built-in-skills:/var/www/hermes-built-in-skills:ro
+/var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
 ```
 
 Current important WebUI environment:
@@ -79,10 +82,16 @@ Current important WebUI environment:
 HERMES_WEBUI_HOST=0.0.0.0
 HERMES_WEBUI_PORT=8787
 HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui-mvp
-HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
+HERMES_WEBUI_DEFAULT_WORKSPACE=/home/hermeswebui/.hermes/workspace
 HERMES_HOME=/home/hermeswebui/.hermes
 HERMES_WEBUI_CORS_ALLOW_ALL=1
 ```
+
+The older `/var/www/hermes-agent-webui` directory may still exist on the server,
+but it is not the current compose owner of the running `hermes-webui` container.
+Before rebuilding, always trust the compose labels from `docker inspect`; using a
+different compose directory can create a separate compose project and hit a
+`container name "/hermes-webui" is already in use` conflict.
 
 ## Token Login State
 
@@ -133,10 +142,12 @@ After login, run a read-only status check before changing anything:
 ```bash
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}'
 docker inspect hermes-webui --format '{{json .Mounts}}'
-docker inspect hermes-webui --format '{{json .Config.Env}}'
+docker inspect hermes-webui --format 'project={{ index .Config.Labels "com.docker.compose.project" }} service={{ index .Config.Labels "com.docker.compose.service" }} config_files={{ index .Config.Labels "com.docker.compose.project.config_files" }} working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
 ```
 
 Do not copy secrets from `docker inspect` into tickets, commits, docs, or chat logs.
+Avoid dumping `.Config.Env` unless you are specifically debugging environment
+inheritance; it may contain deployment secrets.
 
 Update the server source:
 
@@ -152,29 +163,50 @@ git pull --ff-only origin master
 Build and recreate only the WebUI service, preserving existing volumes and port mappings:
 
 ```bash
-cd /var/www/hermes-agent-webui
+cd /var/www/nesquena-hermes-webui
 docker compose up -d --build hermes-webui
 ```
 
-The compose override should continue to point at the local source checkout:
+Expected compose owner after the rebuild:
+
+```bash
+docker inspect hermes-webui --format 'project={{ index .Config.Labels "com.docker.compose.project" }} service={{ index .Config.Labels "com.docker.compose.service" }} config_files={{ index .Config.Labels "com.docker.compose.project.config_files" }} working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
+```
+
+Expected label values:
 
 ```text
-/var/www/hermes-agent-webui/docker-compose.override.yml
+project=nesquena-hermes-webui
+service=hermes-webui
+config_files=/var/www/nesquena-hermes-webui/docker-compose.yml
+working_dir=/var/www/nesquena-hermes-webui
 ```
 
-Expected override shape:
+Keep the existing service name, container name, volumes, state directory, and
+`8787:8787` port mapping. Do not rebuild or restart `hermes` or `hermes-foxu`
+unless you are intentionally deploying the separate `8642` / `8643` API Server
+containers.
 
-```yaml
-services:
-  hermes-webui:
-    image: hermes-webui-token-login:<commit>
-    build:
-      context: /var/www/nesquena-hermes-webui
-    environment:
-      HERMES_WEBUI_CORS_ALLOW_ALL: "1"
+If `docker compose up` prints a conflict like:
+
+```text
+container name "/hermes-webui" is already in use
 ```
 
-If the image tag still points at an old commit, update only the tag value before rebuilding. Keep the existing service name, container name, volumes, state directory, and `8787:8787` port mapping.
+stop and inspect the existing container labels:
+
+```bash
+docker inspect hermes-webui --format 'project={{ index .Config.Labels "com.docker.compose.project" }} service={{ index .Config.Labels "com.docker.compose.service" }} config_files={{ index .Config.Labels "com.docker.compose.project.config_files" }} working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
+```
+
+Then `cd` to the printed `working_dir` and rerun:
+
+```bash
+docker compose up -d --build --force-recreate hermes-webui
+```
+
+Do not manually remove the existing `hermes-webui` container as the first fix;
+the usual cause is deploying from the wrong compose project.
 
 ## Smoke Test
 
@@ -190,8 +222,25 @@ curl -i http://127.0.0.1:8787/health
 Expected:
 
 ```text
-hermes-webui|hermes-webui-token-login:<commit>|Up ... (healthy)
+hermes-webui|hermes-webui-token-login:latest|Up ... (healthy)
 HTTP/1.0 200 OK
+```
+
+Code import check:
+
+```bash
+docker exec -i hermes-webui python3 - <<'PY'
+import api.routes as routes
+print(routes.__file__)
+print(hasattr(routes, "_requested_sessions_profile"))
+PY
+```
+
+For the profile-scoped sessions deployment, expected output includes:
+
+```text
+/apptoo/api/routes.py
+True
 ```
 
 CORS preflight:
@@ -324,11 +373,13 @@ cd /var/www/nesquena-hermes-webui
 git log --oneline -5
 ```
 
-Pick the previous known-good commit, update `/var/www/hermes-agent-webui/docker-compose.override.yml` image tag if needed, then rebuild:
+Pick the previous known-good commit in `/var/www/nesquena-hermes-webui`, then
+rebuild the active compose project:
 
 ```bash
-cd /var/www/hermes-agent-webui
-docker compose up -d --build hermes-webui
+cd /var/www/nesquena-hermes-webui
+docker compose up -d --build --force-recreate hermes-webui
 ```
 
-Do not delete `/root/.hermes`, `/root/.hermes/webui-mvp`, or `/var/www/hermes-agent-webui/workspace` during rollback.
+Do not delete `/root/.hermes`, `/root/.hermes/webui-mvp`, or
+`/root/.hermes/workspace` during rollback.
