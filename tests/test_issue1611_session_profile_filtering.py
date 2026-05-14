@@ -95,6 +95,58 @@ def test_all_profiles_query_flag_false_values():
         assert _all_profiles_query_flag(u) is False, f"path {path!r} should be false"
 
 
+# ── hermes_profile query override ───────────────────────────────────────────
+
+
+def test_requested_sessions_profile_accepts_named_profile():
+    """GET /api/sessions?hermes_profile=haku scopes without mutating cookie state."""
+    from api.routes import _requested_sessions_profile
+
+    u = urlparse('/api/sessions?hermes_profile=haku')
+
+    assert _requested_sessions_profile(u) == 'haku'
+
+
+def test_requested_sessions_profile_falls_back_when_missing():
+    """Missing/empty hermes_profile leaves /api/sessions on cookie/process active profile."""
+    from api.routes import _requested_sessions_profile
+
+    assert _requested_sessions_profile(urlparse('/api/sessions')) is None
+    assert _requested_sessions_profile(urlparse('/api/sessions?hermes_profile=')) is None
+
+
+def test_requested_sessions_profile_accepts_default_profile():
+    """The root profile alias remains valid as an explicit sessions scope."""
+    from api.routes import _requested_sessions_profile
+
+    u = urlparse('/api/sessions?hermes_profile=default')
+
+    assert _requested_sessions_profile(u) == 'default'
+
+
+def test_requested_sessions_profile_rejects_invalid_profile():
+    """Reject path-like or otherwise invalid profile names before filtering."""
+    from api.routes import _requested_sessions_profile
+
+    for path in (
+        '/api/sessions?hermes_profile=bad/name',
+        '/api/sessions?hermes_profile=bad.name',
+        '/api/sessions?hermes_profile=../default',
+    ):
+        with pytest.raises(ValueError, match='invalid profile'):
+            _requested_sessions_profile(urlparse(path))
+
+
+def test_all_profiles_still_opt_in_with_profile_override():
+    """all_profiles=1 remains aggregate mode even when hermes_profile is present."""
+    from api.routes import _all_profiles_query_flag, _requested_sessions_profile
+
+    u = urlparse('/api/sessions?all_profiles=1&hermes_profile=haku')
+
+    assert _all_profiles_query_flag(u) is True
+    assert _requested_sessions_profile(u) == 'haku'
+
+
 # ── No client-side CLI bypass ──────────────────────────────────────────────
 
 
@@ -163,10 +215,15 @@ def test_keep_latest_messaging_runs_after_profile_filter():
     next_handler = src.find('parsed.path == "/api/projects":', handler_idx)
     block = src[handler_idx:next_handler]
 
+    override_idx = block.find('active_profile = requested_profile or get_active_profile_name()')
     filter_idx = block.find('_profiles_match(s.get("profile"), active_profile)')
     dedupe_idx = block.find('_keep_latest_messaging_session_per_source(scoped)')
+    assert override_idx > 0, "Profile query override not found in /api/sessions handler"
     assert filter_idx > 0, "Profile filter not found in /api/sessions handler"
     assert dedupe_idx > 0, "Messaging dedupe must run on the scoped list"
+    assert override_idx < filter_idx, (
+        "Profile query override must resolve active_profile before session rows are scoped"
+    )
     assert filter_idx < dedupe_idx, (
         "Profile filter must run BEFORE messaging-source dedupe — running it "
         "after lets the dedupe discard the active profile's row when both "

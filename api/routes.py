@@ -114,6 +114,18 @@ def _all_profiles_query_flag(parsed_url) -> bool:
     raw = qs.get('all_profiles', [''])[0].strip().lower()
     return raw in ('1', 'true', 'yes', 'on')
 
+
+def _requested_sessions_profile(parsed_url) -> str | None:
+    """Return the optional profile override for /api/sessions."""
+    qs = parse_qs(parsed_url.query)
+    requested_profile = qs.get('hermes_profile', [''])[0].strip()
+    if not requested_profile:
+        return None
+    from api.profiles import _PROFILE_ID_RE
+    if requested_profile != 'default' and not _PROFILE_ID_RE.fullmatch(requested_profile):
+        raise ValueError('invalid profile')
+    return requested_profile
+
 # ── SSE app-level heartbeat (#1623) ────────────────────────────────────────
 #
 # Kernel TCP keepalive (server.py setsockopt block) declares a peer dead at
@@ -3242,7 +3254,11 @@ def handle_get(handler, parsed) -> bool:
         # source. Filter first so the dedupe operates only within the active
         # profile's rows.
         from api.profiles import get_active_profile_name
-        active_profile = get_active_profile_name()
+        try:
+            requested_profile = _requested_sessions_profile(parsed)
+        except ValueError as e:
+            return bad(handler, str(e), 400)
+        active_profile = requested_profile or get_active_profile_name()
         all_profiles = _all_profiles_query_flag(parsed)
         if all_profiles:
             scoped = merged
