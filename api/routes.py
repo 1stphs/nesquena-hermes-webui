@@ -3330,6 +3330,12 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/memory":
         return _handle_memory_read(handler)
 
+    if parsed.path == "/api/profile/memory":
+        return _handle_profile_memory_read(handler, parsed)
+
+    if parsed.path == "/api/profile/user":
+        return _handle_profile_user_read(handler, parsed)
+
     # ── Profile API (GET) ──
     if parsed.path == "/api/profiles":
         from api.profiles import list_profiles_api, get_active_profile_name
@@ -4240,6 +4246,12 @@ def handle_post(handler, parsed) -> bool:
     # ── Memory (POST) ──
     if parsed.path == "/api/memory/write":
         return _handle_memory_write(handler, body)
+
+    if parsed.path == "/api/profile/memory":
+        return _handle_profile_memory_write(handler, body)
+
+    if parsed.path == "/api/profile/user":
+        return _handle_profile_user_write(handler, body)
 
     # ── Profile API (POST) ──
     if parsed.path == "/api/profile/switch":
@@ -6086,6 +6098,101 @@ def _handle_memory_read(handler):
             "user_mtime": user_file.stat().st_mtime if user_file.exists() else None,
         },
     )
+
+
+def _known_profile_memory_roots() -> tuple[Path, Path, set[Path]]:
+    """Return canonical profile roots accepted by the path-scoped memory API."""
+    from api.profiles import _DEFAULT_HERMES_HOME, _profiles_root, list_profiles_api
+
+    base_home = Path(_DEFAULT_HERMES_HOME).expanduser().resolve()
+    profiles_root = Path(_profiles_root()).expanduser().resolve()
+    known_paths = {base_home}
+    for item in list_profiles_api():
+        raw_path = str((item or {}).get("path") or "").strip()
+        if not raw_path:
+            continue
+        try:
+            known_paths.add(Path(raw_path).expanduser().resolve())
+        except (OSError, RuntimeError):
+            continue
+    return base_home, profiles_root, known_paths
+
+
+def _normalize_profile_memory_path(raw_path: str, base_home: Path) -> Path:
+    raw_path = str(raw_path or "").strip()
+    if not raw_path:
+        raise ValueError("path is required")
+    if raw_path == "/.hermes":
+        return base_home
+    if raw_path.startswith("/.hermes/"):
+        return (base_home.parent / raw_path.lstrip("/")).resolve()
+    return Path(raw_path).expanduser().resolve()
+
+
+def _resolve_profile_memory_file(profile_path: str, filename: str = "MEMORY.md") -> tuple[Path, Path]:
+    base_home, profiles_root, known_paths = _known_profile_memory_roots()
+    profile_home = _normalize_profile_memory_path(profile_path, base_home)
+
+    is_known_profile = profile_home in known_paths
+    is_named_profile = profile_home.parent == profiles_root
+    is_root_profile = profile_home == base_home
+    if not (is_known_profile or is_named_profile or is_root_profile):
+        raise ValueError("profile_path must point to a Hermes profile directory")
+
+    if not profile_home.exists() or not profile_home.is_dir():
+        raise FileNotFoundError("Profile not found")
+
+    memory_dir = (profile_home / "memories").resolve()
+    try:
+        memory_dir.relative_to(profile_home)
+    except ValueError as exc:
+        raise ValueError("Invalid memories directory") from exc
+
+    return profile_home, memory_dir / filename
+
+
+def _profile_memory_payload(raw_path: str, profile_home: Path, memory_file: Path) -> dict:
+    exists = memory_file.exists()
+    content = (
+        memory_file.read_text(encoding="utf-8", errors="replace")
+        if exists
+        else ""
+    )
+    return {
+        "path": str(raw_path or profile_home),
+        "profile_path": str(profile_home),
+        "content": content,
+    }
+
+
+def _handle_profile_memory_read(handler, parsed):
+    qs = parse_qs(parsed.query)
+    profile_path = qs.get("path", qs.get("profile_path", [""]))[0]
+    try:
+        profile_home, memory_file = _resolve_profile_memory_file(profile_path)
+        return j(handler, _profile_memory_payload(profile_path, profile_home, memory_file))
+    except ValueError as e:
+        return bad(handler, str(e), 400)
+    except FileNotFoundError as e:
+        return bad(handler, str(e), 404)
+    except OSError as e:
+        logger.exception("Failed to read profile memory")
+        return bad(handler, _sanitize_error(e), 500)
+
+
+def _handle_profile_user_read(handler, parsed):
+    qs = parse_qs(parsed.query)
+    profile_path = qs.get("path", qs.get("profile_path", [""]))[0]
+    try:
+        profile_home, user_file = _resolve_profile_memory_file(profile_path, "USER.md")
+        return j(handler, _profile_memory_payload(profile_path, profile_home, user_file))
+    except ValueError as e:
+        return bad(handler, str(e), 400)
+    except FileNotFoundError as e:
+        return bad(handler, str(e), 404)
+    except OSError as e:
+        logger.exception("Failed to read profile user file")
+        return bad(handler, _sanitize_error(e), 500)
 
 
 # ── POST route helpers ────────────────────────────────────────────────────────
@@ -8879,6 +8986,58 @@ def _handle_memory_write(handler, body):
         return bad(handler, 'section must be "memory" or "user"')
     target.write_text(body["content"], encoding="utf-8")
     return j(handler, {"ok": True, "section": section, "path": str(target)})
+
+
+def _handle_profile_memory_write(handler, body):
+    profile_path = body.get("path", body.get("profile_path", ""))
+    if "content" not in body or body.get("content") is None:
+        return bad(handler, "content is required")
+    content = str(body.get("content"))
+    return _write_profile_memory_file(handler, profile_path, content, "MEMORY.md", "memory_path")
+
+
+def _handle_profile_user_write(handler, body):
+    profile_path = body.get("path", body.get("profile_path", ""))
+    if "content" not in body or body.get("content") is None:
+        return bad(handler, "content is required")
+    content = str(body.get("content"))
+    return _write_profile_memory_file(handler, profile_path, content, "USER.md", "user_path")
+
+
+def _write_profile_memory_file(handler, profile_path: str, content: str, filename: str, path_key: str):
+    try:
+        profile_home, memory_file = _resolve_profile_memory_file(profile_path, filename)
+        memory_dir = memory_file.parent
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        temp_file = memory_dir / f".{filename}.{uuid.uuid4().hex}.tmp"
+        try:
+            temp_file.write_text(content, encoding="utf-8")
+            temp_file.replace(memory_file)
+        finally:
+            try:
+                if temp_file.exists():
+                    temp_file.unlink()
+            except OSError:
+                pass
+        return j(
+            handler,
+            {
+                "ok": True,
+                "path": str(profile_path),
+                "profile_path": str(profile_home),
+                path_key: str(memory_file),
+                "content": content,
+                "mtime": memory_file.stat().st_mtime,
+                "bytes": len(content.encode("utf-8")),
+            },
+        )
+    except ValueError as e:
+        return bad(handler, str(e), 400)
+    except FileNotFoundError as e:
+        return bad(handler, str(e), 404)
+    except OSError as e:
+        logger.exception("Failed to write profile %s", filename)
+        return bad(handler, _sanitize_error(e), 500)
 
 
 def _normalize_message_for_import_refresh(message: object) -> object:

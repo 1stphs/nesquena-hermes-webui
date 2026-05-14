@@ -382,6 +382,147 @@ GET /nocobase/api/hermes_skills_templates:list?paginate=false
 - 前端展示时以 `profiles` 数组作为列表数据源，以 `active` 标识当前激活项。
 - 若该 NocoBase webhook 后续需要鉴权、请求头或请求参数，补充到本文档时只记录字段名和用途，不写入真实密钥、token 或 cookie。
 
+### WebUI：按 Profile 路径读取 MEMORY.md
+
+- 接口地址：`http://172.234.237.195:8787/api/profile/memory`
+- 请求方式：`GET`
+- 主要作用：按传入的 Profile 本地路径读取该 Profile 下 `memories/MEMORY.md` 的完整内容。
+
+请求参数如下：
+
+| 字段 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `path` | query | `string` | 是 | Profile 本地目录路径，例如 `/.hermes/profiles/agent-c59d60cc` 或 `/home/hermeswebui/.hermes/profiles/agent-c59d60cc`。 |
+
+示例请求：
+
+```http
+GET /api/profile/memory?path=/.hermes/profiles/agent-c59d60cc
+```
+
+示例返回：
+
+```json
+{
+  "path": "/.hermes/profiles/agent-c59d60cc",
+  "profile_path": "/home/hermeswebui/.hermes/profiles/agent-c59d60cc",
+  "content": "# Memory\n"
+}
+```
+
+### WebUI：按 Profile 路径修改 MEMORY.md
+
+- 接口地址：`http://172.234.237.195:8787/api/profile/memory`
+- 请求方式：`POST`
+- 主要作用：按传入的 Profile 本地路径覆盖写入该 Profile 下 `memories/MEMORY.md` 的完整内容。
+
+请求体如下：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `path` | `string` | 是 | Profile 本地目录路径，例如 `/.hermes/profiles/agent-c59d60cc` 或 `/home/hermeswebui/.hermes/profiles/agent-c59d60cc`。 |
+| `content` | `string` | 是 | 要写入 `MEMORY.md` 的完整内容，允许为空字符串。 |
+
+示例请求：
+
+```json
+{
+  "path": "/.hermes/profiles/agent-c59d60cc",
+  "content": "新的内容"
+}
+```
+
+示例返回：
+
+```json
+{
+  "ok": true,
+  "path": "/.hermes/profiles/agent-c59d60cc",
+  "profile_path": "/home/hermeswebui/.hermes/profiles/agent-c59d60cc",
+  "memory_path": "/home/hermeswebui/.hermes/profiles/agent-c59d60cc/memories/MEMORY.md",
+  "content": "新的内容",
+  "mtime": 1778750000.0,
+  "bytes": 12
+}
+```
+
+联调备注：
+
+- 这两个接口只接受 Hermes root profile 或 `profiles/` 下的 profile 目录路径，不允许用任意系统路径读写文件。
+- 如果 `MEMORY.md` 不存在，读取接口返回 `content: ""`；写入接口会自动创建 `memories` 目录和 `MEMORY.md`。
+- 修改接口是整文件覆盖，不是追加或局部 patch；前端保存前应提交完整内容。
+- 公网 WebUI 未登录访问时会返回鉴权错误；浏览器跨域 POST 仍受现有 CSRF 规则限制。
+
+### WebUI：按 Profile 路径读取 USER.md
+
+- 接口地址：`http://172.234.237.195:8787/api/profile/user`
+- 请求方式：`GET`
+- 主要作用：按传入的 Profile 本地路径读取该 Profile 下 `memories/USER.md` 的完整内容。
+
+请求参数如下：
+
+| 字段 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `path` | query | `string` | 是 | Profile 本地目录路径，例如 `/.hermes/profiles/agent-c59d60cc` 或 `/home/hermeswebui/.hermes/profiles/agent-c59d60cc`。 |
+
+示例请求：
+
+```http
+GET /api/profile/user?path=/.hermes/profiles/agent-c59d60cc
+```
+
+示例返回：
+
+```json
+{
+  "path": "/.hermes/profiles/agent-c59d60cc",
+  "profile_path": "/home/hermeswebui/.hermes/profiles/agent-c59d60cc",
+  "content": "# User\n"
+}
+```
+
+### WebUI：按 Profile 路径修改 USER.md
+
+- 接口地址：`http://172.234.237.195:8787/api/profile/user`
+- 请求方式：`POST`
+- 主要作用：按传入的 Profile 本地路径覆盖写入该 Profile 下 `memories/USER.md` 的完整内容。
+
+请求体如下：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `path` | `string` | 是 | Profile 本地目录路径，例如 `/.hermes/profiles/agent-c59d60cc` 或 `/home/hermeswebui/.hermes/profiles/agent-c59d60cc`。 |
+| `content` | `string` | 是 | 要写入 `USER.md` 的完整内容，允许为空字符串。 |
+
+示例请求：
+
+```json
+{
+  "path": "/.hermes/profiles/agent-c59d60cc",
+  "content": "新的用户信息"
+}
+```
+
+示例返回：
+
+```json
+{
+  "ok": true,
+  "path": "/.hermes/profiles/agent-c59d60cc",
+  "profile_path": "/home/hermeswebui/.hermes/profiles/agent-c59d60cc",
+  "user_path": "/home/hermeswebui/.hermes/profiles/agent-c59d60cc/memories/USER.md",
+  "content": "新的用户信息",
+  "mtime": 1778750000.0,
+  "bytes": 18
+}
+```
+
+联调备注：
+
+- `USER.md` 和 `MEMORY.md` 实际位于同一个 `memories` 目录下，但使用独立接口，避免前端传文件名。
+- 如果 `USER.md` 不存在，读取接口返回 `content: ""`；写入接口会自动创建 `memories` 目录和 `USER.md`。
+- 修改接口是整文件覆盖，不是追加或局部 patch；前端保存前应提交完整内容。
+
 ### NocoBase Webhook：用户注册
 
 - 接口地址：`https://www.foxuai.com/api/webhook:trigger/3ahenbutb7a`
