@@ -759,7 +759,8 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
     # yet).  We derive workspace in priority order:
     #   1. {home}/webui_state/last_workspace.txt  (previously chosen workspace for this profile)
     #   2. cfg terminal.cwd / workspace / default_workspace keys
-    #   3. Boot-time DEFAULT_WORKSPACE constant
+    #   3. {home}/workspace for named profiles
+    #   4. Boot-time DEFAULT_WORKSPACE constant
     # Use the module-level ``Path`` (imported at line 17) rather than re-importing
     # it locally — keeps the exception fallback simple and avoids a latent NameError
     # if a future refactor moves the inner imports.
@@ -789,6 +790,10 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
                     _pp = Path(str(_cwd)).expanduser().resolve()
                     if _pp.is_dir():
                         default_workspace = str(_pp)
+        if default_workspace is None:
+            profile_ws = home / 'workspace'
+            if home.parent.name == 'profiles' and profile_ws.is_dir():
+                default_workspace = str(profile_ws.resolve())
         if default_workspace is None:
             default_workspace = str(_DW)
     except Exception:

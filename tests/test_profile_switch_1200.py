@@ -124,6 +124,37 @@ def test_switch_profile_uses_last_workspace_txt_over_config(tmp_path, monkeypatc
         profiles._tls.profile = None
 
 
+def test_switch_profile_uses_named_profile_workspace_dir_without_config(tmp_path, monkeypatch):
+    """
+    If a named profile has no explicit workspace config and no last workspace,
+    its own {profile_home}/workspace directory is the default workspace.
+    """
+    import api.profiles as profiles
+
+    default_home = tmp_path / '.hermes'
+    default_home.mkdir()
+    target_home = default_home / 'profiles' / 'myprofile'
+    profile_ws = target_home / 'workspace'
+    profile_ws.mkdir(parents=True)
+
+    orig_default = profiles._DEFAULT_HERMES_HOME
+    profiles._DEFAULT_HERMES_HOME = default_home
+    orig_active = profiles._active_profile
+    profiles._active_profile = 'default'
+    profiles._tls.profile = None
+
+    try:
+        result = profiles.switch_profile('myprofile', process_wide=False)
+        ws = result.get('default_workspace', '')
+        assert Path(ws) == profile_ws.resolve(), (
+            f"Expected named profile workspace ({profile_ws}), got: {ws}"
+        )
+    finally:
+        profiles._DEFAULT_HERMES_HOME = orig_default
+        profiles._active_profile = orig_active
+        profiles._tls.profile = None
+
+
 def test_switch_profile_process_wide_false_returns_correct_model(tmp_path, monkeypatch):
     """
     switch_profile(process_wide=False) reads the default model from the TARGET

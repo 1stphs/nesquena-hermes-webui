@@ -73,6 +73,7 @@ def _profile_default_workspace() -> str:
       1. 'workspace'         — explicit webui workspace key
       2. 'default_workspace' — alternate explicit key
       3. 'terminal.cwd'      — hermes-agent terminal working dir (most common)
+      4. named profile's own workspace directory
 
     Falls back to the boot-time DEFAULT_WORKSPACE constant.
     """
@@ -96,6 +97,14 @@ def _profile_default_workspace() -> str:
                     return str(p)
     except (ImportError, Exception):
         logger.debug("Failed to load profile default workspace config")
+    try:
+        from api.profiles import get_active_hermes_home
+        profile_home = get_active_hermes_home().resolve()
+        profile_ws = profile_home / 'workspace'
+        if profile_home.parent.name == 'profiles' and profile_ws.is_dir():
+            return str(profile_ws.resolve())
+    except Exception:
+        logger.debug("Failed to resolve profile workspace directory")
     return str(_BOOT_DEFAULT_WORKSPACE)
 
 
