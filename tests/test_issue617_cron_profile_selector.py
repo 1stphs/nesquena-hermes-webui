@@ -129,6 +129,193 @@ def test_cron_create_api_rejects_unknown_profile_before_persisting(monkeypatch):
     assert "Unknown profile: missing" in _payload(handler)["error"]
 
 
+def test_cron_batch_api_lists_jobs_for_requested_profiles(monkeypatch):
+    import api.profiles as profiles
+    import api.routes as routes
+
+    events = []
+
+    class Ctx:
+        def __init__(self, home):
+            self.home = str(home)
+
+        def __enter__(self):
+            events.append(("enter", self.home))
+            current_home[0] = self.home
+
+        def __exit__(self, exc_type, exc, tb):
+            events.append(("exit", self.home))
+            current_home[0] = None
+
+    cron_pkg = types.ModuleType("cron")
+    cron_pkg.__path__ = []
+    cron_jobs = types.ModuleType("cron.jobs")
+    current_home = [None]
+
+    def list_jobs(include_disabled=False):
+        events.append(("list", include_disabled))
+        home = current_home[0]
+        return [{"id": home.rsplit("/", 1)[-1], "name": "Job"}]
+
+    cron_jobs.list_jobs = list_jobs
+    monkeypatch.setattr(
+        profiles,
+        "list_profiles_api",
+        lambda: [{"name": "default"}, {"name": "research"}, {"name": "sales"}],
+    )
+    monkeypatch.setattr(
+        profiles,
+        "get_hermes_home_for_profile",
+        lambda name: Path("/hermes") if name == "default" else Path("/hermes/profiles") / name,
+    )
+    monkeypatch.setattr(profiles, "cron_profile_context_for_home", Ctx)
+    monkeypatch.setitem(sys.modules, "cron", cron_pkg)
+    monkeypatch.setitem(sys.modules, "cron.jobs", cron_jobs)
+
+    handler = _JSONHandler()
+    routes._handle_cron_batch(
+        handler,
+        {"profile_names": ["research", "sales", "research"]},
+    )
+
+    body = _payload(handler)
+    assert handler.status == 200
+    assert [item["profile"] for item in body["profiles"]] == ["research", "sales"]
+    assert body["profiles"][0]["path"] == "/hermes/profiles/research"
+    assert body["profiles"][0]["jobs"][0]["id"] == "research"
+    assert body["profiles"][1]["jobs"][0]["id"] == "sales"
+    assert events == [
+        ("enter", "/hermes/profiles/research"),
+        ("list", True),
+        ("exit", "/hermes/profiles/research"),
+        ("enter", "/hermes/profiles/sales"),
+        ("list", True),
+        ("exit", "/hermes/profiles/sales"),
+    ]
+
+
+def test_cron_batch_api_rejects_unknown_profiles(monkeypatch):
+    import api.profiles as profiles
+    import api.routes as routes
+
+    monkeypatch.setattr(profiles, "list_profiles_api", lambda: [{"name": "research"}])
+
+    handler = _JSONHandler()
+    routes._handle_cron_batch(handler, {"profiles": ["ghost"]})
+
+    assert handler.status == 400
+    assert "Unknown profile: ghost" in _payload(handler)["error"]
+
+
+def test_cron_calendar_api_summarizes_profile_jobs_by_month(monkeypatch):
+    import api.profiles as profiles
+    import api.routes as routes
+
+    current_home = [None]
+
+    class Ctx:
+        def __init__(self, home):
+            self.home = str(home)
+
+        def __enter__(self):
+            current_home[0] = self.home
+
+        def __exit__(self, exc_type, exc, tb):
+            current_home[0] = None
+
+    cron_pkg = types.ModuleType("cron")
+    cron_pkg.__path__ = []
+    cron_jobs = types.ModuleType("cron.jobs")
+
+    def list_jobs(include_disabled=False):
+        if current_home[0].endswith("/research"):
+            return [
+                {
+                    "id": "daily",
+                    "name": "Daily report",
+                    "enabled": True,
+                    "schedule": {"kind": "daily", "display": "daily"},
+                },
+                {
+                    "id": "weekly",
+                    "name": "Monday sync",
+                    "enabled": True,
+                    "schedule": {"kind": "weekly", "weekdays": ["monday"], "display": "weekly"},
+                },
+                {
+                    "id": "off",
+                    "name": "Disabled",
+                    "enabled": False,
+                    "schedule": {"kind": "daily", "display": "daily"},
+                },
+            ]
+        return [
+            {
+                "id": "interval",
+                "name": "Mailbox watcher",
+                "enabled": True,
+                "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+            },
+            {
+                "id": "monthly",
+                "name": "Invoice check",
+                "enabled": True,
+                "schedule": {"kind": "monthly", "day": 15, "display": "monthly"},
+            },
+        ]
+
+    cron_jobs.list_jobs = list_jobs
+    monkeypatch.setattr(
+        profiles,
+        "list_profiles_api",
+        lambda: [{"name": "research"}, {"name": "sales"}],
+    )
+    monkeypatch.setattr(
+        profiles,
+        "get_hermes_home_for_profile",
+        lambda name: Path("/hermes/profiles") / name,
+    )
+    monkeypatch.setattr(profiles, "cron_profile_context_for_home", Ctx)
+    monkeypatch.setitem(sys.modules, "cron", cron_pkg)
+    monkeypatch.setitem(sys.modules, "cron.jobs", cron_jobs)
+
+    handler = _JSONHandler()
+    routes._handle_cron_calendar(
+        handler,
+        {"profile_names": ["research", "sales"], "month": "202605"},
+    )
+
+    body = _payload(handler)
+    assert handler.status == 200
+    assert body["month"] == "202605"
+    assert body["profiles"] == ["research", "sales"]
+    assert len(body["days"]) == 31
+
+    may_1 = body["days"][0]
+    assert may_1["date"] == "2026-05-01"
+    assert {(job["name"], job["profile"], job["frequency"]) for job in may_1["jobs"]} == {
+        ("Daily report", "research", "daily"),
+        ("Mailbox watcher", "sales", "every 5m"),
+    }
+
+    may_4 = body["days"][3]
+    assert any(job["name"] == "Monday sync" and job["profile"] == "research" for job in may_4["jobs"])
+
+    may_15 = body["days"][14]
+    assert any(job["name"] == "Invoice check" and job["profile"] == "sales" for job in may_15["jobs"])
+    assert all(job["name"] != "Disabled" for day in body["days"] for job in day["jobs"])
+
+
+def test_cron_calendar_api_validates_month(monkeypatch):
+    import api.routes as routes
+
+    handler = _JSONHandler()
+    routes._handle_cron_calendar(handler, {"profile_names": ["research"], "month": "2026-05"})
+
+    assert handler.status == 400
+    assert "yyyymm" in _payload(handler)["error"]
+
+
 def test_cron_update_api_accepts_profile_clear_and_rejects_unknown(monkeypatch):
     import api.profiles as profiles
     import api.routes as routes
