@@ -140,7 +140,7 @@ If provider setup is still incomplete after install, the onboarding wizard will 
 
 **Pre-built images** (amd64 + arm64) are published to GHCR on every release.
 
-For a comprehensive setup guide covering all 3 compose files, common failure modes, and bind-mount migration, see [`docs/docker.md`](docs/docker.md). The README covers the 5-minute happy path.
+For a comprehensive setup guide covering the compose setup, common failure modes, and bind-mount notes, see [`docs/docker.md`](docs/docker.md). The README covers the 5-minute happy path.
 
 ### 5-minute quickstart (single container)
 
@@ -190,22 +190,6 @@ docker run -d \
   hermes-webui
 ```
 
-### Multi-container setups
-
-If you want the agent and WebUI in separate containers (for isolation, or because you're already running an agent gateway elsewhere):
-
-```bash
-# Agent + WebUI
-docker compose -f docker-compose.two-container.yml up -d
-
-# Agent + Dashboard + WebUI
-docker compose -f docker-compose.three-container.yml up -d
-```
-
-Both compose files use **named Docker volumes** by default, which solves the UID/GID problem by construction. If you need bind mounts to share an existing host directory, see [`docs/docker.md`](docs/docker.md) for the full migration recipe.
-
-> **Known limitation (#681)**: in the two-container setup, tools triggered from the WebUI run in the **WebUI container**, not the agent container. If you need git/node/etc. on the WebUI's filesystem, either use the single-container setup, extend the WebUI Dockerfile, or use the community [all-in-one image](https://github.com/sunnysktsang/hermes-suite).
-
 ### Common failure modes
 
 | Symptom | Likely cause | Fix |
@@ -213,9 +197,6 @@ Both compose files use **named Docker volumes** by default, which solves the UID
 | `PermissionError` at startup | UID mismatch on bind mount | Set `UID=$(id -u)` in `.env` |
 | `.env: permission denied` (#1389) | `fix_credential_permissions()` enforced 0600 | Set `HERMES_SKIP_CHMOD=1` in `.env` |
 | Workspace appears empty | UID mismatch on `/workspace` mount | Set `UID=$(id -u)` in `.env` |
-| `git: command not found` in chat | Two-container architectural limit (#681) | Use single-container or extend Dockerfile |
-| WebUI can't find agent source | `hermes-agent-src` volume misconfigured | Use the named volumes from compose files as-is |
-| Podman shared `.hermes` fails | Podman 3.4 `keep-id` limitation | Use Podman 4+ or single-container |
 
 For the deep dive on each of these, see [`docs/docker.md`](docs/docker.md).
 

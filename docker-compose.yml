@@ -6,17 +6,19 @@ services:
     restart: unless-stopped
 
     env_file:
-      - /root/.hermes/.env
+      - ./.env.webui.local
 
     ports:
       - "8787:8787"
 
     volumes:
-      - /root/.hermes:/home/hermeswebui/.hermes
+      - /var/www/hermes-agent/.hermes:/home/hermeswebui/.hermes
+      - /var/www/hermes-agent/.hermes:/.hermes
       - /var/www/hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
       - /var/www/hermes-community-skills:/var/www/hermes-community-skills:ro
       - /var/www/hermes-built-in-skills:/var/www/hermes-built-in-skills:ro
       - /var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
+
     environment:
       WANTED_UID: "1025"
       WANTED_GID: "1025"
@@ -24,7 +26,8 @@ services:
       HERMES_WEBUI_PORT: "8787"
       HERMES_WEBUI_STATE_DIR: "/home/hermeswebui/.hermes/webui-mvp"
       HERMES_WEBUI_API_TOKENS_FILE: "/home/hermeswebui/.hermes/webui-mvp/api_tokens.json"
-      HERMES_WEBUI_DEFAULT_WORKSPACE: "/home/hermeswebui/.hermes/workspace"
+      HERMES_WEBUI_DEFAULT_WORKSPACE: "/.hermes/profiles"
       HERMES_HOME: "/home/hermeswebui/.hermes"
+      HERMES_WEBUI_AGENT_DIR: "/home/hermeswebui/.hermes/hermes-agent"
       HERMES_WEBUI_PASSWORD: "foxu_ai_is_best"
       HERMES_WEBUI_CORS_ALLOW_ALL: "1"
