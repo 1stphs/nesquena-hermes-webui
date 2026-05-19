@@ -360,6 +360,22 @@ def probe_provider_endpoint(
     if not parsed.hostname:
         return {"ok": False, "error": "invalid_url", "detail": "base_url has no host"}
 
+    if parsed.hostname.lower().rstrip(".").endswith(".invalid"):
+        return {
+            "ok": False,
+            "error": "dns",
+            "detail": f"could not resolve host '{parsed.hostname}'",
+        }
+
+    try:
+        socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except socket.gaierror:
+        return {
+            "ok": False,
+            "error": "dns",
+            "detail": f"could not resolve host '{parsed.hostname}'",
+        }
+
     # Build the probe URL.  OpenAI-compatible servers expose /v1/models or
     # /models.  Most users supply a base URL ending in /v1, so we just append
     # /models to whatever they typed.  Strip the trailing slash and append
