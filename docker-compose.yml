@@ -22,8 +22,8 @@ services:
     environment:
       # macOS bind mounts often use UID/GID 501+; run `id -u` and `id -g`
       # on the host and set these to match file ownership.
-      WANTED_UID: "1025"
-      WANTED_GID: "1025"
+      WANTED_UID: "1001"
+      WANTED_GID: "1001"
       HERMES_WEBUI_HOST: "0.0.0.0"
       HERMES_WEBUI_PORT: "8787"
       HERMES_WEBUI_STATE_DIR: "/home/hermeswebui/.hermes/webui-mvp"
