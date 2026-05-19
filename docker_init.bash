@@ -62,10 +62,10 @@ fi
 # Auto-detect from mounted volumes if still unset (#569, #668).
 # On macOS, host UIDs start at 501. Using the wrong UID means the container
 # user cannot read the bind-mounted files, making the workspace appear empty.
-# In two-container setups (hermes-agent + hermes-webui), the shared hermes-home
-# volume may be owned by the agent container's UID — detect from there first.
+# A shared hermes-home volume may be owned by another container's UID, so
+# detect from there first.
 if [ -z "${WANTED_UID+x}" ] || [ "${WANTED_UID}" = "1024" ]; then
-  # Priority 1: hermes-home shared volume — covers two-container Zeabur/Compose setups (#668)
+  # Priority 1: hermes-home shared volume — covers Zeabur/Compose setups (#668)
   for _probe_dir in "/home/hermeswebui/.hermes" "$HERMES_HOME" "/opt/data"; do
     if [ -d "$_probe_dir" ]; then
       _detected_uid=$(stat -c '%u' "$_probe_dir" 2>/dev/null || echo "")
@@ -306,7 +306,7 @@ test -x /app/venv/bin/python3
 
 ensure_hindsight_client_docker_dependency() {
   # Keep this outside the .deps_installed fast-restart guard so existing
-  # two-container Docker venvs self-heal after this dependency was added.
+  # Docker venvs self-heal after this dependency was added.
   _hindsight_client_requirement="hindsight-client>=0.4.22"
   echo ""; echo "== Checking Hindsight memory provider dependency"
   if uv pip show hindsight-client >/dev/null 2>&1; then
@@ -356,8 +356,7 @@ else
     echo "!! no personality routing, no CLI session imports)."
     echo "!! To fix: mount the agent source volume into the container:"
     echo "!!   -v /path/to/hermes-agent:/home/hermeswebui/.hermes/hermes-agent"
-    echo "!! Or see the two-container compose example:"
-    echo "!!   https://github.com/nesquena/hermes-webui/blob/master/docker-compose.two-container.yml"
+    echo "!! Or set HERMES_WEBUI_AGENT_DIR to the mounted agent source path."
     echo ""
   fi
   touch /app/venv/.deps_installed
