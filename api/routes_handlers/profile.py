@@ -267,7 +267,7 @@ def _normalize_profile_agent_skills(
 
     return [available[name.lower()] for name in selected]
 
-_PROFILE_AGENT_DEFAULT_CLONE_FROM = "profile_template"
+_PROFILE_AGENT_DEFAULT_CLONE_FROM = "company-assistant"
 
 def _profile_agent_create_options(body: dict) -> dict:
     clone_from = body.get("clone_from", _PROFILE_AGENT_DEFAULT_CLONE_FROM)
