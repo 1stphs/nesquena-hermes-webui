@@ -1,19 +1,6 @@
 """Skill endpoint handlers re-exported by api.routes."""
 
-import sys
-
-
-def _routes_binding(name: str):
-    routes = sys.modules.get("api.routes")
-    if routes is not None and hasattr(routes, name):
-        return getattr(routes, name)
-    from api.helpers import bad, j, require
-
-    return {
-        "bad": bad,
-        "j": j,
-        "require": require,
-    }[name]
+from api.routes_handlers._base import _routes_binding
 
 
 def _handle_skill_save(handler, body):

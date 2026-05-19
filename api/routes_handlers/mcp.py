@@ -1,17 +1,6 @@
 """MCP endpoint handlers re-exported by api.routes."""
 
-import sys
-
-
-def _routes_binding(name: str):
-    routes = sys.modules.get("api.routes")
-    if routes is not None and hasattr(routes, name):
-        return getattr(routes, name)
-    from api import config, helpers
-
-    if hasattr(config, name):
-        return getattr(config, name)
-    return getattr(helpers, name)
+from api.routes_handlers._base import _routes_binding
 
 
 def _handle_mcp_tools_list(handler):

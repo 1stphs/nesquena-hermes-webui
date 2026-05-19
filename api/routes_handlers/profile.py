@@ -3,24 +3,14 @@
 import json
 import logging
 import re
-import sys
 import uuid
 from pathlib import Path
 from urllib.parse import parse_qs
 
+from api.routes_handlers._base import _routes_binding
+
 
 logger = logging.getLogger(__name__)
-
-
-def _routes_binding(name: str):
-    routes = sys.modules.get("api.routes")
-    if routes is not None and hasattr(routes, name):
-        return getattr(routes, name)
-    from api import helpers
-
-    if hasattr(helpers, name):
-        return getattr(helpers, name)
-    raise AttributeError(name)
 
 
 def _known_profile_memory_roots() -> tuple[Path, Path, set[Path]]:

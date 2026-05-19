@@ -1,16 +1,8 @@
 """Memory endpoint handlers re-exported by api.routes."""
 
 from pathlib import Path
-import sys
 
-
-def _routes_binding(name: str):
-    routes = sys.modules.get("api.routes")
-    if routes is not None and hasattr(routes, name):
-        return getattr(routes, name)
-    from api import helpers
-
-    return getattr(helpers, name)
+from api.routes_handlers._base import _routes_binding
 
 
 def _handle_memory_read(handler):
