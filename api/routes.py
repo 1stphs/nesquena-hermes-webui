@@ -248,6 +248,9 @@ from api.routes_handlers.mcp import (
 from api.routes_handlers.memory import (
     _handle_memory_read,
 )
+from api.routes_handlers.skill import (
+    _handle_skill_save as _handle_skill_save_impl,
+)
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
     """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
     return bad(
@@ -7573,31 +7576,7 @@ def _handle_profile_agent_update(handler, body):
 
 
 def _handle_skill_save(handler, body):
-    try:
-        require(body, "name", "content")
-    except ValueError as e:
-        return bad(handler, str(e))
-    skill_name = body["name"].strip().lower().replace(" ", "-")
-    if not skill_name or "/" in skill_name or ".." in skill_name:
-        return bad(handler, "Invalid skill name")
-    category = body.get("category", "").strip()
-    if category and ("/" in category or ".." in category):
-        return bad(handler, "Invalid category")
-    from tools.skills_tool import SKILLS_DIR
-
-    if category:
-        skill_dir = SKILLS_DIR / category / skill_name
-    else:
-        skill_dir = SKILLS_DIR / skill_name
-    # Validate resolved path stays within SKILLS_DIR
-    try:
-        skill_dir.resolve().relative_to(SKILLS_DIR.resolve())
-    except ValueError:
-        return bad(handler, "Invalid skill path")
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    skill_file = skill_dir / "SKILL.md"
-    skill_file.write_text(body["content"], encoding="utf-8")
-    return j(handler, {"ok": True, "name": skill_name, "path": str(skill_file)})
+    return _handle_skill_save_impl(handler, body)
 
 
 def _handle_skill_delete(handler, body):
