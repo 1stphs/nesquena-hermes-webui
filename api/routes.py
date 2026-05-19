@@ -24,7 +24,6 @@ import sys
 import threading
 import time
 import uuid
-import re
 from datetime import date as _date, datetime as _datetime, timedelta as _timedelta
 from pathlib import Path
 from contextlib import closing
