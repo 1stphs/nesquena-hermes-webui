@@ -12,23 +12,50 @@ if str(REPO_ROOT) not in sys.path:
 
 
 def _reload_profiles_module(base_home: Path):
+    import api as api_package
+
+    old_base_home = os.environ.get("HERMES_BASE_HOME")
+    old_hermes_home = os.environ.get("HERMES_HOME")
     os.environ["HERMES_BASE_HOME"] = str(base_home)
     os.environ["HERMES_HOME"] = str(base_home)
 
-    # Save the original module references so we can restore them after the test.
-    # Permanently deleting api.config / api.profiles from sys.modules breaks
-    # subsequent tests that import these modules and expect consistent state.
-    _saved = {name: sys.modules[name] for name in ["api.config", "api.profiles"]
-              if name in sys.modules}
+    saved_modules = {
+        name: sys.modules[name]
+        for name in ["api.config", "api.profiles"]
+        if name in sys.modules
+    }
+    saved_attrs = {
+        name: (hasattr(api_package, name), getattr(api_package, name, None))
+        for name in ["config", "profiles"]
+    }
 
     for name in ["api.config", "api.profiles"]:
-        if name in sys.modules:
-            del sys.modules[name]
+        sys.modules.pop(name, None)
 
-    profiles = importlib.import_module("api.profiles")
-
-    # Restore original modules so the cache stays consistent for the rest of the suite.
-    sys.modules.update(_saved)
+    try:
+        profiles = importlib.import_module("api.profiles")
+    finally:
+        for name in ["api.config", "api.profiles"]:
+            if name in saved_modules:
+                sys.modules[name] = saved_modules[name]
+            else:
+                sys.modules.pop(name, None)
+        for name, (had_attr, value) in saved_attrs.items():
+            if had_attr:
+                setattr(api_package, name, value)
+            else:
+                try:
+                    delattr(api_package, name)
+                except AttributeError:
+                    pass
+        if old_base_home is None:
+            os.environ.pop("HERMES_BASE_HOME", None)
+        else:
+            os.environ["HERMES_BASE_HOME"] = old_base_home
+        if old_hermes_home is None:
+            os.environ.pop("HERMES_HOME", None)
+        else:
+            os.environ["HERMES_HOME"] = old_hermes_home
 
     return profiles
 

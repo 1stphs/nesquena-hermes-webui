@@ -11,6 +11,7 @@ def test_load_workspaces_falls_back_to_named_profile_workspace_dir(tmp_path, mon
     state_dir = profile_home / "webui_state"
 
     monkeypatch.setattr(config, "get_config", lambda: {})
+    monkeypatch.setattr("api.profiles.get_active_profile_name", lambda: "myprofile")
     monkeypatch.setattr("api.profiles.get_active_hermes_home", lambda: profile_home)
     monkeypatch.setattr(workspace, "_workspaces_file", lambda: state_dir / "workspaces.json")
 
