@@ -51,80 +51,38 @@ _CLIENT_DISCONNECT_ERRORS = (
 )
 
 # ── Cron run tracking ────────────────────────────────────────────────────────
-# Track job IDs currently being executed so the frontend can poll status.
-_RUNNING_CRON_JOBS: dict[str, float] = {}  # job_id → start_timestamp
-_RUNNING_CRON_LOCK = threading.Lock()
-_CRON_OUTPUT_CONTENT_LIMIT = 8000
-_CRON_OUTPUT_HEADER_CONTEXT = 200
-_MESSAGING_RAW_SOURCES = {str(s).strip().lower() for s in MESSAGING_SOURCES}
-_MESSAGING_SESSION_METADATA_CACHE: dict[str, object] = {
-    "path": None,
-    "mtime": None,
-    "identity": {},
-}
-_MESSAGING_SESSION_METADATA_LOCK = threading.Lock()
-_STALE_MESSAGING_END_REASONS = {"session_reset", "session_switch"}
-
-
-# ── Profile-scoped session/project filtering (#1611, #1614) ────────────────
-#
-# Sessions and projects are stored in the WebUI sidecar without per-row
-# isolation by default — they're tagged with a `profile` field but every
-# query saw all rows. The fix scopes both endpoints to the active profile
-# by default, with `?all_profiles=1` opting into aggregate mode.
-#
-# Renamed-root profile handling (#1612): a row tagged `profile='default'`
-# matches the active root regardless of the root's display name, and a row
-# tagged with the renamed-root display name (e.g. 'kinni') likewise matches
-# when the active profile is `'default'`. _is_root_profile() is the
-# canonical check.
-
-def _profiles_match(row_profile, active_profile) -> bool:
-    """Return True if a session/project row's profile matches the active profile.
-
-    Treats both the literal alias 'default' and any renamed-root display name
-    (per _is_root_profile) as equivalent, so legacy rows tagged 'default'
-    still surface when the user has renamed the root profile to e.g. 'kinni',
-    and vice versa.
-
-    A row with no profile (`None` or empty string) is treated as belonging to
-    the root profile — that's the convention used by the legacy backfill at
-    api/models.py::all_sessions, and matches the default seen in
-    `static/sessions.js` (`S.activeProfile||'default'`).
-    """
-    from api.profiles import _is_root_profile
-
-    row = row_profile or 'default'
-    active = active_profile or 'default'
-    if row == active:
-        return True
-    # Cross-alias the renamed root.
-    if _is_root_profile(row) and _is_root_profile(active):
-        return True
-    return False
-
-
-def _all_profiles_query_flag(parsed_url) -> bool:
-    """Return True if the request URL has `?all_profiles=1` (or true/yes).
-
-    Centralizes the opt-in parsing so /api/sessions and /api/projects use
-    the same shape. Accepts 1/true/yes (case-insensitive) for ergonomics.
-    """
-    qs = parse_qs(parsed_url.query)
-    raw = qs.get('all_profiles', [''])[0].strip().lower()
-    return raw in ('1', 'true', 'yes', 'on')
-
-
-def _requested_sessions_profile(parsed_url) -> str | None:
-    """Return the optional profile override for /api/sessions."""
-    qs = parse_qs(parsed_url.query)
-    requested_profile = qs.get('hermes_profile', [''])[0].strip()
-    if not requested_profile:
-        return None
-    from api.profiles import _PROFILE_ID_RE
-    if requested_profile != 'default' and not _PROFILE_ID_RE.fullmatch(requested_profile):
-        raise ValueError('invalid profile')
-    return requested_profile
+from api.routes_helpers.cron import (
+    _RUNNING_CRON_JOBS,
+    _RUNNING_CRON_LOCK,
+    _CRON_OUTPUT_CONTENT_LIMIT,
+    _CRON_OUTPUT_HEADER_CONTEXT,
+    _mark_cron_running,
+    _mark_cron_done,
+    _is_cron_running,
+    _cron_response_marker_index,
+    _cron_output_content_window,
+    _cron_job_for_api,
+    _cron_jobs_for_api,
+    _normalize_cron_profile_lookup_name,
+    _available_cron_profile_names,
+    _normalize_cron_profile_value,
+    _profile_home_for_cron_job,
+    _profile_home_for_cron_profile_name,
+    _parse_cron_calendar_month,
+    _cron_job_frequency,
+    _parse_iso_date,
+    _days_from_next_run,
+    _all_days,
+    _parse_int_set,
+    _cron_dow_value,
+    _cron_expr_days,
+    _weekday_days,
+    _cron_calendar_days_for_job,
+    _cron_calendar_entry,
+    _cron_subprocess_result_timeout_seconds,
+    _run_cron_job_in_profile_subprocess_impl,
+    _run_cron_tracked as _run_cron_tracked_impl,
+)
 
 # ── SSE app-level heartbeat (#1623) ────────────────────────────────────────
 #
@@ -588,192 +546,70 @@ def _cron_subprocess_result_timeout_seconds(job):
 
 
 def _run_cron_job_in_profile_subprocess(job, execution_profile_home):
-    """Execute cron.scheduler.run_job without holding the parent cron env lock.
-
-    cron.scheduler/cron.jobs still rely on process-global HERMES_HOME and module
-    constants, so running the job body in a child process gives each long cron
-    execution its own globals. The parent process only uses cron_profile_context
-    for short metadata reads/writes and remains responsive to unrelated cron UI
-    and API calls while the job runs.
-    """
+    """Execute cron.scheduler.run_job using a spawn child process."""
     import multiprocessing
-    import queue
 
     ctx = multiprocessing.get_context("spawn")
-    result_queue = ctx.Queue(maxsize=1)
-    process = ctx.Process(
+    return _run_cron_job_in_profile_subprocess_impl(
+        job,
+        execution_profile_home,
+        ctx,
         target=_cron_job_subprocess_main,
-        args=(job, execution_profile_home, result_queue),
     )
-    process.start()
 
-    result_timeout = _cron_subprocess_result_timeout_seconds(job)
-    status = "error"
-    payload = ["cron run subprocess failed before producing a result", ""]
+
+def _cron_job_subprocess_main(job, execution_profile_home, result_queue):
+    """Run one cron job inside a child process pinned to a profile home."""
     try:
-        try:
-            # Drain the potentially large pickled result before joining.  If the
-            # child puts >~64 KiB on a multiprocessing.Queue, joining first can
-            # deadlock while the child's feeder thread waits for the parent to
-            # read from the pipe.
-            status, *payload = result_queue.get(timeout=result_timeout)
-        except queue.Empty:
-            status = "error"
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=5)
-                payload = [
-                    f"cron run subprocess produced no result within {result_timeout:g}s and was terminated",
-                    "",
-                ]
-            else:
-                payload = [
-                    f"cron run subprocess exited with code {process.exitcode} without producing a result",
-                    "",
-                ]
-        finally:
-            process.join(timeout=5)
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=5)
-                if status == "ok":
-                    status = "error"
-                    payload = [
-                        "cron run subprocess did not exit after returning a result",
-                        "",
-                    ]
-    finally:
-        result_queue.close()
-        result_queue.join_thread()
+        def _run():
+            from cron.scheduler import run_job
 
-    if status == "ok":
-        return payload[0]
+            return run_job(job)
 
-    message = payload[0]
-    traceback_text = payload[1] if len(payload) > 1 else ""
-    if traceback_text:
-        logger.error("Manual cron subprocess failed:\n%s", traceback_text)
-    raise RuntimeError(message)
+        if execution_profile_home is None:
+            result = _run()
+        else:
+            from api.profiles import cron_profile_context_for_home
+
+            with cron_profile_context_for_home(execution_profile_home):
+                result = _run()
+        result_queue.put(("ok", result))
+    except BaseException as exc:  # pragma: no cover - surfaced in parent
+        import traceback
+
+        result_queue.put(("error", f"{type(exc).__name__}: {exc}", traceback.format_exc()))
 
 
 def _run_cron_tracked(job, profile_home=None, execution_profile_home=None):
-    """Wrapper that tracks running state around cron.scheduler.run_job.
-
-    ``profile_home`` is the cron store that owns the job row/output metadata.
-    ``execution_profile_home`` is the selected per-job profile used to load
-    agent config/.env while running. When no job profile is selected, both homes
-    are the same and legacy server-default behavior is preserved.
-    """
-    from cron.jobs import mark_job_run, save_job_output
-
-    job_id = job.get("id", "")
-    execution_profile_home = execution_profile_home or profile_home
-
-    def _with_cron_home(home, fn):
-        if home is None:
-            return fn()
-        from api.profiles import cron_profile_context_for_home
-
-        with cron_profile_context_for_home(home):
-            return fn()
-
-    try:
-        success, output, final_response, error = _run_cron_job_in_profile_subprocess(
-            job, execution_profile_home
-        )
-
-        # Persist output and run metadata back to the job's owning cron store,
-        # even when the selected execution profile is different.
-        def _persist_success():
-            save_job_output(job_id, output)
-
-            # Match the scheduled cron path: an apparently successful run with no
-            # final response should not leave the job looking healthy.
-            _success, _error = success, error
-            if _success and not final_response:
-                _success = False
-                _error = "Agent completed but produced empty response (model error, timeout, or misconfiguration)"
-
-            mark_job_run(job_id, _success, _error)
-
-        _with_cron_home(profile_home, _persist_success)
-    except Exception as e:
-        logger.exception("Manual cron run failed for job %s", job_id)
-        try:
-            _with_cron_home(profile_home, lambda: mark_job_run(job_id, False, str(e)))
-        except Exception:
-            logger.debug("Failed to mark manual cron run failure for %s", job_id)
-    finally:
-        _mark_cron_done(job_id)
-
-_PROVIDER_ALIASES = {
-    "claude": "anthropic",
-    "gpt": "openai",
-    "gemini": "google",
-    "openai-codex": "openai",
-}
-
-# OpenAI-compatible /v1/models endpoints for live model discovery.
-# Used as fallback when hermes_cli.provider_model_ids() is unavailable or
-# returns [] for a provider (#871).  Kept at module level so the dict is
-# built once, not reconstructed per request.
-_OPENAI_COMPAT_ENDPOINTS = {
-    "zai": "https://api.z.ai/v1",
-    "minimax": "https://api.minimax.chat/v1",
-    "mistralai": "https://api.mistral.ai/v1",
-    "xai": "https://api.x.ai/v1",
-    "deepseek": "https://api.deepseek.com",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
-    "nvidia": "https://integrate.api.nvidia.com/v1",
-}
-# NOTE: "openai-codex" is excluded because it maps to the same endpoint as
-# the base "openai" provider (api.openai.com/v1).  When both are configured
-# the openai provider is already wired through provider_model_ids(); codex-
-# specific model filtering happens downstream in hermes_cli.
-#
-_LIVE_MODELS_CACHE_TTL = 60.0
-_LIVE_MODELS_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
-_LIVE_MODELS_CACHE_LOCK = threading.RLock()
+    """Wrapper that tracks running state around cron.scheduler.run_job."""
+    return _run_cron_tracked_impl(
+        job,
+        profile_home,
+        execution_profile_home,
+        run_job_subprocess=_run_cron_job_in_profile_subprocess,
+    )
 
 
-def _active_profile_for_live_models_cache() -> str:
-    try:
-        from api.profiles import get_active_profile_name
-
-        return get_active_profile_name() or "default"
-    except Exception as _e:
-        # A transient profile-resolution error mis-scopes the cache for up to
-        # 60s ("default" gets the wrong payload). Log so we can detect it; the
-        # blast radius stays small because the TTL caps the bad-cache window.
-        logger.debug("_active_profile_for_live_models_cache fell back to 'default': %s", _e)
-        return "default"
+# ── Profile-scoped session/project filtering (#1611, #1614) ────────────────
+from api.routes_helpers.profile_filter import (
+    _profiles_match,
+    _all_profiles_query_flag,
+    _requested_sessions_profile,
+)
 
 
-def _live_models_cache_key(provider: str) -> tuple[str, str]:
-    return (_active_profile_for_live_models_cache(), provider)
-
-
-def _get_cached_live_models(key: tuple[str, str]) -> dict | None:
-    now = time.monotonic()
-    with _LIVE_MODELS_CACHE_LOCK:
-        cached = _LIVE_MODELS_CACHE.get(key)
-        if not cached:
-            return None
-        ts, payload = cached
-        if now - ts >= _LIVE_MODELS_CACHE_TTL:
-            _LIVE_MODELS_CACHE.pop(key, None)
-            return None
-        return copy.deepcopy(payload)
-
-
-def _set_cached_live_models(key: tuple[str, str], payload: dict) -> None:
-    with _LIVE_MODELS_CACHE_LOCK:
-        _LIVE_MODELS_CACHE[key] = (time.monotonic(), copy.deepcopy(payload))
-
-
-def _clear_live_models_cache() -> None:
-    with _LIVE_MODELS_CACHE_LOCK:
-        _LIVE_MODELS_CACHE.clear()
+from api.routes_helpers.live_models import (
+    _PROVIDER_ALIASES,
+    _OPENAI_COMPAT_ENDPOINTS,
+    _LIVE_MODELS_CACHE_TTL,
+    _LIVE_MODELS_CACHE,
+    _LIVE_MODELS_CACHE_LOCK,
+    _active_profile_for_live_models_cache,
+    _live_models_cache_key,
+    _get_cached_live_models,
+    _set_cached_live_models,
+    _clear_live_models_cache,
+)
 
 from api.config import (
     STATE_DIR,
@@ -823,8 +659,6 @@ from api.helpers import (
 )
 from api.agent_health import build_agent_health_payload
 from api.system_health import build_system_health_payload
-
-
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
     """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
     return bad(
@@ -940,781 +774,30 @@ def _clear_stale_stream_state(session) -> bool:
     return True
 
 # ── CSRF: validate Origin/Referer on POST ────────────────────────────────────
-import re as _re
-
-
-def _normalize_host_port(value: str) -> tuple[str, str | None]:
-    """Split a host or host:port string into (hostname, port|None).
-    Handles IPv6 bracket notation, e.g. [::1]:8080."""
-    value = value.strip().lower()
-    if not value:
-        return '', None
-    if value.startswith('['):
-        end = value.find(']')
-        if end != -1:
-            host = value[1:end]
-            rest = value[end + 1 :]
-            if rest.startswith(':') and rest[1:].isdigit():
-                return host, rest[1:]
-            return host, None
-    if value.count(':') == 1:
-        host, port = value.rsplit(':', 1)
-        if port.isdigit():
-            return host, port
-    return value, None
-
-
-def _ports_match(origin_scheme: str, origin_port: str | None, allowed_port: str | None) -> bool:
-    """Return True when two ports should be considered equivalent, scheme-aware.
-
-    Treats an absent port as the scheme default: port 80 for http, port 443 for https.
-    Port 80 is NOT treated as equivalent to 443 (different protocols = different origins).
-    """
-    if origin_port == allowed_port:
-        return True
-    # Determine the default port for the origin's scheme
-    default = '443' if origin_scheme == 'https' else '80'
-    if not origin_port and allowed_port == default:
-        return True
-    if not allowed_port and origin_port == default:
-        return True
-    return False
-
-
-def _allowed_public_origins() -> set[str]:
-    """Parse HERMES_WEBUI_ALLOWED_ORIGINS env var (comma-separated) into a set.
-
-    Each entry must include the scheme, e.g. https://myapp.example.com:8000.
-    Entries without a scheme are silently skipped and a warning is printed.
-    """
-    raw = os.getenv('HERMES_WEBUI_ALLOWED_ORIGINS', '')
-    result = set()
-    for value in raw.split(','):
-        value = value.strip().rstrip('/').lower()
-        if not value:
-            continue
-        if not (value.startswith('http://') or value.startswith('https://')):
-            import sys
-            print(
-                f"[webui] WARNING: HERMES_WEBUI_ALLOWED_ORIGINS entry {value!r} is missing "
-                f"the scheme (expected https://hostname or http://hostname). Entry ignored.",
-                flush=True, file=sys.stderr,
-            )
-            continue
-        result.add(value)
-    return result
-
-
-def _env_truthy(name: str) -> bool:
-    return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'on'}
-
-
-def _check_csrf(handler) -> bool:
-    """Reject cross-origin POST requests. Returns True if OK."""
-    if _env_truthy('HERMES_WEBUI_CORS_ALLOW_ALL'):
-        return True
-    origin = handler.headers.get("Origin", "")
-    referer = handler.headers.get("Referer", "")
-    host = handler.headers.get("Host", "")
-    if not origin and not referer:
-        return True  # non-browser clients (curl, agent) have no Origin
-    target = origin or referer
-    # Extract host:port from origin/referer
-    m = _re.match(r"^https?://([^/]+)", target)
-    if not m:
-        return False
-    origin_host = m.group(1)
-    origin_scheme = m.group(0).split('://')[0].lower()  # 'http' or 'https'
-    origin_name, origin_port = _normalize_host_port(origin_host)
-    # Check against explicitly allowed public origins (env var)
-    origin_value = m.group(0).rstrip('/').lower()
-    if origin_value in _allowed_public_origins():
-        return True
-    # Allow same-origin: check Host, X-Forwarded-Host (reverse proxy), and
-    # X-Real-Host against the origin. Reverse proxies (Caddy, nginx) set
-    # X-Forwarded-Host to the client's original Host header.
-    allowed_hosts = [
-        h.strip()
-        for h in [
-            host,
-            handler.headers.get("X-Forwarded-Host", ""),
-            handler.headers.get("X-Real-Host", ""),
-        ]
-        if h.strip()
-    ]
-    for allowed in allowed_hosts:
-        allowed_name, allowed_port = _normalize_host_port(allowed)
-        if origin_name == allowed_name and _ports_match(origin_scheme, origin_port, allowed_port):
-            return True
-    return False
-
-
-def _normalize_provider_id(value: str | None) -> str:
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return ""
-    if raw in _PROVIDER_ALIASES:
-        return _PROVIDER_ALIASES[raw]
-    for prefix, normalized in (
-        ("openai-codex", "openai"),
-        ("openai", "openai"),
-        ("anthropic", "anthropic"),
-        ("claude", "anthropic"),
-        ("google", "google"),
-        ("gemini", "google"),
-        ("openrouter", "openrouter"),
-        ("custom", "custom"),
-    ):
-        if raw.startswith(prefix):
-            return normalized
-    # Unknown prefix — return empty so callers treat it as "no match" and pass
-    # the model through unchanged rather than incorrectly stripping it.
-    return "" 
-
-
-def _catalog_provider_id_sets(catalog: dict) -> tuple[set[str], set[str]]:
-    raw_provider_ids: set[str] = set()
-    normalized_provider_ids: set[str] = set()
-    for group in catalog.get("groups") or []:
-        raw = str(group.get("provider_id") or "").strip().lower()
-        if not raw:
-            continue
-        raw_provider_ids.add(raw)
-        normalized = _normalize_provider_id(raw)
-        if normalized:
-            normalized_provider_ids.add(normalized)
-    return raw_provider_ids, normalized_provider_ids
-
-
-def _catalog_has_provider(
-    provider_raw: str,
-    provider_normalized: str,
-    raw_provider_ids: set[str],
-    normalized_provider_ids: set[str],
-) -> bool:
-    return (
-        provider_raw in raw_provider_ids
-        or (provider_normalized and provider_normalized in raw_provider_ids)
-        or (provider_normalized and provider_normalized in normalized_provider_ids)
-    )
-
-
-def _model_matches_active_provider_family(
-    model: str,
-    active_provider: str,
-) -> bool:
-    model_lower = model.lower()
-    for bare_prefix in ("gpt", "claude", "gemini"):
-        if model_lower.startswith(bare_prefix):
-            return _normalize_provider_id(bare_prefix) == active_provider
-    return False
-
-
-def _catalog_model_id_matches(candidate: str, model: str) -> bool:
-    candidate = str(candidate or "").strip()
-    if candidate.startswith("@") and ":" in candidate:
-        candidate = candidate.rsplit(":", 1)[1]
-    if "/" in candidate:
-        candidate = candidate.split("/", 1)[1]
-    return candidate.replace("-", ".").lower() == model.replace("-", ".").lower()
-
-
-def _clean_session_model_provider(value: str | None) -> str | None:
-    provider = str(value or "").strip().lower()
-    if not provider or provider == "default":
-        return None
-    if provider.startswith("@"):
-        provider = provider[1:]
-    return provider or None
-
-
-def _split_provider_qualified_model(model: str) -> tuple[str, str | None]:
-    model = str(model or "").strip()
-    if model.startswith("@") and ":" in model:
-        provider_hint, bare_model = model[1:].rsplit(":", 1)
-        provider = _clean_session_model_provider(provider_hint)
-        bare = bare_model.strip()
-        if provider and bare:
-            return bare, provider
-    return model, None
-
-
-def _should_attach_codex_provider_context(model: str, raw_active_provider: str, catalog: dict) -> bool:
-    """Return True when a bare Codex model needs separate provider context.
-
-    OpenAI, OpenAI Codex, Copilot, and OpenRouter can all expose GPT-looking
-    bare names. If a session stores only ``gpt-...`` while Codex is active, a
-    later provider-list/default-model round trip can lose the user's Codex
-    choice. Store the provider separately instead of converting the persisted
-    model to ``@openai-codex:model``.
-    """
-    if raw_active_provider != "openai-codex":
-        return False
-    if not model.lower().startswith("gpt"):
-        return False
-    for group in catalog.get("groups") or []:
-        if str(group.get("provider_id") or "").strip().lower() != "openai-codex":
-            continue
-        return any(
-            _catalog_model_id_matches(entry.get("id"), model)
-            for entry in group.get("models", [])
-            if isinstance(entry, dict)
-        )
-    return False
-
-
-def _resolve_compatible_session_model_state(
-    model_id: str | None,
-    model_provider: str | None = None,
-) -> tuple[str, str | None, bool]:
-    """Return (effective_model, effective_provider, model_was_normalized).
-
-    Sessions can outlive provider changes. When an older session still points at
-    a different provider namespace (for example `gemini/...` after switching the
-    agent to OpenAI Codex), reusing that stale model causes chat startup to hit
-    the wrong backend and fail. Normalize only obvious cross-provider mismatches.
-    When a model has an explicit provider context, keep the model string itself
-    in its picker/API shape and carry the provider as separate state.
-    """
-    catalog = get_available_models()
-    default_model = str(catalog.get("default_model") or DEFAULT_MODEL or "").strip()
-    model = str(model_id or "").strip()
-    requested_provider = _clean_session_model_provider(model_provider)
-    if not model:
-        return default_model, requested_provider, bool(default_model)
-
-    active_provider = _normalize_provider_id(catalog.get("active_provider"))
-    # Also keep the raw active_provider slug for cross-provider detection with
-    # non-listed providers (ollama-cloud, deepseek, xai, etc.) that _normalize_provider_id
-    # returns "" for. If the raw provider is set but normalization returned "", we still
-    # want to detect that a session model from a known provider (e.g. openai/gpt-5.4-mini)
-    # is stale relative to this unknown active provider. (#1023)
-    raw_active_provider = str(catalog.get("active_provider") or "").strip().lower()
-    if not active_provider and not raw_active_provider:
-        bare_model, explicit_provider = _split_provider_qualified_model(model)
-        return model, explicit_provider or requested_provider, False
-
-    bare_for_context, explicit_provider = _split_provider_qualified_model(model)
-    if requested_provider and not explicit_provider:
-        return model, requested_provider, False
-
-    if model.startswith("@") and ":" in model:
-        provider_raw = explicit_provider or ""
-        provider_normalized = _normalize_provider_id(provider_raw)
-        bare_model = bare_for_context.strip()
-        if not provider_raw or not bare_model:
-            return model, requested_provider, False
-
-        raw_provider_ids, normalized_provider_ids = _catalog_provider_id_sets(catalog)
-        hint_matches_active = (
-            provider_raw == raw_active_provider
-            or provider_raw == active_provider
-            or (provider_normalized and provider_normalized == active_provider)
-        )
-        if hint_matches_active:
-            # The @provider:model hint explicitly names the active provider, so this
-            # selection is intentional — not a stale cross-provider artifact. Return
-            # the full @provider:model string unchanged so downstream (resolve_model_provider
-            # in config.py) can route through the correct provider. Stripping the prefix
-            # here would collapse duplicate model IDs from different providers back to the
-            # bare ID, causing the first matching provider to win on the next UI render
-            # and the wrong provider to be used for the agent run. (#1253)
-            return model, provider_raw, False
-
-        if _catalog_has_provider(
-            provider_raw,
-            provider_normalized,
-            raw_provider_ids,
-            normalized_provider_ids,
-        ):
-            return model, provider_raw, False
-
-        if _model_matches_active_provider_family(bare_model, active_provider):
-            provider_context = (
-                raw_active_provider
-                if _should_attach_codex_provider_context(bare_model, raw_active_provider, catalog)
-                else None
-            )
-            return bare_model, provider_context, True
-        if default_model:
-            provider_context = (
-                raw_active_provider
-                if _should_attach_codex_provider_context(default_model, raw_active_provider, catalog)
-                else None
-            )
-            return default_model, provider_context, True
-        return model, provider_raw, False
-
-    slash = model.find("/")
-    if slash < 0:
-        model_lower = model.lower()
-        for bare_prefix in ("gpt", "claude", "gemini"):
-            if model_lower.startswith(bare_prefix):
-                model_provider = _normalize_provider_id(bare_prefix)
-                if model_provider and model_provider != active_provider and default_model:
-                    provider_context = (
-                        raw_active_provider
-                        if _should_attach_codex_provider_context(default_model, raw_active_provider, catalog)
-                        else None
-                    )
-                    return default_model, provider_context, True
-                provider_context = (
-                    raw_active_provider
-                    if _should_attach_codex_provider_context(model, raw_active_provider, catalog)
-                    else requested_provider
-                )
-                return model, provider_context, False
-        return model, requested_provider, False
-
-    model_provider = _normalize_provider_id(model[:slash])
-
-    # For custom/openrouter active providers: only skip normalization when the
-    # model's namespace prefix is actually routable by a group in the catalog.
-    # A user who only has custom_providers configured (active_provider="custom")
-    # with a stale session model like "openai/gpt-5.4-mini" would otherwise
-    # never get cleaned up, causing "(unavailable)" to appear in the picker.
-    if active_provider in {"custom", "openrouter"}:
-        # These namespaces are always routable as-is — preserve them.
-        if model_provider in {"", "custom", "openrouter"}:
-            return model, requested_provider, False
-        # Check if any catalog group can actually route this model's prefix.
-        groups = catalog.get("groups") or []
-        routable_provider_ids = {
-            _normalize_provider_id(g.get("provider_id") or "") for g in groups
-        }
-        # openrouter group can route any provider/model namespace
-        has_openrouter_group = any(
-            (g.get("provider_id") or "") == "openrouter" for g in groups
-        )
-        if model_provider in routable_provider_ids or has_openrouter_group:
-            return model, requested_provider, False
-        # Model prefix is not routable — stale cross-provider reference, clear it.
-        if default_model:
-            return default_model, requested_provider, True
-        return model, requested_provider, False
-
-    # Skip normalization for models on custom/openrouter namespaces — these are
-    # user-controlled and should never be silently replaced.
-    #
-    # OpenAI Codex is intentionally normalized to the OpenAI family above so bare
-    # GPT IDs survive provider switches. Slash-qualified OpenAI IDs are different:
-    # ``openai/gpt-...`` is the OpenRouter shape for OpenAI models, and
-    # resolve_model_provider() routes that through OpenRouter when Codex is the
-    # configured provider. Legacy sessions can carry that stale slash ID without
-    # a saved model_provider, so repair it to the active Codex default unless the
-    # session/request explicitly says it is an OpenRouter selection. (#1734)
-    if (
-        raw_active_provider == "openai-codex"
-        and model_provider == "openai"
-        and requested_provider is None
-        and default_model
-    ):
-        # Persist provider_context = "openai-codex" unconditionally on this
-        # repair path so the resolved shape is stable across resolutions
-        # (Opus stage-303 SHOULD-FIX: avoid redundant repair-writes per
-        # chat-start when the catalog-coverage check fails — e.g. if a
-        # future Codex default is itself slash-prefixed). Once we've
-        # decided the session belongs to Codex, persist that decision.
-        return default_model, raw_active_provider, True
-
-    # Also normalize when the model is from a known provider but the active provider
-    # is an unlisted one (e.g. ollama-cloud) — active_provider is "" in that case
-    # but raw_active_provider is set. If model_provider doesn't start with the raw
-    # active provider name, the session model is stale. (#1023)
-    _active_for_compare = active_provider or raw_active_provider
-    if model_provider and model_provider not in {"", "custom", "openrouter"} and model_provider != _active_for_compare and default_model:
-        return default_model, requested_provider, True
-    return model, requested_provider, False
-
-
-def _resolve_compatible_session_model(model_id: str | None) -> tuple[str, bool]:
-    """Return (effective_model, model_was_normalized) for legacy callers."""
-    effective_model, _provider, changed = _resolve_compatible_session_model_state(model_id)
-    return effective_model, changed
-
-
-def _normalize_session_model_in_place(session) -> str:
-    original_model = getattr(session, "model", None) or ""
-    original_provider = _clean_session_model_provider(
-        getattr(session, "model_provider", None)
-    )
-    effective_model, effective_provider, changed = _resolve_compatible_session_model_state(
-        original_model or None,
-        original_provider,
-    )
-    provider_changed = effective_provider != original_provider
-    # Only persist the correction if the session had an explicit model that needed changing.
-    # Sessions with no model stored (empty/None) get the effective default returned without
-    # a disk write — no need to rebuild the index for a fill-in-blank operation.
-    if original_model and effective_model and (
-        (changed and original_model != effective_model) or provider_changed
-    ):
-        if changed and original_model != effective_model:
-            session.model = effective_model
-        session.model_provider = effective_provider
-        session.save(touch_updated_at=False)
-    return effective_model
-
-
-def _resolve_effective_session_model_for_display(session) -> str:
-    """Resolve the model a session should display without mutating persisted state.
-
-    `GET /api/session` should stay side-effect free. If a stale persisted model
-    needs normalization for the current provider configuration, return the
-    effective model for the response payload only and leave disk state alone.
-    """
-    original_model = getattr(session, "model", None) or ""
-    effective_model, _provider, _changed = _resolve_compatible_session_model_state(
-        original_model or None,
-        getattr(session, "model_provider", None),
-    )
-    return effective_model or original_model
-
-def _resolve_effective_session_model_provider_for_display(session) -> str | None:
-    original_model = getattr(session, "model", None) or ""
-    _model, provider, _changed = _resolve_compatible_session_model_state(
-        original_model or None,
-        getattr(session, "model_provider", None),
-    )
-    return provider
-
-
-def _session_model_state_from_request(
-    model: str | None,
-    requested_provider: str | None,
-    current_provider: str | None = None,
-) -> tuple[str | None, str | None]:
-    model_value = str(model).strip() if model is not None else None
-    provider = (
-        _clean_session_model_provider(requested_provider)
-        if requested_provider is not None
-        else None
-    )
-    if model_value:
-        _bare, explicit_provider = _split_provider_qualified_model(model_value)
-        if explicit_provider:
-            provider = explicit_provider
-        elif requested_provider is None:
-            provider = _clean_session_model_provider(current_provider)
-        model_value, provider, _changed = _resolve_compatible_session_model_state(
-            model_value,
-            provider,
-        )
-    return model_value, provider
-
-
-def _lookup_gateway_session_identity(session_id: str) -> dict:
-    if not session_id:
-        return {}
-    metadata = _load_gateway_session_identity_map().get(str(session_id))
-    return metadata if isinstance(metadata, dict) else {}
-
-
-def _lookup_cli_session_metadata(session_id: str) -> dict:
-    if not session_id:
-        return {}
-    try:
-        for row in get_cli_sessions():
-            if row.get("session_id") == session_id:
-                return row
-    except Exception:
-        return {}
-    return {}
-
-
-def _messaging_session_identity(session: dict, raw_source: str) -> str:
-    metadata = _lookup_gateway_session_identity(session.get("session_id"))
-    session_key = _safe_first(
-        metadata.get("session_key"),
-        session.get("session_key"),
-        session.get("gateway_session_key"),
-    )
-    if session_key:
-        return f"{raw_source}|session_key:{session_key}"
-
-    chat_id = _safe_first(
-        metadata.get("chat_id"),
-        session.get("chat_id"),
-        session.get("origin_chat_id"),
-    )
-    thread_id = _safe_first(metadata.get("thread_id"), session.get("thread_id"))
-    chat_type = _safe_first(metadata.get("chat_type"), session.get("chat_type"))
-    user_id = _safe_first(
-        metadata.get("user_id"),
-        session.get("user_id"),
-        session.get("origin_user_id"),
-    )
-
-    identity_parts = []
-    if chat_type:
-        identity_parts.append(f"chat_type:{chat_type}")
-    if chat_id:
-        identity_parts.append(f"chat_id:{chat_id}")
-    if thread_id:
-        identity_parts.append(f"thread_id:{thread_id}")
-    if user_id:
-        identity_parts.append(f"user_id:{user_id}")
-
-    if identity_parts:
-        return f"{raw_source}|" + "|".join(identity_parts)
-    return raw_source
-
-
-def _session_messaging_raw_source(session: dict) -> str:
-    raw = _safe_first(
-        session.get("raw_source"),
-        session.get("source_tag"),
-        session.get("source"),
-        session.get("platform"),
-    )
-    if not raw:
-        raw = session.get("source_label") or "messaging"
-    return _normalize_messaging_source(raw)
-
-
-def _has_durable_messaging_identity(session: dict) -> bool:
-    metadata = _lookup_gateway_session_identity(session.get("session_id"))
-    return bool(_safe_first(
-        metadata.get("session_key"),
-        session.get("session_key"),
-        session.get("gateway_session_key"),
-        metadata.get("chat_id"),
-        session.get("chat_id"),
-        session.get("origin_chat_id"),
-        metadata.get("thread_id"),
-        session.get("thread_id"),
-    ))
-
-
-def _numeric_count(value) -> int:
-    try:
-        return int(float(_safe_first(value, 0) or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _should_hide_stale_messaging_session(
-    session: dict,
-    active_gateway_session_ids: set[str],
-    active_gateway_sources: set[str],
-) -> bool:
-    """Hide stale Gateway-owned internal rows after an external chat moved on.
-
-    Hermes Gateway keeps the external conversation identity in sessions.json.
-    Compression/session-reset can leave old Agent state.db rows behind; those
-    rows are implementation segments, not distinct conversations users chose.
-    Only apply this aggressive hiding when Gateway is currently advertising an
-    active session for the same messaging source. Without that source-of-truth
-    file we keep the old fallback behavior.
-    """
-    raw_source = _session_messaging_raw_source(session)
-    if not _is_known_messaging_source(raw_source):
-        return False
-    if not active_gateway_session_ids or raw_source not in active_gateway_sources:
-        return False
-
-    sid = _safe_first(session.get("session_id"))
-    if sid and sid in active_gateway_session_ids:
-        return False
-
-    if _safe_first(session.get("end_reason")) in _STALE_MESSAGING_END_REASONS:
-        return True
-
-    if not _has_durable_messaging_identity(session):
-        return True
-
-    if session.get("parent_session_id"):
-        return True
-
-    message_count = _numeric_count(session.get("message_count"))
-    actual_count = _numeric_count(session.get("actual_message_count"))
-    if message_count <= 0 and actual_count <= 0:
-        return True
-
-    return False
-
-
-def _is_messaging_session_record(session) -> bool:
-    """Return true for sessions backed by external messaging channels."""
-    if not session:
-        return False
-    if (
-        (getattr(session, "session_source", None) if not isinstance(session, dict) else session.get("session_source")) == "messaging"
-    ):
-        return True
-    raw = _safe_first(
-        getattr(session, "raw_source", None) if not isinstance(session, dict) else session.get("raw_source"),
-        getattr(session, "source_tag", None) if not isinstance(session, dict) else session.get("source_tag"),
-        getattr(session, "source", None) if not isinstance(session, dict) else session.get("source"),
-        session.get("source_label") if isinstance(session, dict) else None,
-    )
-    return _is_known_messaging_source(raw)
-
-
-def _is_messaging_session_id(sid: str) -> bool:
-    """Detect messaging-backed sessions from WebUI metadata or Agent rows."""
-    try:
-        session = Session.load(sid)
-        if _is_messaging_session_record(session):
-            return True
-    except Exception:
-        pass
-    return _is_messaging_session_record(_lookup_cli_session_metadata(sid))
-
-
-def _session_sort_timestamp(session: dict) -> float:
-    return float(
-        _safe_first(
-            session.get("last_message_at"),
-            session.get("updated_at"),
-            session.get("created_at"),
-            session.get("started_at"),
-            0,
-        ) or 0
-    ) or 0.0
-
-
-def _is_cli_session_for_settings(session: dict) -> bool:
-    """Return True for importable CLI sessions that are safe to classify for settings."""
-    if not isinstance(session, dict):
-        return False
-    if is_cli_session_row(session):
-        return True
-
-    # Fallback for legacy local copies that had weak/empty metadata:
-    # keep this conservative so messaging sessions do not collapse incorrectly.
-    if not session.get("is_cli_session"):
-        return False
-    source = str(session.get("source") or "").strip().lower()
-    if source in MESSAGING_SOURCES:
-        return False
-    title = str(session.get("title") or "").strip().lower()
-    return title in ("", "untitled", "cli", "cli session") or title.endswith(" session") and (
-        not source or source == "cli"
-    )
-
-
-CLI_VISIBLE_SESSION_CAP = 20
-
-
-def _cap_recent_cli_sessions(sessions: list[dict], cli_cap: int = CLI_VISIBLE_SESSION_CAP) -> list[dict]:
-    """Keep only the most recent CLI-visible sessions after filtering."""
-    if cli_cap <= 0:
-        return sessions
-    kept = []
-    cli_seen = 0
-    for session in sessions:
-        if _is_cli_session_for_settings(session):
-            cli_seen += 1
-            if cli_seen > cli_cap:
-                continue
-        kept.append(session)
-    return kept
-
-
-def _merge_cli_sidebar_metadata(ui_session: dict, cli_meta: dict) -> dict:
-    """Merge source-of-truth CLI metadata into a sidebar session row.
-
-    Preserve UI-owned state (archived/pinned) while replacing metadata that can
-    legitimately drift in WebUI snapshots.
-    """
-    if not ui_session:
-        return ui_session
-    if not cli_meta:
-        return dict(ui_session)
-    merged = dict(ui_session)
-    merged["is_cli_session"] = True
-    for key in (
-        "source_tag",
-        "raw_source",
-        "session_source",
-        "source_label",
-        "user_id",
-        "chat_id",
-        "chat_type",
-        "thread_id",
-        "session_key",
-        "platform",
-        "parent_session_id",
-        "end_reason",
-        "actual_message_count",
-        "_lineage_root_id",
-        "_lineage_tip_id",
-        "_compression_segment_count",
-    ):
-        value = _safe_first(cli_meta.get(key))
-        if value:
-            merged[key] = value
-
-    if cli_meta.get("created_at") is not None:
-        merged["created_at"] = cli_meta["created_at"]
-    if cli_meta.get("updated_at") is not None:
-        merged["updated_at"] = cli_meta["updated_at"]
-    if cli_meta.get("last_message_at") is not None:
-        merged["last_message_at"] = cli_meta["last_message_at"]
-    if cli_meta.get("message_count") is not None:
-        merged["message_count"] = max(
-            _numeric_count(merged.get("message_count")),
-            _numeric_count(cli_meta.get("message_count")),
-        )
-    elif cli_meta.get("actual_message_count") is not None:
-        merged["message_count"] = max(
-            _numeric_count(merged.get("message_count")),
-            _numeric_count(cli_meta.get("actual_message_count")),
-        )
-
-    if cli_meta.get("title"):
-        current_title = merged.get("title")
-        if not current_title or current_title == "Untitled":
-            merged["title"] = cli_meta["title"]
-
-    if cli_meta.get("model"):
-        if not merged.get("model") or merged.get("model") == "unknown":
-            merged["model"] = cli_meta["model"]
-    return merged
-
-
-def _messaging_source_key(session: dict) -> str | None:
-    raw = _session_messaging_raw_source(session)
-    if not _is_known_messaging_source(raw):
-        return None
-    return _messaging_session_identity(session, raw)
-
-
-def _keep_latest_messaging_session_per_source(sessions: list[dict]) -> list[dict]:
-    """Keep only the newest sidebar row per messaging session identity."""
-    gateway_metadata = _load_gateway_session_identity_map()
-    active_gateway_session_ids = {str(sid) for sid in gateway_metadata.keys() if sid}
-    active_gateway_sources = {
-        _normalize_messaging_source(_safe_first(meta.get("raw_source"), meta.get("platform")))
-        for meta in gateway_metadata.values()
-        if isinstance(meta, dict)
-    }
-    active_gateway_sources = {source for source in active_gateway_sources if _is_known_messaging_source(source)}
-
-    kept_sources: set[str] = set()
-    best_by_source: dict[str, dict] = {}
-    kept: list[dict] = []
-    for session in sessions:
-        key = _messaging_source_key(session)
-        if not key:
-            kept.append(session)
-            continue
-        if _should_hide_stale_messaging_session(session, active_gateway_session_ids, active_gateway_sources):
-            continue
-        if key in kept_sources:
-            kept_sources.add(key)
-            current = best_by_source.get(key)
-            if current is None or _session_sort_timestamp(session) > _session_sort_timestamp(current):
-                best_by_source[key] = session
-            continue
-        kept_sources.add(key)
-        best_by_source[key] = session
-
-    kept.extend(best_by_source.values())
-    kept.sort(key=_session_sort_timestamp, reverse=True)
-    return kept
-
+from api.routes_helpers.csrf import (
+    _normalize_host_port,
+    _ports_match,
+    _allowed_public_origins,
+    _env_truthy,
+    _check_csrf,
+)
+
+from api.routes_helpers.model_resolve import (
+    _normalize_provider_id,
+    _catalog_provider_id_sets,
+    _catalog_has_provider,
+    _model_matches_active_provider_family,
+    _catalog_model_id_matches,
+    _clean_session_model_provider,
+    _split_provider_qualified_model,
+    _should_attach_codex_provider_context,
+    _resolve_compatible_session_model_state,
+    _resolve_compatible_session_model,
+    _normalize_session_model_in_place,
+    _resolve_effective_session_model_for_display,
+    _resolve_effective_session_model_provider_for_display,
+    _session_model_state_from_request,
+)
 
 from api.models import (
     Session,
@@ -1795,7 +878,10 @@ except ImportError:
 
 
 # ── Approval SSE subscribers (long-connection push) ──────────────────────────
-_approval_sse_subscribers: dict[str, list[queue.Queue]] = {}
+from api.routes_helpers.approval_sse import (
+    _approval_sse_subscribers,
+    _approval_sse_notify_subscribers,
+)
 
 
 def _approval_sse_subscribe(session_id: str) -> queue.Queue:
@@ -1833,13 +919,9 @@ def _approval_sse_notify_locked(session_id: str, head: dict | None, total: int) 
     `_handle_approval_respond` popped the last entry) so the client knows to
     hide its approval card.
     """
-    payload = {"pending": dict(head) if head else None, "pending_count": total}
-    subs = _approval_sse_subscribers.get(session_id, ())
-    for q in subs:
-        try:
-            q.put_nowait(payload)
-        except queue.Full:
-            pass  # drop if subscriber is slow (bounded queue prevents memory leak)
+    # The helper catches queue.Full so slow subscribers are dropped without
+    # blocking the approval lock.
+    _approval_sse_notify_subscribers(session_id, head, total)
 
 
 def _approval_sse_notify(session_id: str, head: dict | None, total: int) -> None:
@@ -1905,164 +987,11 @@ except ImportError:
 # ── Login page locale strings ─────────────────────────────────────────────────
 # Add entries here to support more languages on the login page.
 # The key must match the 'language' setting value (from static/i18n.js LOCALES).
-_LOGIN_LOCALE = {
-    "en": {
-        "lang": "en",
-        "title": "Sign in",
-        "subtitle": "Enter your password to continue",
-        "placeholder": "Password",
-        "btn": "Sign in",
-        "invalid_pw": "Invalid password",
-        "conn_failed": "Connection failed",
-    },
-    "es": {
-        "lang": "es-ES",
-        "title": "Iniciar sesi\u00f3n",
-        "subtitle": "Introduce tu contrase\u00f1a para continuar",
-        "placeholder": "Contrase\u00f1a",
-        "btn": "Entrar",
-        "invalid_pw": "Contrase\u00f1a inv\u00e1lida",
-        "conn_failed": "Error de conexi\u00f3n",
-    },
-    "de": {
-        "lang": "de-DE",
-        "title": "Anmelden",
-        "subtitle": "Geben Sie Ihr Passwort ein, um fortzufahren",
-        "placeholder": "Passwort",
-        "btn": "Anmelden",
-        "invalid_pw": "Ung\u00fcltiges Passwort",
-        "conn_failed": "Verbindung fehlgeschlagen",
-    },
-    "ru": {
-        "lang": "ru-RU",
-        "title": "\u0412\u043e\u0439\u0442\u0438",
-        "subtitle": "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043f\u0430\u0440\u043e\u043b\u044c, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c",
-        "placeholder": "\u041f\u0430\u0440\u043e\u043b\u044c",
-        "btn": "\u0412\u043e\u0439\u0442\u0438",
-        "invalid_pw": "\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c",
-        "conn_failed": "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u044c\u0441\u044f",
-    },
-    "zh": {
-        "lang": "zh-CN",
-        "title": "\u767b\u5f55",
-        "subtitle": "\u8f93\u5165\u5bc6\u7801\u7ee7\u7eed\u4f7f\u7528",
-        "placeholder": "\u5bc6\u7801",
-        "btn": "\u767b\u5f55",
-        "invalid_pw": "\u5bc6\u7801\u9519\u8bef",
-        "conn_failed": "\u8fde\u63a5\u5931\u8d25",
-    },
-    "zh-Hant": {
-        "lang": "zh-TW",
-        "title": "\u767b\u5f55",
-        "subtitle": "\u8f38\u5165\u5bc6\u78bc\u7e7c\u7e8c\u4f7f\u7528",
-        "placeholder": "\u5bc6\u78bc",
-        "btn": "\u767b\u5f55",
-        "invalid_pw": "\u5bc6\u78bc\u932f\u8aa4",
-        "conn_failed": "\u9023\u63a5\u5931\u6557",
-    },
-    # Strings mirror static/i18n.js login_* keys for the corresponding locale.
-    # See issue #1442. When adding a new locale to LOCALES in i18n.js, also add
-    # the matching entry here — tests/test_login_locale_parity.py enforces this.
-    "ja": {
-        "lang": "ja-JP",
-        "title": "\u30b5\u30a4\u30f3\u30a4\u30f3",
-        "subtitle": "\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5165\u529b\u3057\u3066\u7d9a\u884c",
-        "placeholder": "\u30d1\u30b9\u30ef\u30fc\u30c9",
-        "btn": "\u30b5\u30a4\u30f3\u30a4\u30f3",
-        "invalid_pw": "\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u7121\u52b9\u3067\u3059",
-        "conn_failed": "\u63a5\u7d9a\u5931\u6557",
-    },
-    "pt": {
-        "lang": "pt-BR",
-        "title": "Entrar",
-        "subtitle": "Digite sua senha para continuar",
-        "placeholder": "Senha",
-        "btn": "Entrar",
-        "invalid_pw": "Senha inv\u00e1lida",
-        "conn_failed": "Falha na conex\u00e3o",
-    },
-    "ko": {
-        "lang": "ko-KR",
-        "title": "\ub85c\uadf8\uc778",
-        "subtitle": "\uacc4\uc18d\ud558\ub824\uba74 \ube44\ubc00\ubc88\ud638\ub97c \uc785\ub825\ud558\uc138\uc694",
-        "placeholder": "\ube44\ubc00\ubc88\ud638",
-        "btn": "\ub85c\uadf8\uc778",
-        "invalid_pw": "\ube44\ubc00\ubc88\ud638\uac00 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4",
-        "conn_failed": "\uc5f0\uacb0 \uc2e4\ud328",
-    },
-}
-
-
-def _resolve_login_locale_key(raw_lang: str | None) -> str:
-    """Resolve settings.language to a known _LOGIN_LOCALE key."""
-    if not raw_lang:
-        return "en"
-    lang = str(raw_lang).strip()
-    if not lang:
-        return "en"
-    if lang in _LOGIN_LOCALE:
-        return lang
-
-    normalized = lang.replace("_", "-")
-    lower = normalized.lower()
-
-    # Case-insensitive direct key match first.
-    for key in _LOGIN_LOCALE:
-        if key.lower() == lower:
-            return key
-
-    # Common Chinese aliases.
-    if lower == "zh" or lower.startswith("zh-cn") or lower.startswith("zh-sg") or lower.startswith("zh-hans"):
-        return "zh"
-    if lower.startswith("zh-tw") or lower.startswith("zh-hk") or lower.startswith("zh-mo") or lower.startswith("zh-hant"):
-        return "zh-Hant" if "zh-Hant" in _LOGIN_LOCALE else "zh"
-
-    # Fallback to base language subtag (e.g. en-US -> en).
-    base = lower.split("-", 1)[0]
-    for key in _LOGIN_LOCALE:
-        if key.lower() == base:
-            return key
-    return "en"
-
-# ── Login page (self-contained, no external deps) ────────────────────────────
-_LOGIN_PAGE_HTML = """<!doctype html>
-<html lang="{{LANG}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{BOT_NAME}} — {{LOGIN_TITLE}}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#1a1a2e;color:#e8e8f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
-  height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:#16213e;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:36px 32px;
-  width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)}
-.logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(145deg,#e8a030,#e94560);
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;color:#fff;
-  margin:0 auto 12px;box-shadow:0 2px 12px rgba(233,69,96,.3)}
-h1{font-size:18px;font-weight:600;margin-bottom:4px}
-.sub{font-size:12px;color:#8888aa;margin-bottom:24px}
-input{width:100%;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
-  background:rgba(255,255,255,.04);color:#e8e8f0;font-size:14px;outline:none;margin-bottom:14px;
-  transition:border-color .15s}
-input:focus{border-color:rgba(124,185,255,.5);box-shadow:0 0 0 3px rgba(124,185,255,.1)}
-button{width:100%;padding:10px;border-radius:10px;border:none;background:rgba(124,185,255,.15);
-  border:1px solid rgba(124,185,255,.3);color:#7cb9ff;font-size:14px;font-weight:600;cursor:pointer;
-  transition:all .15s}
-button:hover{background:rgba(124,185,255,.25)}
-.err{color:#e94560;font-size:12px;margin-top:10px;display:none}
-</style></head><body>
-<div class="card">
-  <div class="logo">{{BOT_NAME_INITIAL}}</div>
-  <h1>{{BOT_NAME}}</h1>
-  <p class="sub">{{LOGIN_SUBTITLE}}</p>
-  <form id="login-form" data-invalid-pw="{{LOGIN_INVALID_PW}}" data-conn-failed="{{LOGIN_CONN_FAILED}}">
-    <input type="password" id="pw" placeholder="{{LOGIN_PLACEHOLDER}}" autofocus>
-    <button type="submit">{{LOGIN_BTN}}</button>
-  </form>
-  <div class="err" id="err"></div>
-</div>
-<!-- Keep login.js relative so subpath mounts load it under the current scope. -->
-<script src="static/login.js?v={{WEBUI_VERSION}}"></script>
-</body></html>"""
-
+from api.routes_helpers.login_page import (
+    _LOGIN_LOCALE,
+    _LOGIN_PAGE_HTML,
+    _resolve_login_locale_key,
+)
 
 # ── Logs endpoint ─────────────────────────────────────────────────────────────
 _LOG_FILE_WHITELIST = {
