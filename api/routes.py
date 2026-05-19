@@ -245,6 +245,9 @@ from api.system_health import build_system_health_payload
 from api.routes_handlers.mcp import (
     _handle_mcp_tools_list,
 )
+from api.routes_handlers.memory import (
+    _handle_memory_read,
+)
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
     """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
     return bad(
@@ -4826,38 +4829,6 @@ def _handle_cron_recent(handler, parsed):
         return j(handler, {"completions": completions, "since": since})
     except ImportError:
         return j(handler, {"completions": [], "since": since})
-
-
-def _handle_memory_read(handler):
-    try:
-        from api.profiles import get_active_hermes_home
-
-        mem_dir = get_active_hermes_home() / "memories"
-    except ImportError:
-        mem_dir = Path.home() / ".hermes" / "memories"
-    mem_file = mem_dir / "MEMORY.md"
-    user_file = mem_dir / "USER.md"
-    memory = (
-        mem_file.read_text(encoding="utf-8", errors="replace")
-        if mem_file.exists()
-        else ""
-    )
-    user = (
-        user_file.read_text(encoding="utf-8", errors="replace")
-        if user_file.exists()
-        else ""
-    )
-    return j(
-        handler,
-        {
-            "memory": _redact_text(memory),
-            "user": _redact_text(user),
-            "memory_path": str(mem_file),
-            "user_path": str(user_file),
-            "memory_mtime": mem_file.stat().st_mtime if mem_file.exists() else None,
-            "user_mtime": user_file.stat().st_mtime if user_file.exists() else None,
-        },
-    )
 
 
 def _known_profile_memory_roots() -> tuple[Path, Path, set[Path]]:
