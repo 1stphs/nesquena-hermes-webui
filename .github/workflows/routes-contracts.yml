@@ -1,0 +1,38 @@
+name: Routes Contract Scan
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'api/routes.py'
+      - 'api/routes_helpers/**'
+      - 'api/routes_handlers/**'
+      - 'api/routes-handlers-contract.md'
+      - 'scripts/scan_routes_contracts.py'
+      - '.github/workflows/routes-contracts.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'api/routes.py'
+      - 'api/routes_helpers/**'
+      - 'api/routes_handlers/**'
+      - 'api/routes-handlers-contract.md'
+      - 'scripts/scan_routes_contracts.py'
+      - '.github/workflows/routes-contracts.yml'
+
+jobs:
+  routes-contracts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check route source contracts
+        run: |
+          python scripts/scan_routes_contracts.py --check
+          git diff --exit-code -- api/routes-handlers-contract.md scripts/scan_routes_contracts.py
