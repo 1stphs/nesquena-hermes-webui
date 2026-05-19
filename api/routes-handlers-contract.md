@@ -584,19 +584,19 @@
     },
     {
       "function": "_handle_mcp_server_delete",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/mcp.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_mcp_server_update",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/mcp.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_mcp_servers_list",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/mcp.py",
       "reasons": [],
       "status": "green"
     },
@@ -873,9 +873,9 @@
 | red | `_handle_live_models` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_llm_wiki_status` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_logs` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_mcp_server_delete` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_mcp_server_update` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_mcp_servers_list` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_mcp_server_delete` | `api/routes_handlers/mcp.py` | no source-level contract detected |
+| green | `_handle_mcp_server_update` | `api/routes_handlers/mcp.py` | no source-level contract detected |
+| green | `_handle_mcp_servers_list` | `api/routes_handlers/mcp.py` | no source-level contract detected |
 | green | `_handle_mcp_tools_list` | `api/routes_handlers/mcp.py` | no source-level contract detected |
 | green | `_handle_media` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_memory_read` | `api/routes_handlers/memory.py` | no source-level contract detected |
