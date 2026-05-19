@@ -165,7 +165,7 @@ def test_profile_create_agent_writes_agent_files(monkeypatch, tmp_path):
     assert created == {
         "name": "market-analyst",
         "kwargs": {
-            "clone_from": "company-assistant",
+            "clone_from": "profile_template",
             "clone_config": True,
             "base_url": None,
             "api_key": None,
