@@ -242,6 +242,9 @@ from api.helpers import (
 )
 from api.agent_health import build_agent_health_payload
 from api.system_health import build_system_health_payload
+from api.routes_handlers.mcp import (
+    _handle_mcp_tools_list,
+)
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
     """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
     return bad(
@@ -8434,36 +8437,6 @@ def _mcp_tools_from_registry(server_summaries):
         })
         tools.append(_mcp_tool_summary(tool_name, schema, server_summary))
     return tools
-
-
-def _handle_mcp_tools_list(handler):
-    """List known MCP tools from already-available runtime inventory only."""
-    cfg = get_config()
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
-    runtime = _mcp_runtime_status_by_name()
-    server_summaries = {
-        str(name): _server_summary(str(name), scfg, runtime.get(str(name)))
-        for name, scfg in servers.items()
-    }
-    tools = _mcp_tools_from_runtime_status(runtime, server_summaries)
-    source = "mcp_runtime_status"
-    if not tools:
-        tools = _mcp_tools_from_registry(server_summaries)
-        source = "tool_registry" if tools else "none"
-    tools.sort(key=lambda row: (row.get("server", ""), row.get("name", "")))
-    unavailable_servers = [
-        summary["name"] for summary in server_summaries.values()
-        if summary.get("enabled") and not summary.get("active")
-    ]
-    return j(handler, {
-        "tools": tools,
-        "total": len(tools),
-        "source": source,
-        "inventory_scope": "already_known_runtime_only",
-        "unavailable_servers": unavailable_servers,
-    })
 
 
 def _handle_mcp_servers_list(handler):
