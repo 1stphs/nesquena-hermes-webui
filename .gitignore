@@ -36,6 +36,7 @@ api/_version.py
 # a global Markdown ignore rule.
 !api/routes-refactor-step1.md
 !api/routes-refactor-step2.md
+!api/routes-refactor-followups.md
 !api/routes-handlers-contract.md
 
 # OS files
