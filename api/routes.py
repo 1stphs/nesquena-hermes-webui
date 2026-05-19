@@ -242,15 +242,17 @@ from api.helpers import (
 )
 from api.agent_health import build_agent_health_payload
 from api.system_health import build_system_health_payload
-from api.routes_handlers.mcp import (
-    _handle_mcp_tools_list,
-)
 from api.routes_handlers.memory import (
     _handle_memory_read,
+)
+from api.routes_handlers.mcp import (
+    _handle_mcp_tools_list,
 )
 from api.routes_handlers.skill import (
     _handle_skill_save as _handle_skill_save_impl,
 )
+
+
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
     """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
     return bad(

@@ -369,11 +369,11 @@ def _collect_contracts() -> list[Contract]:
             continue
         visitor = TestContractVisitor(rel_path, source)
         visitor.visit(tree)
-        for func_name in visitor.inspect_getsource_funcs:
+        for func_name in sorted(visitor.inspect_getsource_funcs):
             contracts.append(Contract("inspect_getsource_function", func_name, rel_path, 1))
-        for func_name in visitor.ast_extract_funcs:
+        for func_name in sorted(visitor.ast_extract_funcs):
             contracts.append(Contract("ast_extracted_function", func_name, rel_path, 1))
-        for func_name in visitor.def_literal_funcs:
+        for func_name in sorted(visitor.def_literal_funcs):
             contracts.append(Contract("def_literal_function", func_name, rel_path, 1))
         contracts.extend(visitor.contracts)
     return _dedupe_contracts(contracts)

@@ -185,13 +185,13 @@
       "file": "tests/test_issue1511_dedup_shared_reference.py",
       "kind": "inspect_getsource_function",
       "line": 1,
-      "value": "get_models_grouped"
+      "value": "cfg_mod"
     },
     {
       "file": "tests/test_issue1511_dedup_shared_reference.py",
       "kind": "inspect_getsource_function",
       "line": 1,
-      "value": "cfg_mod"
+      "value": "get_models_grouped"
     },
     {
       "file": "tests/test_issue1511_dedup_shared_reference.py",
@@ -233,13 +233,13 @@
       "file": "tests/test_security_redaction.py",
       "kind": "inspect_getsource_function",
       "line": 1,
-      "value": "handle_get"
+      "value": "_handle_session_export"
     },
     {
       "file": "tests/test_security_redaction.py",
       "kind": "inspect_getsource_function",
       "line": 1,
-      "value": "_handle_session_export"
+      "value": "handle_get"
     },
     {
       "file": "tests/test_security_redaction.py",
