@@ -7,6 +7,7 @@ PID_FILE="${HERMES_WEBUI_PID_FILE:-${HERMES_HOME}/webui.pid}"
 LOG_FILE="${HERMES_WEBUI_LOG_FILE:-${HERMES_HOME}/webui.log}"
 STATE_FILE="${HERMES_WEBUI_CTL_STATE_FILE:-${HERMES_HOME}/webui.ctl.env}"
 DEFAULT_STATE_DIR="${HERMES_WEBUI_STATE_DIR:-${HERMES_HOME}/webui}"
+CTL_BOOTSTRAP_ARGS=()
 
 usage() {
   cat <<'EOF'
@@ -39,7 +40,7 @@ _load_repo_dotenv_preserving_env() {
     key="${key#export }"
     key="${key//[[:space:]]/}"
     [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-    if [[ -v ${key} ]]; then
+    if [[ -n "${!key+x}" ]]; then
       value="${!key}"
       preserved+=("${key}=${value}")
     fi
@@ -215,18 +216,21 @@ start_cmd() {
   : >> "${LOG_FILE}"
   (
     cd "${REPO_ROOT}"
-    exec "${python_exe}" "${REPO_ROOT}/bootstrap.py" --no-browser --foreground --host "${CTL_HOST}" "${CTL_PORT}" "${CTL_BOOTSTRAP_ARGS[@]}"
+    exec "${python_exe}" "${REPO_ROOT}/bootstrap.py" --no-browser --foreground --host "${CTL_HOST}" "${CTL_PORT}" ${CTL_BOOTSTRAP_ARGS[@]+"${CTL_BOOTSTRAP_ARGS[@]}"}
   ) >> "${LOG_FILE}" 2>&1 &
   pid=$!
 
   printf '%s\n' "${pid}" > "${PID_FILE}"
   _write_state "${pid}" "${CTL_HOST}" "${CTL_PORT}"
-  sleep 0.15
-  if ! _is_alive "${pid}"; then
-    echo "[ctl] Hermes WebUI failed to stay running. Log: ${LOG_FILE}" >&2
-    rm -f "${PID_FILE}" "${STATE_FILE}"
-    return 1
-  fi
+  local i
+  for i in {1..10}; do
+    sleep 0.1
+    if ! _is_alive "${pid}"; then
+      echo "[ctl] Hermes WebUI failed to stay running. Log: ${LOG_FILE}" >&2
+      rm -f "${PID_FILE}" "${STATE_FILE}"
+      return 1
+    fi
+  done
   echo "[ctl] Started Hermes WebUI (PID ${pid})"
   echo "[ctl] Bound: ${CTL_HOST}:${CTL_PORT}"
   echo "[ctl] Log: ${LOG_FILE}"
