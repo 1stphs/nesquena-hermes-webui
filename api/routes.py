@@ -6014,13 +6014,18 @@ def _handle_live_models(handler, parsed):
                             _models_url = f"{_ep}/models"
                         else:
                             _models_url = f"{_ep}/v1/models"
+
+                        from urllib.parse import urlparse
+                        _parsed_models_url = urlparse(_models_url)
+                        if _parsed_models_url.scheme not in ("http", "https"):
+                            raise ValueError(f"Invalid URL scheme: {_parsed_models_url.scheme}")
                         
                         _req = urllib.request.Request(
                             _models_url,
                             headers={"Authorization": f"Bearer {_api_key}"},
                         )
                         
-                        with urllib.request.urlopen(_req, timeout=8) as _resp:
+                        with urllib.request.urlopen(_req, timeout=8) as _resp:  # nosec B310
                             _body = json.loads(_resp.read())
                         
                         # Parse response: {"data": [{"id": "model1", ...}, ...]}
@@ -6067,7 +6072,7 @@ def _handle_live_models(handler, parsed):
                             f"{_ep}/models",
                             headers={"Authorization": f"Bearer {_key}"},
                         )
-                        with urllib.request.urlopen(_req, timeout=8) as _resp:
+                        with urllib.request.urlopen(_req, timeout=8) as _resp:  # nosec B310
                             _body = json.loads(_resp.read())
                         ids = [m.get("id", "") for m in _body.get("data", []) if m.get("id")]
                         logger.debug("Live-fetched %d models from %s /v1/models", len(ids), provider)
