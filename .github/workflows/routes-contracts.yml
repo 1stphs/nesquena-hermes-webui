@@ -36,3 +36,6 @@ jobs:
         run: |
           python scripts/scan_routes_contracts.py --check
           git diff --exit-code -- api/routes-handlers-contract.md scripts/scan_routes_contracts.py
+
+      - name: Static import sanity
+        run: python -c "import api.routes; import api.routes_handlers"
