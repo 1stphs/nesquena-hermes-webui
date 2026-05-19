@@ -632,61 +632,61 @@
     },
     {
       "function": "_handle_profile_agent_create",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_agent_skills",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_agent_update",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_agents_list",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_change_soul",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_memory_read",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_memory_write",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_soul_read",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_user_read",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_profile_user_write",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/profile.py",
       "reasons": [],
       "status": "green"
     },
@@ -881,16 +881,16 @@
 | green | `_handle_memory_read` | `api/routes_handlers/memory.py` | no source-level contract detected |
 | green | `_handle_memory_write` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_plugins` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_agent_create` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_agent_skills` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_agent_update` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_agents_list` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_change_soul` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_memory_read` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_memory_write` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_soul_read` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_user_read` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_profile_user_write` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_profile_agent_create` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_agent_skills` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_agent_update` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_agents_list` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_change_soul` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_memory_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_memory_write` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_soul_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_user_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_user_write` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_session_compress` | `api/routes.py` | no source-level contract detected |
 | yellow | `_handle_session_export` | `api/routes.py` | inspect.getsource(routes._handle_session_export) is used by tests |
 | green | `_handle_session_import` | `api/routes.py` | no source-level contract detected |
