@@ -106,4 +106,3 @@ def _check_csrf(handler) -> bool:
         if origin_name == allowed_name and _ports_match(origin_scheme, origin_port, allowed_port):
             return True
     return False
-

@@ -47,4 +47,3 @@ def _requested_sessions_profile(parsed_url) -> str | None:
     if requested_profile != 'default' and not _PROFILE_ID_RE.fullmatch(requested_profile):
         raise ValueError('invalid profile')
     return requested_profile
-

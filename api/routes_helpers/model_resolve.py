@@ -363,4 +363,3 @@ def _session_model_state_from_request(
             provider,
         )
     return model_value, provider
-

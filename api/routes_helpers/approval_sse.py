@@ -12,4 +12,3 @@ def _approval_sse_notify_subscribers(session_id: str, head: dict | None, total: 
             q.put_nowait(payload)
         except queue.Full:
             pass
-
