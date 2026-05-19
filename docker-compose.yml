@@ -20,6 +20,8 @@ services:
       - /var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
 
     environment:
+      # macOS bind mounts often use UID/GID 501+; run `id -u` and `id -g`
+      # on the host and set these to match file ownership.
       WANTED_UID: "1025"
       WANTED_GID: "1025"
       HERMES_WEBUI_HOST: "0.0.0.0"
