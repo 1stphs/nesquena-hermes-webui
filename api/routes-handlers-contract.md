@@ -620,7 +620,7 @@
     },
     {
       "function": "_handle_memory_write",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/memory.py",
       "reasons": [],
       "status": "green"
     },
@@ -732,13 +732,13 @@
     },
     {
       "function": "_handle_skill_delete",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/skill.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_skill_install_community",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/skill.py",
       "reasons": [],
       "status": "green"
     },
@@ -752,7 +752,7 @@
     },
     {
       "function": "_handle_skill_uninstall_profile",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/skill.py",
       "reasons": [],
       "status": "green"
     },
@@ -879,7 +879,7 @@
 | green | `_handle_mcp_tools_list` | `api/routes_handlers/mcp.py` | no source-level contract detected |
 | green | `_handle_media` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_memory_read` | `api/routes_handlers/memory.py` | no source-level contract detected |
-| green | `_handle_memory_write` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_memory_write` | `api/routes_handlers/memory.py` | no source-level contract detected |
 | green | `_handle_plugins` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_profile_agent_create` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_agent_skills` | `api/routes_handlers/profile.py` | no source-level contract detected |
@@ -897,10 +897,10 @@
 | red | `_handle_session_import_cli` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_sessions_cleanup` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_sessions_search` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_skill_delete` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_skill_install_community` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_skill_delete` | `api/routes_handlers/skill.py` | no source-level contract detected |
+| green | `_handle_skill_install_community` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | red | `_handle_skill_save` | `api/routes.py` | routes.py source tests lock the physical function definition |
-| green | `_handle_skill_uninstall_profile` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_skill_uninstall_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_sse_stream` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_close` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_input` | `api/routes.py` | no source-level contract detected |
