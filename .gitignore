@@ -32,6 +32,12 @@ full-UI.png
 # Version file written by Docker/CI build — generated, never committed
 api/_version.py
 
+# Routes refactor contracts are repo documentation, even when a developer has
+# a global Markdown ignore rule.
+!api/routes-refactor-step1.md
+!api/routes-refactor-step2.md
+!api/routes-handlers-contract.md
+
 # OS files
 .DS_Store
 Thumbs.db
