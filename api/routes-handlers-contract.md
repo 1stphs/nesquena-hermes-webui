@@ -1208,19 +1208,19 @@
     },
     {
       "function": "_handle_workspace_add",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/workspace.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_workspace_remove",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/workspace.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_workspace_rename",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/workspace.py",
       "reasons": [],
       "status": "green"
     },
@@ -1321,7 +1321,7 @@
 | green | `_handle_terminal_output` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_resize` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_start` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_workspace_add` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_workspace_remove` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_workspace_rename` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_workspace_add` | `api/routes_handlers/workspace.py` | no source-level contract detected |
+| green | `_handle_workspace_remove` | `api/routes_handlers/workspace.py` | no source-level contract detected |
+| green | `_handle_workspace_rename` | `api/routes_handlers/workspace.py` | no source-level contract detected |
 | green | `_handle_workspace_reorder` | `api/routes.py` | no source-level contract detected |

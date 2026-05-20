@@ -268,6 +268,11 @@ from api.routes_handlers.mcp import (
     _handle_mcp_server_delete,
     _handle_mcp_server_update,
 )
+from api.routes_handlers.workspace import (
+    _handle_workspace_add,
+    _handle_workspace_remove,
+    _handle_workspace_rename,
+)
 from api.routes_handlers.skill import (
     _handle_skill_save as _handle_skill_save_impl,
     _handle_skill_delete,
@@ -5452,71 +5457,6 @@ def _handle_file_path(handler, body):
         return j(handler, {"ok": True, "path": str(target)})
     except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
-
-
-def _handle_workspace_add(handler, body):
-    # Strip surrounding paired quotes BEFORE any further processing — macOS
-    # Finder's "Copy as Pathname" wraps paths in single quotes, and users
-    # routinely paste those quoted strings into the Add Space input.
-    # Doing this at the route entry means every downstream check (blocked
-    # system path, validate_workspace_to_add, duplicate detection) sees the
-    # cleaned form.
-    path_str = _strip_surrounding_quotes(body.get("path", "").strip())
-    name = body.get("name", "").strip()
-    auto_create = body.get("create", False)
-    if not path_str:
-        return bad(handler, "path is required")
-    # Validate the path is NOT a blocked system root BEFORE any filesystem mutation.
-    # This prevents creating orphan directories on rejected paths (#782 review).
-    # _is_blocked_system_path honours user-tmp carve-outs (e.g. /var/folders on
-    # macOS) so pytest's tmp_path_factory paths and other legit user-tmp dirs
-    # still register cleanly.
-    candidate = Path(path_str).expanduser().resolve()
-    if _is_blocked_system_path(candidate):
-        return bad(handler, f"Path points to a system directory: {candidate}")
-    # Now safe to create the directory if requested
-    if auto_create:
-        try:
-            candidate.mkdir(parents=True, exist_ok=True)
-        except (OSError, PermissionError) as e:
-            return bad(handler, f"Could not create directory: {_sanitize_error(e)}")
-    # Full validation (exists, is_dir) — should pass now that dir exists
-    try:
-        p = validate_workspace_to_add(path_str)
-    except ValueError as e:
-        return bad(handler, str(e))
-    wss = load_workspaces()
-    if any(w["path"] == str(p) for w in wss):
-        return bad(handler, "Workspace already in list")
-    wss.append({"path": str(p), "name": name or p.name})
-    save_workspaces(wss)
-    return j(handler, {"ok": True, "workspaces": wss})
-
-
-def _handle_workspace_remove(handler, body):
-    path_str = body.get("path", "").strip()
-    if not path_str:
-        return bad(handler, "path is required")
-    wss = load_workspaces()
-    wss = [w for w in wss if w["path"] != path_str]
-    save_workspaces(wss)
-    return j(handler, {"ok": True, "workspaces": wss})
-
-
-def _handle_workspace_rename(handler, body):
-    path_str = body.get("path", "").strip()
-    name = body.get("name", "").strip()
-    if not path_str or not name:
-        return bad(handler, "path and name are required")
-    wss = load_workspaces()
-    for w in wss:
-        if w["path"] == path_str:
-            w["name"] = name
-            break
-    else:
-        return bad(handler, "Workspace not found", 404)
-    save_workspaces(wss)
-    return j(handler, {"ok": True, "workspaces": wss})
 
 
 def _handle_workspace_reorder(handler, body):
