@@ -695,13 +695,13 @@
   "ratings": [
     {
       "function": "_handle_approval_inject",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/approval.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_approval_pending",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/approval.py",
       "reasons": [],
       "status": "green"
     },
@@ -757,19 +757,19 @@
     },
     {
       "function": "_handle_clarify_inject",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/approval.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_clarify_pending",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/approval.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_clarify_respond",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/approval.py",
       "reasons": [],
       "status": "green"
     },
@@ -1244,17 +1244,17 @@
 
 | status | function | location | reason |
 |---|---|---|---|
-| green | `_handle_approval_inject` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_approval_pending` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_approval_inject` | `api/routes_handlers/approval.py` | no source-level contract detected |
+| green | `_handle_approval_pending` | `api/routes_handlers/approval.py` | no source-level contract detected |
 | yellow | `_handle_approval_respond` | `api/routes.py` | body contains source literal from tests/test_approval_queue.py:54: 'queue.pop(0)' |
 | red | `_handle_approval_sse_stream` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_approval_sse.py:44: 'def _handle_approval_sse_stream('; body contains source literal from tests/test_approval_sse.py:64: '_approval_sse_subscribers'; body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'; body contains source literal from tests/test_approval_sse.py:116: 'queue.Queue(maxsize=' |
 | red | `_handle_background` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_btw` | `api/routes.py` | no source-level contract detected |
 | yellow | `_handle_chat_start` | `api/routes.py` | body contains source literal from tests/test_turn_duration_display.py:68: '"pending_started_at": s.pending_started_at' |
 | yellow | `_handle_chat_sync` | `api/routes.py` | body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock' |
-| green | `_handle_clarify_inject` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_clarify_pending` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_clarify_respond` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_clarify_inject` | `api/routes_handlers/approval.py` | no source-level contract detected |
+| green | `_handle_clarify_pending` | `api/routes_handlers/approval.py` | no source-level contract detected |
+| green | `_handle_clarify_respond` | `api/routes_handlers/approval.py` | no source-level contract detected |
 | red | `_handle_clarify_sse_stream` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'; body contains source literal from tests/test_approval_sse.py:116: 'queue.Queue(maxsize=' |
 | green | `_handle_conversation_rounds` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_create_dir` | `api/routes_handlers/file.py` | no source-level contract detected |
