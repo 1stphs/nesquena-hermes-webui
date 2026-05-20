@@ -280,6 +280,10 @@ from api.routes_handlers.approval import (
     _handle_clarify_inject,
     _handle_clarify_respond,
 )
+from api.routes_handlers.session_io import (
+    _handle_session_import,
+    _handle_conversation_rounds,
+)
 from api.routes_handlers.skill import (
     _handle_skill_save as _handle_skill_save_impl,
     _handle_skill_delete,
@@ -487,6 +491,8 @@ from api.models import (
     import_cli_session,
     get_cli_sessions,
     get_cli_session_messages,
+    count_conversation_rounds,
+    CONVERSATION_ROUND_THRESHOLD,
     ensure_cron_project,
     is_cron_session,
 )
@@ -5762,44 +5768,6 @@ def _handle_session_compress(handler, body):
         return bad(handler, f"Compression failed: {_sanitize_error(e)}")
 
 
-def _handle_conversation_rounds(handler, body):
-    """Return conversation-round count for a gateway session.
-
-    Request body::
-
-        { "session_id": "...", "since": <unix_ts_or_iso> }
-
-    Response::
-
-        { "ok": true, "rounds": 12, "threshold": 10, "should_show": true }
-    """
-    try:
-        require(body, "session_id")
-    except ValueError as e:
-        return bad(handler, str(e))
-
-    sid = str(body.get("session_id") or "").strip()
-    if not sid:
-        return bad(handler, "session_id is required")
-
-    since = body.get("since")
-    if since is not None:
-        try:
-            since = float(since)
-        except (TypeError, ValueError):
-            return bad(handler, "since must be a unix timestamp (number)")
-
-    from api.models import count_conversation_rounds, CONVERSATION_ROUND_THRESHOLD
-
-    rounds = count_conversation_rounds(sid, since=since)
-    return j(handler, {
-        "ok": True,
-        "rounds": rounds,
-        "threshold": CONVERSATION_ROUND_THRESHOLD,
-        "should_show": rounds >= CONVERSATION_ROUND_THRESHOLD,
-    })
-
-
 def _build_handoff_summary_tool_message(
     sid: str,
     summary: str,
@@ -6673,33 +6641,6 @@ def _handle_session_import_cli(handler, body):
             "imported": True,
         },
     )
-
-
-def _handle_session_import(handler, body):
-    """Import a session from a JSON export. Creates a new session with a new ID."""
-    if not body or not isinstance(body, dict):
-        return bad(handler, "Request body must be a JSON object")
-    messages = body.get("messages")
-    if not isinstance(messages, list):
-        return bad(handler, 'JSON must contain a "messages" array')
-    title = body.get("title", "Imported session")
-    workspace = body.get("workspace", str(DEFAULT_WORKSPACE))
-    model = body.get("model", DEFAULT_MODEL)
-    s = Session(
-        title=title,
-        workspace=workspace,
-        model=model,
-        messages=messages,
-        tool_calls=body.get("tool_calls", []),
-    )
-    s.pinned = body.get("pinned", False)
-    with LOCK:
-        SESSIONS[s.session_id] = s
-        SESSIONS.move_to_end(s.session_id)
-        while len(SESSIONS) > SESSIONS_MAX:
-            SESSIONS.popitem(last=False)
-    s.save()
-    return j(handler, {"ok": True, "session": s.compact() | {"messages": s.messages}})
 
 
 # ── MCP Server helpers ──

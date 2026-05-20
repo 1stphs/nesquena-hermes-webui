@@ -785,7 +785,7 @@
     },
     {
       "function": "_handle_conversation_rounds",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/session_io.py",
       "reasons": [],
       "status": "green"
     },
@@ -1118,7 +1118,7 @@
     },
     {
       "function": "_handle_session_import",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/session_io.py",
       "reasons": [],
       "status": "green"
     },
@@ -1256,7 +1256,7 @@
 | green | `_handle_clarify_pending` | `api/routes_handlers/approval.py` | no source-level contract detected |
 | green | `_handle_clarify_respond` | `api/routes_handlers/approval.py` | no source-level contract detected |
 | red | `_handle_clarify_sse_stream` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'; body contains source literal from tests/test_approval_sse.py:116: 'queue.Queue(maxsize=' |
-| green | `_handle_conversation_rounds` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_conversation_rounds` | `api/routes_handlers/session_io.py` | no source-level contract detected |
 | green | `_handle_create_dir` | `api/routes_handlers/file.py` | no source-level contract detected |
 | green | `_handle_cron_batch` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_cron_calendar` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
@@ -1307,7 +1307,7 @@
 | green | `_handle_profile_user_write` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | yellow | `_handle_session_compress` | `api/routes.py` | body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock'; body contains source literal from tests/test_turn_duration_display.py:68: '"pending_started_at": s.pending_started_at' |
 | yellow | `_handle_session_export` | `api/routes.py` | inspect.getsource(routes._handle_session_export) is used by tests |
-| green | `_handle_session_import` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_session_import` | `api/routes_handlers/session_io.py` | no source-level contract detected |
 | red | `_handle_session_import_cli` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_sessions_cleanup` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_sessions_search` | `api/routes.py` | no source-level contract detected |
