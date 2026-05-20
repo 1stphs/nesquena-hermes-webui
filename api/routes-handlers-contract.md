@@ -987,7 +987,7 @@
     },
     {
       "function": "_handle_logs",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/logs.py",
       "reasons": [],
       "status": "green"
     },
@@ -1138,7 +1138,7 @@
     },
     {
       "function": "_handle_sessions_search",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/session_io.py",
       "reasons": [],
       "status": "green"
     },
@@ -1178,13 +1178,13 @@
     },
     {
       "function": "_handle_terminal_close",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/terminal.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_terminal_input",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/terminal.py",
       "reasons": [],
       "status": "green"
     },
@@ -1196,13 +1196,13 @@
     },
     {
       "function": "_handle_terminal_resize",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/terminal.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_terminal_start",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/terminal.py",
       "reasons": [],
       "status": "green"
     },
@@ -1286,7 +1286,7 @@
 | green | `_handle_list_dir` | `api/routes_handlers/file.py` | no source-level contract detected |
 | red | `_handle_live_models` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_issues_373_374_375.py:158: '/api/models/live'; body contains source literal from tests/test_issues_373_374_375.py:164: 'def _handle_live_models('; body contains source literal from tests/test_issues_373_374_375.py:185: 'provider_model_ids'; body contains source literal from tests/test_opencode_providers.py:121: 'provider_model_ids' |
 | green | `_handle_llm_wiki_status` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_logs` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_logs` | `api/routes_handlers/logs.py` | no source-level contract detected |
 | green | `_handle_mcp_server_delete` | `api/routes_handlers/mcp.py` | no source-level contract detected |
 | green | `_handle_mcp_server_update` | `api/routes_handlers/mcp.py` | no source-level contract detected |
 | green | `_handle_mcp_servers_list` | `api/routes_handlers/mcp.py` | no source-level contract detected |
@@ -1310,17 +1310,17 @@
 | green | `_handle_session_import` | `api/routes_handlers/session_io.py` | no source-level contract detected |
 | red | `_handle_session_import_cli` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_sessions_cleanup` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_sessions_search` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_sessions_search` | `api/routes_handlers/session_io.py` | no source-level contract detected |
 | green | `_handle_skill_delete` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_skill_install_community` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | red | `_handle_skill_save` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_skill_uninstall_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | yellow | `_handle_sse_stream` | `api/routes.py` | body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS' |
-| green | `_handle_terminal_close` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_terminal_input` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_terminal_close` | `api/routes_handlers/terminal.py` | no source-level contract detected |
+| green | `_handle_terminal_input` | `api/routes_handlers/terminal.py` | no source-level contract detected |
 | green | `_handle_terminal_output` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_terminal_resize` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_terminal_start` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_terminal_resize` | `api/routes_handlers/terminal.py` | no source-level contract detected |
+| green | `_handle_terminal_start` | `api/routes_handlers/terminal.py` | no source-level contract detected |
 | green | `_handle_workspace_add` | `api/routes_handlers/workspace.py` | no source-level contract detected |
 | green | `_handle_workspace_remove` | `api/routes_handlers/workspace.py` | no source-level contract detected |
 | green | `_handle_workspace_rename` | `api/routes_handlers/workspace.py` | no source-level contract detected |

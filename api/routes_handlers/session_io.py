@@ -1,6 +1,53 @@
 """Session import and conversation-round endpoint handlers re-exported by api.routes."""
 
+from urllib.parse import parse_qs
+
 from api.routes_handlers._base import _routes_binding
+
+
+def _handle_sessions_search(handler, parsed):
+    qs = parse_qs(parsed.query)
+    q = qs.get("q", [""])[0].lower().strip()
+    content_search = qs.get("content", ["1"])[0] == "1"
+    depth = int(qs.get("depth", ["5"])[0])
+    if not q:
+        safe_sessions = []
+        for s in _routes_binding("all_sessions")():
+            item = dict(s)
+            if isinstance(item.get("title"), str):
+                item["title"] = _routes_binding("_redact_text")(item["title"])
+            safe_sessions.append(item)
+        return _routes_binding("j")(handler, {"sessions": safe_sessions})
+    results = []
+    for s in _routes_binding("all_sessions")():
+        title_match = q in (s.get("title") or "").lower()
+        if title_match:
+            item = dict(s, match_type="title")
+            if isinstance(item.get("title"), str):
+                item["title"] = _routes_binding("_redact_text")(item["title"])
+            results.append(item)
+            continue
+        if content_search:
+            try:
+                sess = _routes_binding("get_session")(s["session_id"])
+                msgs = sess.messages[:depth] if depth else sess.messages
+                for m in msgs:
+                    c = m.get("content") or ""
+                    if isinstance(c, list):
+                        c = " ".join(
+                            p.get("text", "")
+                            for p in c
+                            if isinstance(p, dict) and p.get("type") == "text"
+                        )
+                    if q in str(c).lower():
+                        item = dict(s, match_type="content")
+                        if isinstance(item.get("title"), str):
+                            item["title"] = _routes_binding("_redact_text")(item["title"])
+                        results.append(item)
+                        break
+            except (KeyError, Exception):
+                pass
+    return _routes_binding("j")(handler, {"sessions": results, "query": q, "count": len(results)})
 
 
 def _handle_conversation_rounds(handler, body):

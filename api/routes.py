@@ -97,7 +97,6 @@ from api.routes_helpers.cron import (
 # to handle proxies and mobile NAT.
 _SSE_HEARTBEAT_INTERVAL_SECONDS = 5
 
-
 from api.routes_helpers.messaging import (
     _MESSAGING_RAW_SOURCES,
     _MESSAGING_SESSION_METADATA_CACHE,
@@ -126,7 +125,6 @@ from api.routes_helpers.messaging import (
     _keep_latest_messaging_session_per_source,
 )
 
-
 def _run_cron_job_in_profile_subprocess(job, execution_profile_home):
     """Execute cron.scheduler.run_job using a spawn child process."""
     import multiprocessing
@@ -138,7 +136,6 @@ def _run_cron_job_in_profile_subprocess(job, execution_profile_home):
         ctx,
         target=_cron_job_subprocess_main,
     )
-
 
 def _cron_job_subprocess_main(job, execution_profile_home, result_queue):
     """Run one cron job inside a child process pinned to a profile home."""
@@ -161,7 +158,6 @@ def _cron_job_subprocess_main(job, execution_profile_home, result_queue):
 
         result_queue.put(("error", f"{type(exc).__name__}: {exc}", traceback.format_exc()))
 
-
 def _run_cron_tracked(job, profile_home=None, execution_profile_home=None):
     """Wrapper that tracks running state around cron.scheduler.run_job."""
     return _run_cron_tracked_impl(
@@ -171,14 +167,12 @@ def _run_cron_tracked(job, profile_home=None, execution_profile_home=None):
         run_job_subprocess=_run_cron_job_in_profile_subprocess,
     )
 
-
 # ── Profile-scoped session/project filtering (#1611, #1614) ────────────────
 from api.routes_helpers.profile_filter import (
     _profiles_match,
     _all_profiles_query_flag,
     _requested_sessions_profile,
 )
-
 
 from api.routes_helpers.live_models import (
     _PROVIDER_ALIASES,
@@ -241,6 +235,9 @@ from api.helpers import (
 )
 from api.agent_health import build_agent_health_payload
 from api.system_health import build_system_health_payload
+from api.routes_handlers.logs import (
+    _handle_logs,
+)
 from api.routes_handlers.memory import (
     _handle_memory_read,
     _handle_memory_write,
@@ -283,6 +280,13 @@ from api.routes_handlers.approval import (
 from api.routes_handlers.session_io import (
     _handle_session_import,
     _handle_conversation_rounds,
+    _handle_sessions_search,
+)
+from api.routes_handlers.terminal import (
+    _handle_terminal_start,
+    _handle_terminal_input,
+    _handle_terminal_resize,
+    _handle_terminal_close,
 )
 from api.routes_handlers.skill import (
     _handle_skill_save as _handle_skill_save_impl,
@@ -336,7 +340,6 @@ from api.routes_handlers.profile import (
     _write_profile_memory_file,
 )
 
-
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
     """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
     return bad(
@@ -348,7 +351,6 @@ def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
         ),
         status=404,
     ) or True
-
 
 def _clear_stale_stream_state(session) -> bool:
     """Clear persisted streaming flags when the in-memory stream no longer exists.
@@ -556,13 +558,11 @@ except ImportError:
     _lock = threading.Lock()
     _permanent_approved = set()
 
-
 # ── Approval SSE subscribers (long-connection push) ──────────────────────────
 from api.routes_helpers.approval_sse import (
     _approval_sse_subscribers,
     _approval_sse_notify_subscribers,
 )
-
 
 def _approval_sse_subscribe(session_id: str) -> queue.Queue:
     """Register an SSE subscriber for approval events on a given session."""
@@ -570,7 +570,6 @@ def _approval_sse_subscribe(session_id: str) -> queue.Queue:
     with _lock:
         _approval_sse_subscribers.setdefault(session_id, []).append(q)
     return q
-
 
 def _approval_sse_unsubscribe(session_id: str, q: queue.Queue) -> None:
     """Remove an SSE subscriber."""
@@ -580,7 +579,6 @@ def _approval_sse_unsubscribe(session_id: str, q: queue.Queue) -> None:
             subs.remove(q)
             if not subs:
                 _approval_sse_subscribers.pop(session_id, None)
-
 
 def _approval_sse_notify_locked(session_id: str, head: dict | None, total: int) -> None:
     """Push an approval event to all SSE subscribers for a session.
@@ -603,7 +601,6 @@ def _approval_sse_notify_locked(session_id: str, head: dict | None, total: int) 
     # blocking the approval lock.
     _approval_sse_notify_subscribers(session_id, head, total)
 
-
 def _approval_sse_notify(session_id: str, head: dict | None, total: int) -> None:
     """Convenience wrapper that takes `_lock` itself.
 
@@ -615,7 +612,6 @@ def _approval_sse_notify(session_id: str, head: dict | None, total: int) -> None
     """
     with _lock:
         _approval_sse_notify_locked(session_id, head, total)
-
 
 def submit_pending(session_key: str, approval: dict) -> None:
     """Append a pending approval to the per-session queue.
@@ -663,7 +659,6 @@ except ImportError:
     clarify_sse_subscribe = None
     resolve_clarify = lambda *a, **k: 0
 
-
 # ── Login page locale strings ─────────────────────────────────────────────────
 # Add entries here to support more languages on the login page.
 # The key must match the 'language' setting value (from static/i18n.js LOCALES).
@@ -673,85 +668,10 @@ from api.routes_helpers.login_page import (
     _resolve_login_locale_key,
 )
 
-# ── Logs endpoint ─────────────────────────────────────────────────────────────
-_LOG_FILE_WHITELIST = {
-    "agent": "agent.log",
-    "errors": "errors.log",
-    "gateway": "gateway.log",
-}
-_LOG_TAIL_VALUES = {100, 200, 500, 1000}
-_LOG_DEFAULT_TAIL = 200
-_LOG_MAX_BYTES = 4 * 1024 * 1024
-
-
-def _normalize_logs_tail(raw_tail) -> int:
-    try:
-        tail = int(str(raw_tail or "").strip())
-    except (TypeError, ValueError):
-        return _LOG_DEFAULT_TAIL
-    return tail if tail in _LOG_TAIL_VALUES else _LOG_DEFAULT_TAIL
-
-
-def _handle_logs(handler, parsed) -> bool:
-    """Return a bounded tail window for an active-profile Hermes log file."""
-    query = parse_qs(parsed.query)
-    file_key = (query.get("file", ["agent"])[0] or "agent").strip().lower()
-    filename = _LOG_FILE_WHITELIST.get(file_key)
-    if not filename:
-        return bad(handler, "Unknown log file", status=400)
-
-    tail = _normalize_logs_tail(query.get("tail", [None])[0])
-    try:
-        from api.profiles import get_active_hermes_home
-
-        hermes_home = Path(get_active_hermes_home()).expanduser()
-    except Exception:
-        hermes_home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")).expanduser()
-
-    log_dir = hermes_home / "logs"
-    log_path = log_dir / filename
-    try:
-        # Defense in depth: the filename is hardcoded above, but keep the final
-        # path anchored under the active profile's logs directory.
-        if log_path.resolve(strict=False).parent != log_dir.resolve(strict=False):
-            return bad(handler, "Invalid log file", status=400)
-        if not log_path.exists() or not log_path.is_file():
-            return j(handler, {
-                "file": file_key,
-                "tail": tail,
-                "lines": [],
-                "truncated": False,
-                "total_bytes": 0,
-                "mtime": None,
-                "hint": f"Log file for {file_key} not found yet.",
-            })
-        st = log_path.stat()
-        total_bytes = int(st.st_size)
-        read_bytes = min(total_bytes, _LOG_MAX_BYTES)
-        with log_path.open("rb") as fh:
-            if total_bytes > read_bytes:
-                fh.seek(total_bytes - read_bytes)
-            raw = fh.read(read_bytes)
-        text = raw.decode("utf-8", errors="replace")
-        lines = text.splitlines()[-tail:]
-        return j(handler, {
-            "file": file_key,
-            "tail": tail,
-            "lines": lines,
-            "truncated": total_bytes > read_bytes,
-            "total_bytes": total_bytes,
-            "mtime": st.st_mtime,
-            "hint": "",
-        })
-    except Exception as exc:
-        logger.exception("Failed to read whitelisted log file %s", file_key)
-        return bad(handler, _sanitize_error(exc), status=500)
-
 # ── Insights endpoint ──────────────────────────────────────────────────────────
 
 _LLM_WIKI_DOCS_URL = "https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-llm-wiki"
 _LLM_WIKI_PAGE_DIRS = ("entities", "concepts", "comparisons", "queries")
-
 
 def _llm_wiki_active_hermes_home() -> Path:
     try:
@@ -759,7 +679,6 @@ def _llm_wiki_active_hermes_home() -> Path:
         return Path(get_active_hermes_home()).expanduser()
     except Exception:
         return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
-
 
 def _llm_wiki_env_file_path(hermes_home: Path) -> str | None:
     env_path = hermes_home / ".env"
@@ -779,7 +698,6 @@ def _llm_wiki_env_file_path(hermes_home: Path) -> str | None:
         return None
     return None
 
-
 def _llm_wiki_get_config_path_value(config: dict, dotted_key: str) -> str | None:
     if not isinstance(config, dict):
         return None
@@ -792,7 +710,6 @@ def _llm_wiki_get_config_path_value(config: dict, dotted_key: str) -> str | None
         cur = cur[part]
     return str(cur) if cur else None
 
-
 def _llm_wiki_config_path() -> str | None:
     try:
         from api.config import get_config as _get_cfg
@@ -804,7 +721,6 @@ def _llm_wiki_config_path() -> str | None:
         or _llm_wiki_get_config_path_value(cfg, "wiki.path")
     )
 
-
 # Cap WIKI walks to prevent self-DoS if WIKI_PATH points at /, /etc, /home, etc.
 # Real LLM wikis have under a few thousand files; 10k is generous and catches misconfig.
 _LLM_WIKI_MAX_FILES = 10000
@@ -812,7 +728,6 @@ _LLM_WIKI_MAX_FILES = 10000
 _LLM_WIKI_FORBIDDEN_ROOTS = frozenset(
     str(Path(p).expanduser().resolve()) for p in ("/", "/etc", "/usr", "/var", "/opt", "/sys", "/proc")
 )
-
 
 def _llm_wiki_resolve_path() -> tuple[Path, str, bool]:
     hermes_home = _llm_wiki_active_hermes_home()
@@ -828,7 +743,6 @@ def _llm_wiki_resolve_path() -> tuple[Path, str, bool]:
         raw = "~/wiki"
     return Path(os.path.expandvars(raw)).expanduser(), source, configured
 
-
 def _llm_wiki_safe_iso(ts: float | None) -> str | None:
     if not ts:
         return None
@@ -837,7 +751,6 @@ def _llm_wiki_safe_iso(ts: float | None) -> str | None:
         return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
     except Exception:
         return None
-
 
 def _llm_wiki_count_files(root: Path) -> int:
     if not root.exists() or not root.is_dir():
@@ -863,7 +776,6 @@ def _llm_wiki_count_files(root: Path) -> int:
             continue
     return count
 
-
 def _llm_wiki_page_files(wiki_path: Path) -> list[Path]:
     pages: list[Path] = []
     # Defense in depth: refuse forbidden system roots.
@@ -888,7 +800,6 @@ def _llm_wiki_page_files(wiki_path: Path) -> list[Path]:
             except Exception:
                 continue
     return pages
-
 
 def _build_llm_wiki_status() -> dict:
     """Return private-safe LLM Wiki status metadata without reading page bodies."""
@@ -954,11 +865,9 @@ def _build_llm_wiki_status() -> dict:
             "error": type(exc).__name__,
         }
 
-
 def _handle_llm_wiki_status(handler, parsed) -> bool:
     j(handler, _build_llm_wiki_status())
     return True
-
 
 def _handle_insights(handler, parsed) -> bool:
     """Return usage analytics from local WebUI session data."""
@@ -1131,9 +1040,7 @@ def _handle_insights(handler, parsed) -> bool:
         "activity_by_hour": hod_data,
     })
 
-
 # ── GET routes ────────────────────────────────────────────────────────────────
-
 
 def _accept_loop_health(handler) -> dict:
     server = getattr(handler, "server", None)
@@ -1141,7 +1048,6 @@ def _accept_loop_health(handler) -> dict:
         "requests_total": int(getattr(server, "accept_loop_requests_total", 0) or 0),
         "last_request_at": round(float(getattr(server, "accept_loop_last_request_at", 0.0) or 0.0), 3),
     }
-
 
 def _streams_lock_health(timeout_seconds: float = 0.5) -> dict:
     t0 = time.time()
@@ -1161,7 +1067,6 @@ def _streams_lock_health(timeout_seconds: float = 0.5) -> dict:
         }
     finally:
         STREAMS_LOCK.release()
-
 
 def _deep_health_checks(stream_check: dict | None = None) -> tuple[dict, bool]:
     """Run cheap probes that exercise the state paths used by the UI shell.
@@ -1239,7 +1144,6 @@ def _deep_health_checks(stream_check: dict | None = None) -> tuple[dict, bool]:
     )
     return checks, healthy
 
-
 def _handle_health(handler, parsed):
     deep = parse_qs(parsed.query or "").get("deep", [""])[0].lower() in {"1", "true", "yes", "on"}
     stream_check = _streams_lock_health()
@@ -1263,7 +1167,6 @@ def _handle_health(handler, parsed):
         return j(handler, payload, status=503)
     return j(handler, payload)
 
-
 # ── Plugin visibility endpoint (#539) ───────────────────────────────────────
 _PLUGIN_VISIBILITY_HOOKS = (
     "pre_tool_call",
@@ -1273,13 +1176,11 @@ _PLUGIN_VISIBILITY_HOOKS = (
 )
 _PLUGIN_VISIBILITY_HOOK_SET = set(_PLUGIN_VISIBILITY_HOOKS)
 
-
 def _get_plugin_manager_for_visibility():
     """Return Hermes Agent's plugin manager for read-only WebUI visibility."""
     from hermes_cli.plugins import get_plugin_manager
 
     return get_plugin_manager()
-
 
 def _clean_plugin_visibility_text(value, *, limit=240) -> str:
     """Return bounded display text without path/callback-like internals."""
@@ -1292,7 +1193,6 @@ def _clean_plugin_visibility_text(value, *, limit=240) -> str:
     if len(text) > limit:
         text = text[: limit - 1].rstrip() + "…"
     return text
-
 
 def _plugin_visibility_payload(manager=None) -> dict:
     """Build a sanitized plugin/hook visibility payload for Settings.
@@ -1341,7 +1241,6 @@ def _plugin_visibility_payload(manager=None) -> dict:
         "read_only": True,
     }
 
-
 def _handle_plugins(handler, parsed) -> bool:
     try:
         return j(handler, _plugin_visibility_payload())
@@ -1358,7 +1257,6 @@ def _handle_plugins(handler, parsed) -> bool:
             },
         )
 
-
 _SHELL_ERROR_HTML = """<!doctype html>
 <html lang=\"en\">
 <head>
@@ -1374,7 +1272,6 @@ _SHELL_ERROR_HTML = """<!doctype html>
 </body>
 </html>"""
 
-
 def _serve_shell_unavailable(handler, exc: Exception) -> bool:
     """Return HTML for shell-route failures so `/` never renders JSON."""
     logger.warning("Failed to serve WebUI shell route: %s", exc)
@@ -1385,7 +1282,6 @@ def _serve_shell_unavailable(handler, exc: Exception) -> bool:
         content_type="text/html; charset=utf-8",
     )
     return True
-
 
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
@@ -2415,9 +2311,7 @@ def handle_get(handler, parsed) -> bool:
 
     return False  # 404
 
-
 # ── GET route helpers
-
 
 def handle_post(handler, parsed) -> bool:
     """Handle all POST routes. Returns True if handled, False for 404."""
@@ -3654,7 +3548,6 @@ def handle_post(handler, parsed) -> bool:
 
     return False  # 404
 
-
 def handle_patch(handler, parsed) -> bool:
     """Handle all PATCH routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
@@ -3668,7 +3561,6 @@ def handle_patch(handler, parsed) -> bool:
             return _kanban_unknown_endpoint(handler, parsed, "PATCH")
         return True
     return False
-
 
 def handle_delete(handler, parsed) -> bool:
     """Handle all DELETE routes. Returns True if handled, False for 404."""
@@ -3705,7 +3597,6 @@ _STATIC_MIME = {
 # MIME types that are text-based and should carry charset=utf-8
 _TEXT_MIME_TYPES = {"text/css", "application/javascript", "text/html", "image/svg+xml", "text/plain"}
 
-
 def _serve_static(handler, parsed):
     static_root = (Path(__file__).parent.parent / "static").resolve()
     # Strip the leading '/static/' prefix, then resolve and sandbox
@@ -3729,7 +3620,6 @@ def _serve_static(handler, parsed):
     handler.wfile.write(raw)
     return True
 
-
 def _handle_session_export(handler, parsed):
     sid = parse_qs(parsed.query).get("session_id", [""])[0]
     if not sid:
@@ -3750,52 +3640,6 @@ def _handle_session_export(handler, parsed):
     handler.end_headers()
     handler.wfile.write(payload.encode("utf-8"))
     return True
-
-
-def _handle_sessions_search(handler, parsed):
-    qs = parse_qs(parsed.query)
-    q = qs.get("q", [""])[0].lower().strip()
-    content_search = qs.get("content", ["1"])[0] == "1"
-    depth = int(qs.get("depth", ["5"])[0])
-    if not q:
-        safe_sessions = []
-        for s in all_sessions():
-            item = dict(s)
-            if isinstance(item.get("title"), str):
-                item["title"] = _redact_text(item["title"])
-            safe_sessions.append(item)
-        return j(handler, {"sessions": safe_sessions})
-    results = []
-    for s in all_sessions():
-        title_match = q in (s.get("title") or "").lower()
-        if title_match:
-            item = dict(s, match_type="title")
-            if isinstance(item.get("title"), str):
-                item["title"] = _redact_text(item["title"])
-            results.append(item)
-            continue
-        if content_search:
-            try:
-                sess = get_session(s["session_id"])
-                msgs = sess.messages[:depth] if depth else sess.messages
-                for m in msgs:
-                    c = m.get("content") or ""
-                    if isinstance(c, list):
-                        c = " ".join(
-                            p.get("text", "")
-                            for p in c
-                            if isinstance(p, dict) and p.get("type") == "text"
-                        )
-                    if q in str(c).lower():
-                        item = dict(s, match_type="content")
-                        if isinstance(item.get("title"), str):
-                            item["title"] = _redact_text(item["title"])
-                        results.append(item)
-                        break
-            except (KeyError, Exception):
-                pass
-    return j(handler, {"sessions": results, "query": q, "count": len(results)})
-
 
 def _handle_sse_stream(handler, parsed):
     stream_id = parse_qs(parsed.query).get("stream_id", [""])[0]
@@ -3829,92 +3673,6 @@ def _handle_sse_stream(handler, parsed):
             except Exception:
                 pass
     return True
-
-
-def _terminal_session_and_workspace(body_or_query):
-    sid = str(body_or_query.get("session_id", "")).strip()
-    if not sid:
-        raise ValueError("session_id required")
-    try:
-        s = get_session(sid)
-    except KeyError:
-        raise KeyError("Session not found")
-    workspace = resolve_trusted_workspace(getattr(s, "workspace", "") or "")
-    return sid, workspace
-
-
-def _handle_terminal_start(handler, body):
-    try:
-        sid, workspace = _terminal_session_and_workspace(body)
-        from api.terminal import start_terminal
-        term = start_terminal(
-            sid,
-            workspace,
-            rows=int(body.get("rows") or 24),
-            cols=int(body.get("cols") or 80),
-            restart=bool(body.get("restart")),
-        )
-        return j(
-            handler,
-            {
-                "ok": True,
-                "session_id": sid,
-                "workspace": term.workspace,
-                "running": term.is_alive(),
-            },
-        )
-    except KeyError as e:
-        return bad(handler, str(e), 404)
-    except ValueError as e:
-        return bad(handler, str(e), 400)
-    except Exception as e:
-        return bad(handler, _sanitize_error(e), 500)
-
-
-def _handle_terminal_input(handler, body):
-    try:
-        require(body, "session_id")
-        data = str(body.get("data", ""))
-        if len(data) > 8192:
-            return bad(handler, "input too large", 413)
-        from api.terminal import write_terminal
-        write_terminal(body["session_id"], data)
-        return j(handler, {"ok": True})
-    except KeyError as e:
-        return bad(handler, str(e), 404)
-    except ValueError as e:
-        return bad(handler, str(e), 400)
-    except Exception as e:
-        return bad(handler, _sanitize_error(e), 500)
-
-
-def _handle_terminal_resize(handler, body):
-    try:
-        require(body, "session_id")
-        from api.terminal import resize_terminal
-        resize_terminal(
-            body["session_id"],
-            rows=int(body.get("rows") or 24),
-            cols=int(body.get("cols") or 80),
-        )
-        return j(handler, {"ok": True})
-    except KeyError as e:
-        return bad(handler, str(e), 404)
-    except ValueError as e:
-        return bad(handler, str(e), 400)
-    except Exception as e:
-        return bad(handler, _sanitize_error(e), 500)
-
-
-def _handle_terminal_close(handler, body):
-    try:
-        require(body, "session_id")
-        from api.terminal import close_terminal
-        closed = close_terminal(body["session_id"])
-        return j(handler, {"ok": True, "closed": closed})
-    except ValueError as e:
-        return bad(handler, str(e), 400)
-
 
 def _handle_terminal_output(handler, parsed):
     qs = parse_qs(parsed.query)
@@ -3950,7 +3708,6 @@ def _handle_terminal_output(handler, parsed):
         pass
     return True
 
-
 def _gateway_sse_probe_payload(settings, watcher):
     enabled = bool(settings.get('show_cli_sessions'))
     # Use the public is_alive() accessor where available (current GatewayWatcher);
@@ -3977,7 +3734,6 @@ def _gateway_sse_probe_payload(settings, watcher):
         payload['error'] = 'watcher not started'
         return payload, 503
     return payload, 200
-
 
 def _handle_gateway_sse_stream(handler, parsed):
     """SSE endpoint for real-time gateway session updates.
@@ -4034,7 +3790,6 @@ def _handle_gateway_sse_stream(handler, parsed):
         watcher.unsubscribe(q)
     return True
 
-
 def _content_disposition_value(disposition: str, filename: str) -> str:
     """Build a latin-1-safe Content-Disposition value with RFC 5987 filename*."""
     import urllib.parse as _up
@@ -4056,7 +3811,6 @@ def _content_disposition_value(disposition: str, filename: str) -> str:
         f'{disposition}; filename="{ascii_fallback}"; '
         f"filename*=UTF-8''{quoted_name}"
     )
-
 
 def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | None:
     """Parse a single HTTP bytes range into inclusive start/end offsets."""
@@ -4085,7 +3839,6 @@ def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | 
         return start, end
     except ValueError:
         return None
-
 
 def _serve_file_bytes(handler, target: Path, mime: str, disposition: str, cache_control: str, *, csp: str | None = None):
     """Serve a file with correct MIME/disposition and optional byte-range support."""
@@ -4143,7 +3896,6 @@ def _serve_file_bytes(handler, target: Path, mime: str, disposition: str, cache_
         except PermissionError:
             return True
     return True
-
 
 def _handle_media(handler, parsed):
     """Serve a local file by absolute path for inline display in the chat.
@@ -4237,7 +3989,6 @@ def _handle_media(handler, parsed):
     csp = "sandbox allow-scripts" if html_inline_ok else None
     return _serve_file_bytes(handler, target, mime, disposition, "private, max-age=3600", csp=csp)
 
-
 def _handle_file_raw(handler, parsed):
     qs = parse_qs(parsed.query)
     sid = qs.get("session_id", [""])[0]
@@ -4272,7 +4023,6 @@ def _handle_file_raw(handler, parsed):
     csp = "sandbox allow-scripts" if html_inline_ok else None
     # _serve_file_bytes sends Content-Security-Policy when csp is set.
     return _serve_file_bytes(handler, target, mime, disposition, "no-store", csp=csp)
-
 
 def _handle_approval_sse_stream(handler, parsed):
     """SSE endpoint for real-time approval notifications.
@@ -4332,7 +4082,6 @@ def _handle_approval_sse_stream(handler, parsed):
         pass  # client went away — normal for long-lived connections
     finally:
         _approval_sse_unsubscribe(sid, q)
-
 
 def _handle_clarify_sse_stream(handler, parsed):
     """SSE endpoint for real-time clarify notifications.
@@ -4404,7 +4153,6 @@ def _handle_clarify_sse_stream(handler, parsed):
         pass
     finally:
         clarify_sse_unsubscribe(sid, q)
-
 
 def _handle_live_models(handler, parsed):
     """Return the live model list for a provider.
@@ -4633,7 +4381,6 @@ def _handle_live_models(handler, parsed):
         logger.debug("_handle_live_models failed for %s: %s", provider, _e)
         return j(handler, {"error": str(_e), "models": []})
 
-
 def _handle_cron_history(handler, parsed):
     """Validate cron history query parameters before delegating to cron_read."""
     import re as _re
@@ -4651,7 +4398,6 @@ def _handle_cron_history(handler, parsed):
         return j(handler, {"error": "offset and limit must be integers"}, status=400)
     return _cron_history_response(handler, job_id, offset, limit)
 
-
 def _handle_cron_run_detail(handler, parsed):
     """Validate cron run detail query parameters before delegating to cron_read."""
     import re as _re
@@ -4665,9 +4411,7 @@ def _handle_cron_run_detail(handler, parsed):
         return j(handler, {"error": "invalid job_id"}, status=400)
     return _cron_run_detail_response(handler, job_id, filename)
 
-
 # ── POST route helpers ────────────────────────────────────────────────────────
-
 
 def _handle_sessions_cleanup(handler, body, zero_only=False):
     cleaned = 0
@@ -4690,7 +4434,6 @@ def _handle_sessions_cleanup(handler, body, zero_only=False):
     if SESSION_INDEX_FILE.exists():
         SESSION_INDEX_FILE.unlink(missing_ok=True)
     return j(handler, {"ok": True, "cleaned": cleaned})
-
 
 def _handle_btw(handler, body):
     """POST /api/btw — ephemeral side question using session context.
@@ -4746,7 +4489,6 @@ def _handle_btw(handler, body):
     )
     thr.start()
     return j(handler, {"stream_id": stream_id, "session_id": ephemeral.session_id, "parent_session_id": body["session_id"]})
-
 
 def _handle_background(handler, body):
     """POST /api/background — run prompt in parallel background agent.
@@ -4838,7 +4580,6 @@ def _handle_background(handler, body):
     thr.start()
     return j(handler, {"task_id": task_id, "stream_id": stream_id, "session_id": bg.session_id})
 
-
 def _checkpoint_user_message_for_eager_session_save(s, msg: str, attachments, started_at: float | None) -> None:
     """Materialize the current user turn for eager first-turn persistence.
 
@@ -4862,7 +4603,6 @@ def _checkpoint_user_message_for_eager_session_save(s, msg: str, attachments, st
     if attachments:
         user_msg["attachments"] = list(attachments)
     s.messages.append(user_msg)
-
 
 def _prepare_chat_start_session_for_stream(
     s,
@@ -4899,7 +4639,6 @@ def _prepare_chat_start_session_for_stream(
             s.pending_started_at,
         )
     s.save()
-
 
 def _handle_chat_start(handler, body):
     try:
@@ -5000,7 +4739,6 @@ def _handle_chat_start(handler, body):
         response["effective_model_provider"] = model_provider
     return j(handler, response)
 
-
 def _normalize_chat_attachments(raw_attachments):
     """Normalize attachment payloads from the browser.
 
@@ -5029,7 +4767,6 @@ def _normalize_chat_attachments(raw_attachments):
             if value:
                 normalized.append({"name": value, "path": "", "mime": ""})
     return normalized
-
 
 def _handle_chat_sync(handler, body):
     """Fallback synchronous chat endpoint (POST /api/chat). Not used by frontend."""
@@ -5186,7 +4923,6 @@ def _handle_chat_sync(handler, body):
         },
     )
 
-
 def _handle_cron_create(handler, body):
     try:
         require(body, "prompt", "schedule")
@@ -5209,7 +4945,6 @@ def _handle_cron_create(handler, body):
         return j(handler, {"ok": True, "job": _cron_job_for_api(job)})
     except Exception as e:
         return j(handler, {"error": str(e)}, status=400)
-
 
 def _handle_cron_batch(handler, body):
     raw_profiles = body.get("profiles", body.get("profile_names"))
@@ -5245,7 +4980,6 @@ def _handle_cron_batch(handler, body):
         })
     return j(handler, {"profiles": results})
 
-
 def _handle_cron_update(handler, body):
     try:
         require(body, "job_id")
@@ -5269,7 +5003,6 @@ def _handle_cron_update(handler, body):
         return bad(handler, "Job not found", 404)
     return j(handler, {"ok": True, "job": _cron_job_for_api(job)})
 
-
 def _handle_cron_delete(handler, body):
     try:
         require(body, "job_id")
@@ -5281,7 +5014,6 @@ def _handle_cron_delete(handler, body):
     if not ok:
         return bad(handler, "Job not found", 404)
     return j(handler, {"ok": True, "job_id": body["job_id"]})
-
 
 def _handle_cron_run(handler, body):
     job_id = body.get("job_id", "")
@@ -5317,7 +5049,6 @@ def _handle_cron_run(handler, body):
     threading.Thread(target=_run_cron_tracked, args=(job, _profile_home, _execution_profile_home), daemon=True).start()
     return j(handler, {"ok": True, "job_id": job_id, "status": "running"})
 
-
 def _handle_cron_pause(handler, body):
     job_id = body.get("job_id", "")
     if not job_id:
@@ -5329,7 +5060,6 @@ def _handle_cron_pause(handler, body):
         return j(handler, {"ok": True, "job": result})
     return bad(handler, "Job not found", 404)
 
-
 def _handle_cron_resume(handler, body):
     job_id = body.get("job_id", "")
     if not job_id:
@@ -5340,7 +5070,6 @@ def _handle_cron_resume(handler, body):
     if result:
         return j(handler, {"ok": True, "job": result})
     return bad(handler, "Job not found", 404)
-
 
 def _handle_file_reveal(handler, body):
     try:
@@ -5375,7 +5104,6 @@ def _handle_file_reveal(handler, body):
     except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
 
-
 def _handle_file_path(handler, body):
     """Resolve a relative workspace-rooted path into an absolute on-disk path.
 
@@ -5404,7 +5132,6 @@ def _handle_file_path(handler, body):
     except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
 
-
 def _handle_workspace_reorder(handler, body):
     """Reorder workspaces by providing an ordered list of paths.
 
@@ -5431,7 +5158,6 @@ def _handle_workspace_reorder(handler, body):
             reordered.append(w)
     save_workspaces(reordered)
     return j(handler, {"ok": True, "workspaces": reordered})
-
 
 def _handle_approval_respond(handler, body):
     sid = body.get("session_id", "")
@@ -5490,7 +5216,6 @@ def _handle_approval_respond(handler, body):
     # thread is parked in entry.event.wait() and needs to be woken up.
     resolve_gateway_approval(sid, choice, resolve_all=False)
     return j(handler, {"ok": True, "choice": choice})
-
 
 def _handle_session_compress(handler, body):
     def _visible_messages_for_anchor(messages):
@@ -5767,7 +5492,6 @@ def _handle_session_compress(handler, body):
         logger.warning("Manual session compression failed: %s", e)
         return bad(handler, f"Compression failed: {_sanitize_error(e)}")
 
-
 def _build_handoff_summary_tool_message(
     sid: str,
     summary: str,
@@ -5795,7 +5519,6 @@ def _build_handoff_summary_tool_message(
             "generated_at": now,
         }, ensure_ascii=False),
     }
-
 
 def _extract_handoff_summary_payload(message: dict) -> dict | None:
     """Return a normalized handoff-summary payload if *message* is a tool marker."""
@@ -5826,7 +5549,6 @@ def _extract_handoff_summary_payload(message: dict) -> dict | None:
         "_handoff_summary_card": True,
     }
 
-
 def _is_matching_handoff_summary_message(existing: dict, target: dict) -> bool:
     """Return True when two message payloads represent the same handoff summary."""
     existing_payload = _extract_handoff_summary_payload(existing)
@@ -5841,7 +5563,6 @@ def _is_matching_handoff_summary_message(existing: dict, target: dict) -> bool:
         existing_payload.get("fallback") == target_payload.get("fallback") and
         existing_payload.get("_handoff_summary_card") == target_payload.get("_handoff_summary_card")
     )
-
 
 def _is_matching_handoff_summary_content(content: object, target_payload: dict | None) -> bool:
     """Return True if DB content JSON matches an expected handoff summary payload."""
@@ -5864,7 +5585,6 @@ def _is_matching_handoff_summary_content(content: object, target_payload: dict |
         bool(payload.get("fallback")) == bool(target_payload.get("fallback"))
     )
 
-
 def _persist_handoff_summary_locally(sid: str, message: dict) -> bool:
     """Persist a handoff summary marker into a local WebUI session file."""
     try:
@@ -5883,7 +5603,6 @@ def _persist_handoff_summary_locally(sid: str, message: dict) -> bool:
     except Exception as e:
         logger.warning("Failed to persist handoff summary marker in local session %s: %s", sid, e)
         return False
-
 
 def _persist_handoff_summary_to_state_db(sid: str, message: dict) -> bool:
     """Persist a handoff summary marker into CLI sessions state.db.
@@ -5950,7 +5669,6 @@ def _persist_handoff_summary_to_state_db(sid: str, message: dict) -> bool:
         logger.warning("Failed to persist handoff summary marker in state.db for %s: %s", sid, e)
         return False
 
-
 def _persist_handoff_summary(sid: str, summary: str, channel: str | None, rounds: int | None, fallback: bool = False) -> dict:
     """Persist a handoff summary marker across local/session backends."""
     marker = _build_handoff_summary_tool_message(sid, summary, channel, rounds, fallback)
@@ -5963,7 +5681,6 @@ def _persist_handoff_summary(sid: str, summary: str, channel: str | None, rounds
     if persisted_local:
         return marker
     return marker if _persist_handoff_summary_to_state_db(sid, marker) else marker
-
 
 def _handle_handoff_summary(handler, body):
     """Generate an on-demand handoff summary for a gateway session.
@@ -6386,10 +6103,8 @@ def _handle_handoff_summary(handler, body):
             "warning": f"Summary generation used local fallback: {_sanitize_error(e)}",
         })
 
-
 def _handle_skill_save(handler, body):
     return _handle_skill_save_impl(handler, body)
-
 
 def _normalize_message_for_import_refresh(message: object) -> object:
     """Normalize message payloads for import refresh prefix checks.
@@ -6406,7 +6121,6 @@ def _normalize_message_for_import_refresh(message: object) -> object:
     normalized.pop("_ts", None)
     return normalized
 
-
 def _message_has_cli_tool_metadata(message: object) -> bool:
     if not isinstance(message, dict):
         return False
@@ -6415,7 +6129,6 @@ def _message_has_cli_tool_metadata(message: object) -> bool:
     if message.get("role") == "tool" and (message.get("tool_call_id") or message.get("tool_name") or message.get("name")):
         return True
     return False
-
 
 def _strip_cli_tool_metadata_for_refresh(message: object) -> object:
     if not isinstance(message, dict):
@@ -6426,7 +6139,6 @@ def _strip_cli_tool_metadata_for_refresh(message: object) -> object:
     for key in ("tool_calls", "tool_call_id", "tool_name", "name"):
         normalized.pop(key, None)
     return normalized
-
 
 def _is_cli_tool_metadata_enrichment(existing_messages: list, fresh_messages: list) -> bool:
     """Return True when fresh messages only add CLI tool metadata.
@@ -6449,7 +6161,6 @@ def _is_cli_tool_metadata_enrichment(existing_messages: list, fresh_messages: li
             return False
     return True
 
-
 def _is_messages_refresh_prefix_match(existing_messages: list, fresh_messages: list) -> bool:
     """Return True when existing_messages is a prefix of fresh_messages by value.
 
@@ -6466,7 +6177,6 @@ def _is_messages_refresh_prefix_match(existing_messages: list, fresh_messages: l
         if _normalize_message_for_import_refresh(existing_message) != _normalize_message_for_import_refresh(fresh_message):
             return False
     return True
-
 
 def _handle_session_import_cli(handler, body):
     """Import a single CLI session into the WebUI store."""
@@ -6642,7 +6352,6 @@ def _handle_session_import_cli(handler, body):
         },
     )
 
-
 # ── MCP Server helpers ──
 from api.config import get_config, _save_yaml_config_file, _get_config_path, reload_config
 
@@ -6661,7 +6370,6 @@ def _mask_secrets(obj):
             masked[k] = v
     return masked
 
-
 def _parse_mcp_enabled(value) -> bool:
     """Parse Hermes MCP ``enabled`` values without raising on bad config."""
     if value is None:
@@ -6677,7 +6385,6 @@ def _parse_mcp_enabled(value) -> bool:
         if normalized in {"false", "0", "no", "off"}:
             return False
     return True
-
 
 def _mcp_runtime_status_by_name() -> dict[str, dict]:
     """Return already-known MCP runtime status without starting servers.
@@ -6698,7 +6405,6 @@ def _mcp_runtime_status_by_name() -> dict[str, dict]:
         for entry in statuses
         if isinstance(entry, dict) and entry.get("name")
     }
-
 
 def _server_summary(name, cfg, runtime_status=None):
     """Return a safe summary of an MCP server config."""
@@ -6750,7 +6456,6 @@ def _server_summary(name, cfg, runtime_status=None):
     out["tool_count"] = runtime_status.get("tools") if runtime_status else None
     return out
 
-
 def _mcp_safe_display_text(value, *, limit: int) -> str:
     """Return redacted, bounded MCP text safe for WebUI inventory rows."""
     if not isinstance(value, str):
@@ -6760,7 +6465,6 @@ def _mcp_safe_display_text(value, *, limit: int) -> str:
     if len(value) > limit:
         value = value[: max(0, limit - 1)].rstrip() + "…"
     return value
-
 
 def _mcp_schema_type(schema) -> str:
     """Return a compact, non-sensitive display type for a JSON schema node."""
@@ -6777,7 +6481,6 @@ def _mcp_schema_type(schema) -> str:
     if "enum" in schema:
         return "enum"
     return "unknown"
-
 
 def _mcp_schema_summary(schema, *, limit: int = 12) -> list[dict]:
     """Summarize an MCP input schema without exposing raw defaults/examples.
@@ -6813,7 +6516,6 @@ def _mcp_schema_summary(schema, *, limit: int = 12) -> list[dict]:
         })
     return out
 
-
 def _mcp_tool_schema_from_payload(tool):
     if not isinstance(tool, dict):
         return {}
@@ -6824,7 +6526,6 @@ def _mcp_tool_schema_from_payload(tool):
                 return value["parameters"]
             return value
     return {}
-
 
 def _mcp_tool_summary(name, tool, server_summary):
     """Return a safe global inventory row for one MCP tool."""
@@ -6848,7 +6549,6 @@ def _mcp_tool_summary(name, tool, server_summary):
         "schema_summary": _mcp_schema_summary(_mcp_tool_schema_from_payload(tool)),
     }
 
-
 def _mcp_tools_from_runtime_status(runtime_by_name, server_summaries):
     """Read detailed MCP tool payloads from runtime status when available."""
     tools = []
@@ -6869,7 +6569,6 @@ def _mcp_tools_from_runtime_status(runtime_by_name, server_summaries):
             if summary["name"]:
                 tools.append(summary)
     return tools
-
 
 def _mcp_tools_from_registry(server_summaries):
     """Read already-registered MCP tool schemas without probing MCP servers."""
@@ -6900,9 +6599,7 @@ def _mcp_tools_from_registry(server_summaries):
         tools.append(_mcp_tool_summary(tool_name, schema, server_summary))
     return tools
 
-
 _MASKED_PLACEHOLDER = "••••••"
-
 
 def _strip_masked_values(submitted, existing):
     """Remove masked placeholder values from submitted dict, keeping originals."""
