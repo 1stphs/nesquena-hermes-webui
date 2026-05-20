@@ -244,3 +244,61 @@ if parsed.path == "/api/mcp/tools":
 - `handle_get` / `handle_post` / `handle_patch` / `handle_delete` 体内 if/elif 结构改写。
 - 红区端点的搬迁。
 - `_handle_logs`、`_handle_llm_wiki_status`、`_handle_insights`、`_handle_health`、`_handle_plugins` 这几个 step1 留下的 endpoint helper——它们已经是顶层 def,但更接近"端点逻辑"而不是"helper"。归 `routes_helpers/` 还是 `routes_handlers/`,等阶段 1 扫描工具跑完看其评级再决定,不预定。
+
+## 实际进度记录(2026-05-20 回填)
+
+### 当前终态
+
+- Z-PR8 已推到 `master`: `c9bee7c refactor(routes): 抽出会话导入端点处理器`。
+- 当前 `api/routes.py`: 6921 行。
+- 当前 `api/routes_handlers/`: 41 个 `_handle_*` 定义,覆盖 9 个 handler 子模块。
+- 当前 contract scan: `green=62 yellow=7 red=12`。
+- 当前全套回归: `4823 passed, 57 skipped, 3 xpassed, 4 warnings, 8 subtests passed`。
+- `_handle_skill_save` 是特殊薄壳:真实实现已在 `api/routes_handlers/skill.py`,但 `api/routes.py` 仍保留同名 `def` 作为源码契约边界。
+
+### Z-PR1 到 Z-PR8 实际记录
+
+起点按 `690cd19 chore(routes): stabilize contract report` 后的 8485 行计算。Z-PR1 到 Z-PR8 合计从 `api/routes.py` 降 1564 行,终态 6921 行。若从契约扫描 commit `ae52931` 的 8560 行起算,step2 已累计降 1639 行。
+
+| PR | commit | 子模块 | 实际搬迁端点数 | `routes.py` 行数 | 实际降行 | 原预估降行 | 结果说明 |
+|---|---|---|---:|---:|---:|---:|---|
+| Z-PR1 | `b7d549e` | `routes_handlers/profile.py` | 10 | 7745 | 740 | ~500 | profile 单 handler 平均体量高于预估 |
+| Z-PR2 | `cde6901` | `routes_handlers/skill.py` + `routes_handlers/memory.py` | 4 | 7531 | 214 | ~250 | 只补齐 green 端点,`_handle_skill_save` 继续保留 routes.py 薄壳 |
+| Z-PR3 | `06b4602` | `routes_handlers/mcp.py` | 3 | 7460 | 71 | ~200 | `_handle_mcp_tools_list` 已在 POC 搬出,本 PR 只补剩余 3 个 |
+| Z-PR4 | `0608014` | `routes_handlers/cron_read.py` | 4 | 7274 | 186 | ~250 | 只搬 cron 读/状态 green 端点,`cron_history`/`cron_run_detail` red 留在 routes.py |
+| Z-PR5 | `9a2c478` | `routes_handlers/file.py` | 7 | 7116 | 158 | ~300 | `file_path`/`file_reveal` red 留在 routes.py,`file_raw`/media 链路不动 |
+| Z-PR6 | `28afb4f` | `routes_handlers/workspace.py` | 3 | 7056 | 60 | ~80 | 不含 `_handle_workspace_reorder` |
+| Z-PR7 | `c3ab395` | `routes_handlers/approval.py` | 5 | 6980 | 76 | ~300 | 只搬 approval/clarify green 端点,`_handle_approval_respond` 和 SSE 链路留在 routes.py |
+| Z-PR8 | `c9bee7c` | `routes_handlers/session_io.py` | 2 | 6921 | 59 | ~600 | 只搬 `_handle_session_import`、`_handle_conversation_rounds`; session CLI/handoff/compress/export 留在 routes.py |
+
+POC 期在 Z-PR1 前已搬/代理 3 个端点: `_handle_mcp_tools_list`、`_handle_memory_read`、`_handle_skill_save` 实现下沉。Z-PR1 到 Z-PR8 之后,`routes_handlers` 当前实际承载 41 个 `_handle_*` 定义。
+
+### 仍留在 `api/routes.py` 的 red/yellow
+
+这些端点不再属于 step2 继续搬迁范围。要继续移动它们,先做 step3:把源码契约测试现代化为扫 `api/**` 或改为行为级断言,再逐个迁移。
+
+| status | 函数 | 留存原因 |
+|---|---|---|
+| red | `_handle_approval_sse_stream` | routes.py 物理 def 和 SSE 队列/断线字面量被测试锁定 |
+| red | `_handle_background` | routes.py 物理 def 被测试锁定 |
+| red | `_handle_clarify_sse_stream` | routes.py 物理 def 和 SSE 队列/断线字面量被测试锁定 |
+| red | `_handle_cron_history` | routes.py 物理 def 被测试锁定 |
+| red | `_handle_cron_run` | routes.py 物理 def 被测试锁定 |
+| red | `_handle_cron_run_detail` | routes.py 物理 def 被测试锁定 |
+| red | `_handle_file_path` | routes.py 物理 def 被测试锁定 |
+| red | `_handle_file_reveal` | routes.py 物理 def 被测试锁定 |
+| red | `_handle_handoff_summary` | routes.py 物理 def 和 runtime provider 字面量被测试锁定 |
+| red | `_handle_live_models` | routes.py 物理 def、`/api/models/live`、provider model 字面量被测试锁定 |
+| red | `_handle_session_import_cli` | routes.py 物理 def 被测试锁定 |
+| red | `_handle_skill_save` | routes.py 物理 def 被 `handoff_summary` 源码切片边界锁定,当前保留薄壳 |
+| yellow | `_handle_approval_respond` | 函数体含 approval queue 字面量 |
+| yellow | `_handle_chat_start` | 函数体含 pending turn 字面量 |
+| yellow | `_handle_chat_sync` | 函数体含 runtime provider env-lock 字面量 |
+| yellow | `_handle_gateway_sse_stream` | 函数体含 SSE disconnect 字面量 |
+| yellow | `_handle_session_compress` | 函数体含 runtime provider env-lock 和 pending turn 字面量 |
+| yellow | `_handle_session_export` | `inspect.getsource(routes._handle_session_export)` 被测试使用 |
+| yellow | `_handle_sse_stream` | 函数体含 SSE disconnect 字面量 |
+
+### 当前结论
+
+step2 的保守拆分到 Z-PR8 已收口。当前终态没有达到 5500-6500 行预估,主要原因是 red/yellow 端点和若干未纳入 Z-PR1-8 的 green 端点继续留在 routes.py。后续不应在 step2 内继续硬搬 red/yellow;需要单独立项 step3 测试现代化。

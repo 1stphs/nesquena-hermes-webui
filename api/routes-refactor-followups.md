@@ -17,9 +17,24 @@ step2 阶段 3(Z-PR1 ~ Z-PR8)推进过程中,**与拆分本身无关、但每次
 - `scan_routes_contracts.py` 的契约覆盖扩展 —— 实测 `_check_contracts` 已经覆盖了 R1 类回归会触发的契约面(`assert "X" in routes_src` / `def _handle_X(` / re-export / 全限定调用),不需重复造轮子
 - routes.py 顶部 re-export 块的精简 —— 显式列举是 `mock.patch("api.routes._handle_xxx")` 兼容性所必需,**主动不动**
 
+## 当前状态(2026-05-20 回填)
+
+| 项 | 状态 | 证据 / 处理 |
+|---|---|---|
+| A1 `tests/test_profile_memory_api.py` 全套污染 | 可关闭 | 当前定向 `tests/test_profile_memory_api.py tests/test_profile_workspace_default.py tests/test_title_sanitization.py` 通过 18/18;后续已有 `1e53a43 test(profile): fully isolate api.profiles reload from sys.modules and parent package` |
+| A2 `tests/test_profile_workspace_default.py` 全套污染 | 已完成 | `1e53a43` 修改 `tests/test_profile_workspace_default.py`,当前定向通过 |
+| A3 `api/streaming.py` 顶部 CJK docstring | 已完成 | `11945df style(streaming): drop CJK paraphrase from module docstring`,当前 `api/streaming.py` 顶部为纯英文 docstring |
+| B1 routes contract workflow 覆盖 `tests/test_*.py` | 已完成 | `beda8fa ci(routes): extend contract gate to tests changes`,当前 pull_request/push paths 均包含 `tests/test_*.py` |
+| C1 `routes-refactor-step2.md` 进度回填 | 已完成 | 本轮在 `api/routes-refactor-step2.md` 追加 Z-PR1 到 Z-PR8 实际记录和 red/yellow 留存清单 |
+| `.gitignore` unignore routes refactor docs | 已完成 | 当前 `.gitignore` 已包含 `!api/routes-refactor-step1.md`、`!api/routes-refactor-step2.md`、`!api/routes-refactor-followups.md`、`!api/routes-handlers-contract.md` |
+
+当前 step2 不再继续规划新的 handler 搬迁。剩余 red/yellow 端点进入 step3:先测试现代化,再谈迁移。
+
 ## A 类:测试基础设施债务
 
 ### A1. `tests/test_profile_memory_api.py` 6 个测试在全套中污染
+
+**2026-05-20 状态**:可关闭。当前未复现;定向运行 `tests/test_profile_memory_api.py tests/test_profile_workspace_default.py tests/test_title_sanitization.py` 为 18/18 通过。后续已有 `1e53a43 test(profile): fully isolate api.profiles reload from sys.modules and parent package`,该提交隔离 `api.profiles` reload 和 parent package 引用。
 
 **现状**:6 个测试单独跑全过(单文件 23/23),嵌入全套时挂 6 个。每个测试都 `monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", base)` + 用 `tmp_path`——表面看 fixture 隔离对了。
 
@@ -42,6 +57,8 @@ step2 阶段 3(Z-PR1 ~ Z-PR8)推进过程中,**与拆分本身无关、但每次
 
 ### A2. `tests/test_profile_workspace_default.py` 全套挂 / 单跑过
 
+**2026-05-20 状态**:已完成。`1e53a43` 已改 `tests/test_profile_workspace_default.py`,当前定向验证通过。
+
 **现状**:`test_load_workspaces_falls_back_to_named_profile_workspace_dir` 单跑过,全套挂。又一个污染。
 
 **改法**:跟 A1 同样的二分定位流程。可能跟 A1 同源(都跟 profile 模块状态有关),如果是,A1 修了 A2 顺带过。先做 A1,跑全套看 A2 是否还在。
@@ -49,6 +66,8 @@ step2 阶段 3(Z-PR1 ~ Z-PR8)推进过程中,**与拆分本身无关、但每次
 **commit 策略**:如果 A1 没顺带修好,单独一 commit。
 
 ### A3. `tests/test_title_sanitization::test_title_generation_source_has_no_cjk_literals`
+
+**2026-05-20 状态**:已完成。`11945df style(streaming): drop CJK paraphrase from module docstring` 已把 `api/streaming.py` 顶部中文 paraphrase 移除,当前定向验证通过。
 
 **现状**:测试断言 `api/streaming.py` 全文不含 `[一-鿿]` 范围字符。当前 [api/streaming.py:4-7](api/streaming.py#L4) 顶部 docstring 有"中文说明:Hermes Web UI 的 SSE streaming engine..."——直接挂。
 
@@ -94,6 +113,8 @@ Includes Sprint 10 cancel support via CANCEL_FLAGS.
 
 ### B1. `routes-contracts.yml` 触发 paths 扩展到 `tests/test_*.py`
 
+**2026-05-20 状态**:已完成。`beda8fa ci(routes): extend contract gate to tests changes` 已在 pull_request 和 push 的 paths 中加入 `tests/test_*.py`。
+
 **现状**:CI workflow 当前 paths 只覆盖:
 
 ```yaml
@@ -138,6 +159,8 @@ on:
 
 ### C1. `routes-refactor-step2.md` 阶段 3 实际进度回填
 
+**2026-05-20 状态**:已完成。本轮已在 `api/routes-refactor-step2.md` 追加实际进度记录、当前 routes.py 行数、Z-PR1 到 Z-PR8 实际表、red/yellow 留存清单和 step3 边界。
+
 **现状**:step2.md 表格写的预估和 Z-PR1~Z-PR3 实际值偏差很大:
 
 | 项 | step2.md 预估 | 实际 |
@@ -171,7 +194,9 @@ on:
 
 ## 优先顺序与节奏
 
-按时间紧迫度和 ROI 排:
+**2026-05-20 状态**:本节已归档。A/B/C 项均已有当前状态标注;不要再按下面旧排期继续执行。若要继续处理 routes 拆分,从 step3 测试现代化另开文档。
+
+原计划按时间紧迫度和 ROI 排:
 
 | 序 | 项 | 何时做 | 阻塞 Z-PR4? |
 |---|---|---|---|
@@ -181,9 +206,11 @@ on:
 | 4 | **A2** profile_workspace_default | 跟 A1 一起 / A1 后 | 否 |
 | 5 | **C1** 进度回填 | Z-PR8 后 | 否(本就是收尾) |
 
-**建议节奏**:今天先做 1+2(两个独立 commit,半小时内),然后并行起 Z-PR4 + A1 定位。A1 / A2 修完后,Z-PR4 ~ Z-PR8 的"全套 pytest"信号就干净了。
+**归档说明**:原建议节奏已经执行完或不再适用。当前不要并行起 Z-PR4 ~ Z-PR8;这些 PR 已收口到 Z-PR8。
 
 ## 实施时间预估
+
+**2026-05-20 状态**:历史估时,仅保留作复盘参考。
 
 | 项 | 估时 |
 |---|---|
@@ -195,6 +222,15 @@ on:
 | 合计 | ~2-3 小时(分散在 Z-PR4~8 期间) |
 
 ## .gitignore 提醒
+
+**2026-05-20 状态**:已完成。当前 [.gitignore](../.gitignore) 已包含:
+
+```gitignore
+!api/routes-refactor-step1.md
+!api/routes-refactor-step2.md
+!api/routes-refactor-followups.md
+!api/routes-handlers-contract.md
+```
 
 `~/.gitignore_global` 的 `*.md` 规则会忽略本文件。落盘后需要在 [.gitignore](../.gitignore) 加一行:
 
