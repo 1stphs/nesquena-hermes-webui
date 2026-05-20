@@ -245,6 +245,14 @@ from api.routes_handlers.memory import (
     _handle_memory_read,
     _handle_memory_write,
 )
+from api.routes_handlers.cron_read import (
+    _cron_history_response,
+    _cron_run_detail_response,
+    _handle_cron_output,
+    _handle_cron_status,
+    _handle_cron_recent,
+    _handle_cron_calendar,
+)
 from api.routes_handlers.mcp import (
     _handle_mcp_tools_list,
     _handle_mcp_servers_list,
@@ -4718,55 +4726,25 @@ def _handle_live_models(handler, parsed):
 
 
 def _handle_cron_history(handler, parsed):
-    """List cron run output files with metadata (no content).
-
-    Returns lightweight file listing so the frontend can render a run history
-    without fetching full output for every run.
-    """
-    from cron.jobs import OUTPUT_DIR as CRON_OUT
+    """Validate cron history query parameters before delegating to cron_read."""
     import re as _re
 
     qs = parse_qs(parsed.query)
     job_id = qs.get("job_id", [""])[0]
     if not job_id:
         return j(handler, {"error": "job_id required"}, status=400)
-    # Defense-in-depth: cron job_ids are 12-char hex from the agent's scheduler.
-    # Without validation, a job_id of "../<other>" would let an authenticated
-    # caller enumerate .md filenames in adjacent directories under CRON_OUT's
-    # parent. Mirror the rollback checkpoint id regex shape.
-    # (Opus pre-release advisor finding.)
     if not _re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,63}", job_id) or job_id in (".", ".."):
         return j(handler, {"error": "invalid job_id"}, status=400)
-    # Reject malformed offset/limit instead of letting int() raise ValueError
-    # and surface as a confusing 500. Clamp to safe ranges.
     try:
         offset = max(0, int(qs.get("offset", ["0"])[0]))
         limit = max(1, min(500, int(qs.get("limit", ["50"])[0])))
     except (ValueError, TypeError):
         return j(handler, {"error": "offset and limit must be integers"}, status=400)
-    out_dir = CRON_OUT / job_id
-    runs = []
-    total = 0
-    if out_dir.exists():
-        all_files = sorted(out_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
-        total = len(all_files)
-        page = all_files[offset:offset + limit]
-        for f in page:
-            try:
-                st = f.stat()
-                runs.append({
-                    "filename": f.name,
-                    "size": st.st_size,
-                    "modified": st.st_mtime,
-                })
-            except OSError:
-                logger.debug("Failed to stat cron output file %s", f)
-    return j(handler, {"job_id": job_id, "runs": runs, "total": total, "offset": offset})
+    return _cron_history_response(handler, job_id, offset, limit)
 
 
 def _handle_cron_run_detail(handler, parsed):
-    """Return full content of a single cron run output file."""
-    from cron.jobs import OUTPUT_DIR as CRON_OUT
+    """Validate cron run detail query parameters before delegating to cron_read."""
     import re as _re
 
     qs = parse_qs(parsed.query)
@@ -4774,117 +4752,9 @@ def _handle_cron_run_detail(handler, parsed):
     filename = qs.get("filename", [""])[0]
     if not job_id or not filename:
         return j(handler, {"error": "job_id and filename required"}, status=400)
-    # Validate job_id shape (defense-in-depth even though the resolve+is_relative_to
-    # check below catches traversal — fail-closed at the parameter boundary so
-    # malformed job_ids return a 400 from the validator rather than a 400 from
-    # the path resolver).
     if not _re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,63}", job_id) or job_id in (".", ".."):
         return j(handler, {"error": "invalid job_id"}, status=400)
-    # Prevent path traversal — resolve and verify it stays within the job's output dir
-    fpath = (CRON_OUT / job_id / filename).resolve()
-    if not fpath.is_relative_to(CRON_OUT.resolve()):
-        return j(handler, {"error": "invalid filename"}, status=400)
-    if not fpath.exists():
-        return j(handler, {"error": "run not found"}, status=404)
-    try:
-        content = fpath.read_text(encoding="utf-8", errors="replace")
-        snippet = _cron_output_snippet(content)
-        return j(handler, {"job_id": job_id, "filename": filename,
-                           "content": content, "snippet": snippet})
-    except Exception as e:
-        return j(handler, {"error": str(e)}, status=500)
-
-
-def _cron_output_snippet(text: str, limit: int = 600) -> str:
-    """Extract the response body from a cron output .md file for preview.
-
-    Contract: cron output files use markdown front-matter followed by a
-    ``## Response`` (or ``# Response``) heading that marks the start of the
-    agent's reply.  This function locates that heading and returns everything
-    after it (up to *limit* chars).  If no heading is found the entire text
-    is returned — callers should be aware that front-matter fields (model,
-    timestamp, …) may appear in the snippet.
-    """
-    lines = text.split("\n")
-    response_idx = -1
-    for i, line in enumerate(lines):
-        if line.startswith("## Response") or line.startswith("# Response"):
-            response_idx = i
-            break
-    body = ("\n".join(lines[response_idx + 1:]) if response_idx >= 0 else "\n".join(lines)).strip()
-    return body[:limit] or "(empty)"
-
-
-def _handle_cron_output(handler, parsed):
-    from cron.jobs import OUTPUT_DIR as CRON_OUT
-
-    qs = parse_qs(parsed.query)
-    job_id = qs.get("job_id", [""])[0]
-    limit = int(qs.get("limit", ["5"])[0])
-    if not job_id:
-        return j(handler, {"error": "job_id required"}, status=400)
-    out_dir = CRON_OUT / job_id
-    outputs = []
-    if out_dir.exists():
-        files = sorted(out_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)[:limit]
-        for f in files:
-            try:
-                txt = f.read_text(encoding="utf-8", errors="replace")
-                outputs.append({"filename": f.name, "content": _cron_output_content_window(txt)})
-            except Exception:
-                logger.debug("Failed to read cron output file %s", f)
-    return j(handler, {"job_id": job_id, "outputs": outputs})
-
-
-def _handle_cron_status(handler, parsed):
-    """Return running status for one or all cron jobs."""
-    qs = parse_qs(parsed.query)
-    job_id = qs.get("job_id", [""])[0]
-    if job_id:
-        running, elapsed = _is_cron_running(job_id)
-        return j(handler, {"job_id": job_id, "running": running, "elapsed": round(elapsed, 1)})
-    # Return status for all running jobs
-    with _RUNNING_CRON_LOCK:
-        all_running = {jid: round(time.time() - t, 1) for jid, t in _RUNNING_CRON_JOBS.items()}
-    return j(handler, {"running": all_running})
-
-
-def _handle_cron_recent(handler, parsed):
-    """Return cron jobs that have completed since a given timestamp."""
-    import datetime
-
-    qs = parse_qs(parsed.query)
-    since = float(qs.get("since", ["0"])[0])
-    try:
-        from cron.jobs import list_jobs
-
-        jobs = list_jobs(include_disabled=True)
-        completions = []
-        for job in jobs:
-            last_run = job.get("last_run_at")
-            if not last_run:
-                continue
-            if isinstance(last_run, str):
-                try:
-                    ts = datetime.datetime.fromisoformat(
-                        last_run.replace("Z", "+00:00")
-                    ).timestamp()
-                except (ValueError, TypeError):
-                    continue
-            else:
-                ts = float(last_run)
-            if ts > since:
-                completions.append(
-                    {
-                        "job_id": job.get("id", ""),
-                        "name": job.get("name", "Unknown"),
-                        "status": job.get("last_status", "unknown"),
-                        "completed_at": ts,
-                    }
-                )
-        return j(handler, {"completions": completions, "since": since})
-    except ImportError:
-        return j(handler, {"completions": [], "since": since})
+    return _cron_run_detail_response(handler, job_id, filename)
 
 
 # ── POST route helpers ────────────────────────────────────────────────────────
@@ -5465,62 +5335,6 @@ def _handle_cron_batch(handler, body):
             "jobs": jobs,
         })
     return j(handler, {"profiles": results})
-
-
-def _handle_cron_calendar(handler, body):
-    raw_profiles = body.get("profiles", body.get("profile_names"))
-    if not isinstance(raw_profiles, list):
-        return bad(handler, "profile_names must be an array")
-    try:
-        month_key, year, month, last_day = _parse_cron_calendar_month(body.get("month"))
-    except ValueError as e:
-        return bad(handler, str(e))
-    if len(raw_profiles) > 100:
-        return bad(handler, "profile_names cannot contain more than 100 entries")
-
-    profiles = []
-    seen = set()
-    try:
-        for raw in raw_profiles:
-            profile = _normalize_cron_profile_lookup_name(raw)
-            if profile in seen:
-                continue
-            seen.add(profile)
-            profiles.append(profile)
-    except ValueError as e:
-        return bad(handler, str(e))
-
-    from api.profiles import cron_profile_context_for_home
-    from cron.jobs import list_jobs
-
-    buckets = {
-        day: {
-            "date": f"{year:04d}-{month:02d}-{day:02d}",
-            "jobs": [],
-            "count": 0,
-        }
-        for day in range(1, last_day + 1)
-    }
-    for profile in profiles:
-        home = _profile_home_for_cron_profile_name(profile)
-        with cron_profile_context_for_home(home):
-            jobs = _cron_jobs_for_api(list_jobs(include_disabled=True))
-        for job in jobs:
-            entry = _cron_calendar_entry(job, profile)
-            for day in sorted(_cron_calendar_days_for_job(job, year, month, last_day)):
-                if day not in buckets:
-                    continue
-                buckets[day]["jobs"].append(dict(entry))
-                buckets[day]["count"] += 1
-
-    return j(
-        handler,
-        {
-            "month": month_key,
-            "profiles": profiles,
-            "days": [buckets[day] for day in range(1, last_day + 1)],
-        },
-    )
 
 
 def _handle_cron_update(handler, body):

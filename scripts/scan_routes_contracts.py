@@ -155,9 +155,8 @@ class TestContractVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Assert(self, node: ast.Assert) -> None:
-        if self._node_references_routes_source(node.test):
-            for text in _literal_strings(node.test):
-                self._add_code_literal(text, node, kind="assert_literal")
+        for text in self._routes_source_in_literals(node.test):
+            self._add_code_literal(text, node, kind="assert_literal")
         self.generic_visit(node)
 
     def visit_Constant(self, node: ast.Constant) -> None:
@@ -197,6 +196,23 @@ class TestContractVisitor(ast.NodeVisitor):
             for kw in node.keywords
         )
 
+    def _routes_source_in_literals(self, node: ast.AST) -> list[str]:
+        if isinstance(node, ast.BoolOp):
+            if isinstance(node.op, ast.Or):
+                return []
+            values: list[str] = []
+            for value in node.values:
+                values.extend(self._routes_source_in_literals(value))
+            return values
+        if isinstance(node, ast.Compare):
+            values = []
+            left_text = _literal_text(node.left)
+            for op, comparator in zip(node.ops, node.comparators):
+                if isinstance(op, ast.In) and left_text and self._node_references_routes_source(comparator):
+                    values.append(left_text)
+            return values
+        return []
+
 
 def _call_name(node: ast.AST) -> str:
     if isinstance(node, ast.Name):
@@ -228,7 +244,14 @@ def _target_names(node: ast.AST) -> list[str]:
 
 def _node_mentions_routes_path(node: ast.AST, routes_path_names: set[str]) -> bool:
     text = ast.unparse(node) if hasattr(ast, "unparse") else ""
-    if "api/routes.py" in text or "routes.py" in text and "/ 'api'" in text:
+    if "api/routes.py" in text or ("routes.py" in text and "api" in text):
+        return True
+    literal_parts = [
+        child.value.replace("\\", "/")
+        for child in ast.walk(node)
+        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+    ]
+    if "routes.py" in literal_parts and "api" in literal_parts:
         return True
     for child in ast.walk(node):
         if isinstance(child, ast.Constant) and isinstance(child.value, str):
@@ -249,9 +272,9 @@ def _node_reads_text(
 ) -> bool:
     if isinstance(node, ast.Call):
         call_name = _call_name(node.func)
-        if call_name.endswith(".read_text"):
+        if call_name == "read_text" or call_name.endswith(".read_text"):
             return _node_mentions_routes_path(node.func, routes_path_names)
-        if call_name.endswith(".read") and isinstance(node.func, ast.Attribute):
+        if (call_name == "read" or call_name.endswith(".read")) and isinstance(node.func, ast.Attribute):
             if isinstance(node.func.value, ast.Name) and node.func.value.id in routes_file_names:
                 return True
         if node.args and _node_mentions_routes_path(node, routes_path_names):

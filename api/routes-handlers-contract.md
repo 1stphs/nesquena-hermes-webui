@@ -51,12 +51,6 @@
     },
     {
       "file": "tests/test_465_session_branching.py",
-      "kind": "assert_literal",
-      "line": 22,
-      "value": "\"/api/session/branch\""
-    },
-    {
-      "file": "tests/test_465_session_branching.py",
       "kind": "regex_literal",
       "line": 31,
       "value": "parsed\\.path == \"/api/session/branch\"(.*?)(?=\\n    if parsed\\.path|$)"
@@ -84,6 +78,108 @@
       "kind": "regex_literal",
       "line": 90,
       "value": "parsed\\.path == \"/api/session/branch\"(.*?)(?=\\n    if parsed\\.path|$)"
+    },
+    {
+      "file": "tests/test_approval_queue.py",
+      "kind": "assert_literal",
+      "line": 54,
+      "value": "queue.pop(0)"
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_handle_approval_sse_stream"
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 39,
+      "value": "\"/api/approval/stream\""
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 44,
+      "value": "def _handle_approval_sse_stream("
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 49,
+      "value": "def _approval_sse_subscribe("
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 54,
+      "value": "def _approval_sse_unsubscribe("
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 59,
+      "value": "def _approval_sse_notify("
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 64,
+      "value": "_approval_sse_subscribers"
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 98,
+      "value": "_approval_sse_notify_locked(session_key, head, total)"
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "regex_literal",
+      "line": 106,
+      "value": "finally:.*\\n.*_approval_sse_unsubscribe\\("
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 111,
+      "value": "_CLIENT_DISCONNECT_ERRORS"
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 116,
+      "value": "queue.Queue(maxsize="
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 122,
+      "value": "queue.Full"
+    },
+    {
+      "file": "tests/test_approval_sse.py",
+      "kind": "assert_literal",
+      "line": 140,
+      "value": "_approval_sse_subscribers.pop(session_id, None)"
+    },
+    {
+      "file": "tests/test_background_tasks.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_handle_background"
+    },
+    {
+      "file": "tests/test_background_tasks.py",
+      "kind": "def_literal",
+      "line": 127,
+      "value": "_handle_background"
+    },
+    {
+      "file": "tests/test_background_tasks.py",
+      "kind": "source_position_reference",
+      "line": 127,
+      "value": "_handle_background"
     },
     {
       "file": "tests/test_byok_model_dropdown.py",
@@ -149,13 +245,31 @@
       "file": "tests/test_issue1013_handoff_dock.py",
       "kind": "def_literal_function",
       "line": 1,
+      "value": "_handle_handoff_summary"
+    },
+    {
+      "file": "tests/test_issue1013_handoff_dock.py",
+      "kind": "def_literal_function",
+      "line": 1,
       "value": "_handle_skill_save"
+    },
+    {
+      "file": "tests/test_issue1013_handoff_dock.py",
+      "kind": "source_position_reference",
+      "line": 136,
+      "value": "_handle_handoff_summary"
     },
     {
       "file": "tests/test_issue1013_handoff_dock.py",
       "kind": "source_position_reference",
       "line": 137,
       "value": "_handle_skill_save"
+    },
+    {
+      "file": "tests/test_issue1013_handoff_dock.py",
+      "kind": "source_position_reference",
+      "line": 146,
+      "value": "_handle_handoff_summary"
     },
     {
       "file": "tests/test_issue1013_handoff_dock.py",
@@ -182,6 +296,12 @@
       "value": "_write_env_file"
     },
     {
+      "file": "tests/test_issue1362_codex_oauth_onboarding.py",
+      "kind": "assert_literal",
+      "line": 551,
+      "value": "resolve_runtime_provider_with_anthropic_env_lock"
+    },
+    {
       "file": "tests/test_issue1511_dedup_shared_reference.py",
       "kind": "inspect_getsource_function",
       "line": 1,
@@ -204,6 +324,48 @@
       "kind": "inspect_getsource",
       "line": 197,
       "value": "cfg_mod"
+    },
+    {
+      "file": "tests/test_issue616.py",
+      "kind": "assert_literal",
+      "line": 6,
+      "value": "\"/api/workspaces/suggest\""
+    },
+    {
+      "file": "tests/test_issue693_system_health_panel.py",
+      "kind": "assert_literal",
+      "line": 106,
+      "value": "parsed.path == \"/api/system/health\""
+    },
+    {
+      "file": "tests/test_issue716_agent_heartbeat.py",
+      "kind": "assert_literal",
+      "line": 111,
+      "value": "parsed.path == \"/api/health/agent\""
+    },
+    {
+      "file": "tests/test_issues_373_374_375.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_handle_live_models"
+    },
+    {
+      "file": "tests/test_issues_373_374_375.py",
+      "kind": "assert_literal",
+      "line": 158,
+      "value": "/api/models/live"
+    },
+    {
+      "file": "tests/test_issues_373_374_375.py",
+      "kind": "assert_literal",
+      "line": 164,
+      "value": "def _handle_live_models("
+    },
+    {
+      "file": "tests/test_issues_373_374_375.py",
+      "kind": "assert_literal",
+      "line": 185,
+      "value": "provider_model_ids"
     },
     {
       "file": "tests/test_minimax_provider.py",
@@ -224,10 +386,130 @@
       "value": "get_available_models"
     },
     {
+      "file": "tests/test_opencode_providers.py",
+      "kind": "assert_literal",
+      "line": 121,
+      "value": "provider_model_ids"
+    },
+    {
+      "file": "tests/test_pr1350_sse_atomic_subscribe.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_handle_approval_sse_stream"
+    },
+    {
+      "file": "tests/test_pr1350_sse_atomic_subscribe.py",
+      "kind": "def_literal",
+      "line": 62,
+      "value": "_handle_approval_sse_stream"
+    },
+    {
+      "file": "tests/test_pr1350_sse_atomic_subscribe.py",
+      "kind": "source_position_reference",
+      "line": 62,
+      "value": "_handle_approval_sse_stream"
+    },
+    {
+      "file": "tests/test_pr1355_sse_handler_no_deadlock.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_handle_clarify_sse_stream"
+    },
+    {
+      "file": "tests/test_pr1355_sse_handler_no_deadlock.py",
+      "kind": "def_literal",
+      "line": 114,
+      "value": "_handle_clarify_sse_stream"
+    },
+    {
+      "file": "tests/test_pr1355_sse_handler_no_deadlock.py",
+      "kind": "source_position_reference",
+      "line": 114,
+      "value": "_handle_clarify_sse_stream"
+    },
+    {
+      "file": "tests/test_provider_quota_status.py",
+      "kind": "assert_literal",
+      "line": 314,
+      "value": "parsed.path == \"/api/provider/quota\""
+    },
+    {
+      "file": "tests/test_real_steer.py",
+      "kind": "assert_literal",
+      "line": 240,
+      "value": "/api/chat/steer"
+    },
+    {
+      "file": "tests/test_real_steer.py",
+      "kind": "assert_literal",
+      "line": 241,
+      "value": "_handle_chat_steer"
+    },
+    {
       "file": "tests/test_reasoning_show_hide.py",
       "kind": "assert_literal",
       "line": 376,
       "value": "parsed.path == \"/api/reasoning\""
+    },
+    {
+      "file": "tests/test_regressions.py",
+      "kind": "assert_literal",
+      "line": 531,
+      "value": "s.active_stream_id = stream_id"
+    },
+    {
+      "file": "tests/test_regressions.py",
+      "kind": "assert_literal",
+      "line": 532,
+      "value": "s.pending_user_message = msg"
+    },
+    {
+      "file": "tests/test_regressions.py",
+      "kind": "assert_literal",
+      "line": 533,
+      "value": "s.pending_attachments = attachments"
+    },
+    {
+      "file": "tests/test_regressions.py",
+      "kind": "assert_literal",
+      "line": 534,
+      "value": "\"active_stream_id\": getattr(s, \"active_stream_id\", None)"
+    },
+    {
+      "file": "tests/test_regressions.py",
+      "kind": "assert_literal",
+      "line": 535,
+      "value": "\"pending_user_message\": getattr(s, \"pending_user_message\", None)"
+    },
+    {
+      "file": "tests/test_scheduled_jobs_profile_isolation.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_cron_job_subprocess_main"
+    },
+    {
+      "file": "tests/test_scheduled_jobs_profile_isolation.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_handle_cron_run"
+    },
+    {
+      "file": "tests/test_scheduled_jobs_profile_isolation.py",
+      "kind": "def_literal",
+      "line": 180,
+      "value": "_handle_cron_run"
+    },
+    {
+      "file": "tests/test_scheduled_jobs_profile_isolation.py",
+      "kind": "source_position_reference",
+      "line": 180,
+      "value": "_handle_cron_run"
+    },
+    {
+      "file": "tests/test_scheduled_jobs_profile_isolation.py",
+      "kind": "source_position_reference",
+      "line": 301,
+      "value": "_cron_job_subprocess_main"
     },
     {
       "file": "tests/test_security_redaction.py",
@@ -252,6 +534,12 @@
       "kind": "inspect_getsource",
       "line": 275,
       "value": "_handle_session_export"
+    },
+    {
+      "file": "tests/test_session_cross_tab_sync.py",
+      "kind": "assert_literal",
+      "line": 62,
+      "value": "parsed.path.startswith(\"/session/\")"
     },
     {
       "file": "tests/test_session_duplicate.py",
@@ -290,6 +578,12 @@
       "value": "_run_agent_streaming"
     },
     {
+      "file": "tests/test_sprint20.py",
+      "kind": "assert_literal",
+      "line": 344,
+      "value": "\"/api/transcribe\""
+    },
+    {
       "file": "tests/test_sprint29.py",
       "kind": "inspect_getsource_function",
       "line": 1,
@@ -302,16 +596,100 @@
       "value": "_hash_password"
     },
     {
+      "file": "tests/test_stale_stream_cleanup.py",
+      "kind": "assert_literal",
+      "line": 47,
+      "value": "def _clear_stale_stream_state(session)"
+    },
+    {
+      "file": "tests/test_stale_stream_cleanup.py",
+      "kind": "assert_literal",
+      "line": 49,
+      "value": "session.active_stream_id = None"
+    },
+    {
+      "file": "tests/test_stale_stream_cleanup.py",
+      "kind": "assert_literal",
+      "line": 50,
+      "value": "session.pending_user_message = None"
+    },
+    {
+      "file": "tests/test_stale_stream_cleanup.py",
+      "kind": "assert_literal",
+      "line": 51,
+      "value": "session.pending_attachments = []"
+    },
+    {
+      "file": "tests/test_stale_stream_cleanup.py",
+      "kind": "assert_literal",
+      "line": 52,
+      "value": "session.pending_started_at = None"
+    },
+    {
+      "file": "tests/test_turn_duration_display.py",
+      "kind": "assert_literal",
+      "line": 68,
+      "value": "\"pending_started_at\": s.pending_started_at"
+    },
+    {
       "file": "tests/test_update_banner_fixes.py",
       "kind": "assert_literal",
       "line": 338,
       "value": "\"/api/updates/force\""
+    },
+    {
+      "file": "tests/test_v050257_opus_followups.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_handle_cron_history"
+    },
+    {
+      "file": "tests/test_v050257_opus_followups.py",
+      "kind": "def_literal_function",
+      "line": 1,
+      "value": "_handle_cron_run_detail"
+    },
+    {
+      "file": "tests/test_v050257_opus_followups.py",
+      "kind": "def_literal",
+      "line": 96,
+      "value": "_handle_cron_history"
+    },
+    {
+      "file": "tests/test_v050257_opus_followups.py",
+      "kind": "source_position_reference",
+      "line": 96,
+      "value": "_handle_cron_history"
+    },
+    {
+      "file": "tests/test_v050257_opus_followups.py",
+      "kind": "def_literal",
+      "line": 97,
+      "value": "_handle_cron_run_detail"
+    },
+    {
+      "file": "tests/test_v050257_opus_followups.py",
+      "kind": "source_position_reference",
+      "line": 97,
+      "value": "_handle_cron_run_detail"
+    },
+    {
+      "file": "tests/test_v050257_opus_followups.py",
+      "kind": "def_literal",
+      "line": 124,
+      "value": "_handle_cron_history"
+    },
+    {
+      "file": "tests/test_v050257_opus_followups.py",
+      "kind": "source_position_reference",
+      "line": 124,
+      "value": "_handle_cron_history"
     }
   ],
   "counts": {
-    "green": 74,
-    "red": 6,
-    "yellow": 1
+    "green": 62,
+    "red": 12,
+    "yellow": 7
   },
   "errors": [],
   "ratings": [
@@ -330,20 +708,30 @@
     {
       "function": "_handle_approval_respond",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "body contains source literal from tests/test_approval_queue.py:54: 'queue.pop(0)'"
+      ],
+      "status": "yellow"
     },
     {
       "function": "_handle_approval_sse_stream",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "routes.py source tests lock the physical function definition",
+        "body contains source literal from tests/test_approval_sse.py:44: 'def _handle_approval_sse_stream('",
+        "body contains source literal from tests/test_approval_sse.py:64: '_approval_sse_subscribers'",
+        "body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'",
+        "body contains source literal from tests/test_approval_sse.py:116: 'queue.Queue(maxsize='"
+      ],
+      "status": "red"
     },
     {
       "function": "_handle_background",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "routes.py source tests lock the physical function definition"
+      ],
+      "status": "red"
     },
     {
       "function": "_handle_btw",
@@ -354,14 +742,18 @@
     {
       "function": "_handle_chat_start",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "body contains source literal from tests/test_turn_duration_display.py:68: '\"pending_started_at\": s.pending_started_at'"
+      ],
+      "status": "yellow"
     },
     {
       "function": "_handle_chat_sync",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock'"
+      ],
+      "status": "yellow"
     },
     {
       "function": "_handle_clarify_inject",
@@ -384,8 +776,12 @@
     {
       "function": "_handle_clarify_sse_stream",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "routes.py source tests lock the physical function definition",
+        "body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'",
+        "body contains source literal from tests/test_approval_sse.py:116: 'queue.Queue(maxsize='"
+      ],
+      "status": "red"
     },
     {
       "function": "_handle_conversation_rounds",
@@ -407,7 +803,7 @@
     },
     {
       "function": "_handle_cron_calendar",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/cron_read.py",
       "reasons": [],
       "status": "green"
     },
@@ -426,12 +822,14 @@
     {
       "function": "_handle_cron_history",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "routes.py source tests lock the physical function definition"
+      ],
+      "status": "red"
     },
     {
       "function": "_handle_cron_output",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/cron_read.py",
       "reasons": [],
       "status": "green"
     },
@@ -443,7 +841,7 @@
     },
     {
       "function": "_handle_cron_recent",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/cron_read.py",
       "reasons": [],
       "status": "green"
     },
@@ -464,12 +862,14 @@
     {
       "function": "_handle_cron_run_detail",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "routes.py source tests lock the physical function definition"
+      ],
+      "status": "red"
     },
     {
       "function": "_handle_cron_status",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/cron_read.py",
       "reasons": [],
       "status": "green"
     },
@@ -535,14 +935,19 @@
     {
       "function": "_handle_gateway_sse_stream",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'"
+      ],
+      "status": "yellow"
     },
     {
       "function": "_handle_handoff_summary",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "routes.py source tests lock the physical function definition",
+        "body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock'"
+      ],
+      "status": "red"
     },
     {
       "function": "_handle_health",
@@ -566,7 +971,11 @@
       "function": "_handle_live_models",
       "location": "api/routes.py",
       "reasons": [
-        "routes.py source tests lock the physical function definition"
+        "routes.py source tests lock the physical function definition",
+        "body contains source literal from tests/test_issues_373_374_375.py:158: '/api/models/live'",
+        "body contains source literal from tests/test_issues_373_374_375.py:164: 'def _handle_live_models('",
+        "body contains source literal from tests/test_issues_373_374_375.py:185: 'provider_model_ids'",
+        "body contains source literal from tests/test_opencode_providers.py:121: 'provider_model_ids'"
       ],
       "status": "red"
     },
@@ -693,8 +1102,11 @@
     {
       "function": "_handle_session_compress",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock'",
+        "body contains source literal from tests/test_turn_duration_display.py:68: '\"pending_started_at\": s.pending_started_at'"
+      ],
+      "status": "yellow"
     },
     {
       "function": "_handle_session_export",
@@ -759,8 +1171,10 @@
     {
       "function": "_handle_sse_stream",
       "location": "api/routes.py",
-      "reasons": [],
-      "status": "green"
+      "reasons": [
+        "body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'"
+      ],
+      "status": "yellow"
     },
     {
       "function": "_handle_terminal_close",
@@ -822,9 +1236,9 @@
 
 ## Summary
 
-- green: 74
-- yellow: 1
-- red: 6
+- green: 62
+- yellow: 7
+- red: 12
 
 ## Ratings
 
@@ -832,30 +1246,30 @@
 |---|---|---|---|
 | green | `_handle_approval_inject` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_approval_pending` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_approval_respond` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_approval_sse_stream` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_background` | `api/routes.py` | no source-level contract detected |
+| yellow | `_handle_approval_respond` | `api/routes.py` | body contains source literal from tests/test_approval_queue.py:54: 'queue.pop(0)' |
+| red | `_handle_approval_sse_stream` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_approval_sse.py:44: 'def _handle_approval_sse_stream('; body contains source literal from tests/test_approval_sse.py:64: '_approval_sse_subscribers'; body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'; body contains source literal from tests/test_approval_sse.py:116: 'queue.Queue(maxsize=' |
+| red | `_handle_background` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_btw` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_chat_start` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_chat_sync` | `api/routes.py` | no source-level contract detected |
+| yellow | `_handle_chat_start` | `api/routes.py` | body contains source literal from tests/test_turn_duration_display.py:68: '"pending_started_at": s.pending_started_at' |
+| yellow | `_handle_chat_sync` | `api/routes.py` | body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock' |
 | green | `_handle_clarify_inject` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_clarify_pending` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_clarify_respond` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_clarify_sse_stream` | `api/routes.py` | no source-level contract detected |
+| red | `_handle_clarify_sse_stream` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'; body contains source literal from tests/test_approval_sse.py:116: 'queue.Queue(maxsize=' |
 | green | `_handle_conversation_rounds` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_create_dir` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_cron_batch` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_cron_calendar` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_cron_calendar` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
 | green | `_handle_cron_create` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_cron_delete` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_cron_history` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_cron_output` | `api/routes.py` | no source-level contract detected |
+| red | `_handle_cron_history` | `api/routes.py` | routes.py source tests lock the physical function definition |
+| green | `_handle_cron_output` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
 | green | `_handle_cron_pause` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_cron_recent` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_cron_recent` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
 | green | `_handle_cron_resume` | `api/routes.py` | no source-level contract detected |
 | red | `_handle_cron_run` | `api/routes.py` | routes.py source tests lock the physical function definition |
-| green | `_handle_cron_run_detail` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_cron_status` | `api/routes.py` | no source-level contract detected |
+| red | `_handle_cron_run_detail` | `api/routes.py` | routes.py source tests lock the physical function definition |
+| green | `_handle_cron_status` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
 | green | `_handle_cron_update` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_file_create` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_file_delete` | `api/routes.py` | no source-level contract detected |
@@ -865,12 +1279,12 @@
 | green | `_handle_file_rename` | `api/routes.py` | no source-level contract detected |
 | red | `_handle_file_reveal` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_file_save` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_gateway_sse_stream` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_handoff_summary` | `api/routes.py` | no source-level contract detected |
+| yellow | `_handle_gateway_sse_stream` | `api/routes.py` | body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS' |
+| red | `_handle_handoff_summary` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock' |
 | green | `_handle_health` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_insights` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_list_dir` | `api/routes.py` | no source-level contract detected |
-| red | `_handle_live_models` | `api/routes.py` | routes.py source tests lock the physical function definition |
+| red | `_handle_live_models` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_issues_373_374_375.py:158: '/api/models/live'; body contains source literal from tests/test_issues_373_374_375.py:164: 'def _handle_live_models('; body contains source literal from tests/test_issues_373_374_375.py:185: 'provider_model_ids'; body contains source literal from tests/test_opencode_providers.py:121: 'provider_model_ids' |
 | green | `_handle_llm_wiki_status` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_logs` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_mcp_server_delete` | `api/routes_handlers/mcp.py` | no source-level contract detected |
@@ -891,7 +1305,7 @@
 | green | `_handle_profile_soul_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_user_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_user_write` | `api/routes_handlers/profile.py` | no source-level contract detected |
-| green | `_handle_session_compress` | `api/routes.py` | no source-level contract detected |
+| yellow | `_handle_session_compress` | `api/routes.py` | body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock'; body contains source literal from tests/test_turn_duration_display.py:68: '"pending_started_at": s.pending_started_at' |
 | yellow | `_handle_session_export` | `api/routes.py` | inspect.getsource(routes._handle_session_export) is used by tests |
 | green | `_handle_session_import` | `api/routes.py` | no source-level contract detected |
 | red | `_handle_session_import_cli` | `api/routes.py` | routes.py source tests lock the physical function definition |
@@ -901,7 +1315,7 @@
 | green | `_handle_skill_install_community` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | red | `_handle_skill_save` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_skill_uninstall_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
-| green | `_handle_sse_stream` | `api/routes.py` | no source-level contract detected |
+| yellow | `_handle_sse_stream` | `api/routes.py` | body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS' |
 | green | `_handle_terminal_close` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_input` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_output` | `api/routes.py` | no source-level contract detected |
