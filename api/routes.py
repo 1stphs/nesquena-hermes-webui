@@ -245,6 +245,15 @@ from api.routes_handlers.memory import (
     _handle_memory_read,
     _handle_memory_write,
 )
+from api.routes_handlers.file import (
+    _handle_list_dir,
+    _handle_file_read,
+    _handle_file_delete,
+    _handle_file_save,
+    _handle_file_create,
+    _handle_file_rename,
+    _handle_create_dir,
+)
 from api.routes_handlers.cron_read import (
     _cron_history_response,
     _cron_run_detail_response,
@@ -3770,39 +3779,6 @@ def _handle_sessions_search(handler, parsed):
     return j(handler, {"sessions": results, "query": q, "count": len(results)})
 
 
-def _handle_list_dir(handler, parsed):
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    try:
-        s = get_session(sid)
-        workspace = s.workspace
-    except KeyError:
-        # Fallback for CLI sessions not loaded in WebUI memory
-        try:
-            cli_meta = None
-            for cs in get_cli_sessions():
-                if cs["session_id"] == sid:
-                    cli_meta = cs
-                    break
-            if not cli_meta:
-                return bad(handler, "Session not found", 404)
-            workspace = cli_meta.get("workspace", "")
-        except Exception:
-            return bad(handler, "Session not found", 404)
-    try:
-        return j(
-            handler,
-            {
-                "entries": list_dir(Path(workspace), qs.get("path", ["."])[0]),
-                "path": qs.get("path", ["."])[0],
-            },
-        )
-    except (FileNotFoundError, ValueError) as e:
-        return bad(handler, _sanitize_error(e), 404)
-
-
 def _handle_sse_stream(handler, parsed):
     stream_id = parse_qs(parsed.query).get("stream_id", [""])[0]
     stream = STREAMS.get(stream_id)
@@ -4278,24 +4254,6 @@ def _handle_file_raw(handler, parsed):
     csp = "sandbox allow-scripts" if html_inline_ok else None
     # _serve_file_bytes sends Content-Security-Policy when csp is set.
     return _serve_file_bytes(handler, target, mime, disposition, "no-store", csp=csp)
-
-
-def _handle_file_read(handler, parsed):
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    try:
-        s = get_session(sid)
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    rel = qs.get("path", [""])[0]
-    if not rel:
-        return bad(handler, "path is required")
-    try:
-        return j(handler, read_file_content(Path(s.workspace), rel))
-    except (FileNotFoundError, ValueError) as e:
-        return bad(handler, _sanitize_error(e), 404)
 
 
 def _handle_approval_pending(handler, parsed):
@@ -5431,122 +5389,6 @@ def _handle_cron_resume(handler, body):
     if result:
         return j(handler, {"ok": True, "job": result})
     return bad(handler, "Job not found", 404)
-
-
-def _handle_file_delete(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        if not target.exists():
-            return bad(handler, "File not found", 404)
-        if target.is_dir():
-            if not body.get("recursive"):
-                return bad(handler, "Set recursive=true to delete directories")
-            shutil.rmtree(target)
-        else:
-            target.unlink()
-        return j(handler, {"ok": True, "path": body["path"]})
-    except (ValueError, PermissionError) as e:
-        return bad(handler, _sanitize_error(e))
-
-
-def _handle_file_save(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        if not target.exists():
-            return bad(handler, "File not found", 404)
-        if target.is_dir():
-            return bad(handler, "Cannot save: path is a directory")
-        target.write_text(body.get("content", ""), encoding="utf-8")
-        return j(
-            handler, {"ok": True, "path": body["path"], "size": target.stat().st_size}
-        )
-    except (ValueError, PermissionError) as e:
-        return bad(handler, _sanitize_error(e))
-
-
-def _handle_file_create(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        if target.exists():
-            return bad(handler, "File already exists")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body.get("content", ""), encoding="utf-8")
-        return j(
-            handler, {"ok": True, "path": str(target.relative_to(Path(s.workspace)))}
-        )
-    except (ValueError, PermissionError) as e:
-        return bad(handler, _sanitize_error(e))
-
-
-def _handle_file_rename(handler, body):
-    try:
-        require(body, "session_id", "path", "new_name")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        source = safe_resolve(Path(s.workspace), body["path"])
-        if not source.exists():
-            return bad(handler, "File not found", 404)
-        new_name = body["new_name"].strip()
-        if not new_name or "/" in new_name or ".." in new_name:
-            return bad(handler, "Invalid file name")
-        dest = source.parent / new_name
-        if dest.exists():
-            return bad(handler, f'A file named "{new_name}" already exists')
-        source.rename(dest)
-        new_rel = str(dest.relative_to(Path(s.workspace)))
-        return j(handler, {"ok": True, "old_path": body["path"], "new_path": new_rel})
-    except (ValueError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
-
-
-def _handle_create_dir(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        if target.exists():
-            return bad(handler, "Path already exists")
-        target.mkdir(parents=True)
-        return j(
-            handler, {"ok": True, "path": str(target.relative_to(Path(s.workspace)))}
-        )
-    except (ValueError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
 
 
 def _handle_file_reveal(handler, body):

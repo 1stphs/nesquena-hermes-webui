@@ -791,7 +791,7 @@
     },
     {
       "function": "_handle_create_dir",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/file.py",
       "reasons": [],
       "status": "green"
     },
@@ -881,13 +881,13 @@
     },
     {
       "function": "_handle_file_create",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/file.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_file_delete",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/file.py",
       "reasons": [],
       "status": "green"
     },
@@ -908,13 +908,13 @@
     },
     {
       "function": "_handle_file_read",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/file.py",
       "reasons": [],
       "status": "green"
     },
     {
       "function": "_handle_file_rename",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/file.py",
       "reasons": [],
       "status": "green"
     },
@@ -928,7 +928,7 @@
     },
     {
       "function": "_handle_file_save",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/file.py",
       "reasons": [],
       "status": "green"
     },
@@ -963,7 +963,7 @@
     },
     {
       "function": "_handle_list_dir",
-      "location": "api/routes.py",
+      "location": "api/routes_handlers/file.py",
       "reasons": [],
       "status": "green"
     },
@@ -1257,7 +1257,7 @@
 | green | `_handle_clarify_respond` | `api/routes.py` | no source-level contract detected |
 | red | `_handle_clarify_sse_stream` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS'; body contains source literal from tests/test_approval_sse.py:116: 'queue.Queue(maxsize=' |
 | green | `_handle_conversation_rounds` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_create_dir` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_create_dir` | `api/routes_handlers/file.py` | no source-level contract detected |
 | green | `_handle_cron_batch` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_cron_calendar` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
 | green | `_handle_cron_create` | `api/routes.py` | no source-level contract detected |
@@ -1271,19 +1271,19 @@
 | red | `_handle_cron_run_detail` | `api/routes.py` | routes.py source tests lock the physical function definition |
 | green | `_handle_cron_status` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
 | green | `_handle_cron_update` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_file_create` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_file_delete` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_file_create` | `api/routes_handlers/file.py` | no source-level contract detected |
+| green | `_handle_file_delete` | `api/routes_handlers/file.py` | no source-level contract detected |
 | red | `_handle_file_path` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_1764_context_menu_essentials.py:80: 'def _handle_file_path(handler, body):' |
 | green | `_handle_file_raw` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_file_read` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_file_rename` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_file_read` | `api/routes_handlers/file.py` | no source-level contract detected |
+| green | `_handle_file_rename` | `api/routes_handlers/file.py` | no source-level contract detected |
 | red | `_handle_file_reveal` | `api/routes.py` | routes.py source tests lock the physical function definition |
-| green | `_handle_file_save` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_file_save` | `api/routes_handlers/file.py` | no source-level contract detected |
 | yellow | `_handle_gateway_sse_stream` | `api/routes.py` | body contains source literal from tests/test_approval_sse.py:111: '_CLIENT_DISCONNECT_ERRORS' |
 | red | `_handle_handoff_summary` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_issue1362_codex_oauth_onboarding.py:551: 'resolve_runtime_provider_with_anthropic_env_lock' |
 | green | `_handle_health` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_insights` | `api/routes.py` | no source-level contract detected |
-| green | `_handle_list_dir` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_list_dir` | `api/routes_handlers/file.py` | no source-level contract detected |
 | red | `_handle_live_models` | `api/routes.py` | routes.py source tests lock the physical function definition; body contains source literal from tests/test_issues_373_374_375.py:158: '/api/models/live'; body contains source literal from tests/test_issues_373_374_375.py:164: 'def _handle_live_models('; body contains source literal from tests/test_issues_373_374_375.py:185: 'provider_model_ids'; body contains source literal from tests/test_opencode_providers.py:121: 'provider_model_ids' |
 | green | `_handle_llm_wiki_status` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_logs` | `api/routes.py` | no source-level contract detected |
