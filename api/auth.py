@@ -1,11 +1,11 @@
 """
-Hermes Web UI -- Optional password authentication.
+Hermes API service -- Optional password authentication.
 Off by default. Enable by setting HERMES_WEBUI_PASSWORD env var
-or configuring a password in the Settings panel.
+or configuring a stored password hash.
 
-中文说明：Hermes Web UI 的可选密码认证。
+中文说明：Hermes API service 的可选密码认证。
 默认关闭。可以通过设置 HERMES_WEBUI_PASSWORD 环境变量，
-或在 Settings（设置）面板里配置密码来启用。
+或配置已保存的密码哈希来启用。
 """
 import hashlib
 import hmac
@@ -25,10 +25,16 @@ logger = logging.getLogger(__name__)
 
 # ── Public paths (no auth required) ─────────────────────────────────────────
 PUBLIC_PATHS = frozenset({
-    '/login', '/health', '/favicon.ico',
+    '/', '/login', '/health', '/favicon.ico',
     '/api/auth/login', '/api/auth/status', '/api/auth/token-login',
     '/manifest.json', '/manifest.webmanifest',
 })
+
+REMOVED_WEBUI_PATHS = frozenset({
+    '/index.html', '/login', '/manifest.json', '/manifest.webmanifest',
+    '/sw.js', '/favicon.ico',
+})
+REMOVED_WEBUI_PREFIXES = ('/session/', '/static/')
 
 COOKIE_NAME = 'hermes_session'
 SESSION_TTL = 86400 * 30  # 30 days
@@ -320,13 +326,18 @@ def parse_cookie(handler) -> str | None:
     return morsel.value if morsel else None
 
 
+def is_removed_webui_path(path: str) -> bool:
+    """Return True for removed built-in WebUI paths that should reach JSON 410."""
+    return path in REMOVED_WEBUI_PATHS or path.startswith(REMOVED_WEBUI_PREFIXES)
+
+
 def check_auth(handler, parsed) -> bool:
     """Check if request is authorized. Returns True if OK.
-    If not authorized, sends 401 (API) or 302 redirect (page) and returns False."""
+    If not authorized, sends JSON 401 and returns False."""
     if not is_auth_enabled():
         return True
-    # Public paths don't require auth
-    if parsed.path in PUBLIC_PATHS or parsed.path.startswith('/static/') or parsed.path.startswith('/session/static/'):
+    # Public paths don't require auth.
+    if parsed.path in PUBLIC_PATHS or is_removed_webui_path(parsed.path):
         return True
     # Check session cookie
     cookie_val = parse_cookie(handler)
@@ -343,35 +354,14 @@ def check_auth(handler, parsed) -> bool:
         handler.end_headers()
         handler.wfile.write(b'{"error":"Authentication required"}')
     else:
-        handler.send_response(302)
-        # Pass the original path as ?next= so login.js redirects back after auth.
-        # SECURITY/CORRECTNESS: the inner `?` and `&` MUST be percent-encoded
-        # when stuffed into the outer `?next=` parameter, otherwise:
-        #   (a) multi-param query strings get truncated at the first inner `&`
-        #       (e.g. `/api/sessions?limit=50&offset=0` would round-trip as
-        #       just `/api/sessions?limit=50` after the browser parses the
-        #       outer URL — `offset=0` becomes a separate top-level query
-        #       parameter that the login page ignores).
-        #   (b) attacker-controlled paths could inject a second `next=`
-        #       parameter; per RFC 3986 the duplicate behaviour is undefined
-        #       and parsers diverge (Python's parse_qs returns last-match,
-        #       URLSearchParams returns first-match), opening a query-pollution
-        #       footgun even though _safeNextPath() rejects most malicious
-        #       shapes downstream.
-        # Encoding the entire `path?query` blob with quote(safe='/') turns
-        # `?` → `%3F` and `&` → `%26`, so the outer parameter holds exactly
-        # one path-with-query string and `searchParams.get('next')` returns
-        # the full original URL (the browser auto-decodes once).
-        # (Opus pre-release advisor finding for v0.50.258.)
-        import urllib.parse as _urlparse
-        _path_with_query = parsed.path or '/'
-        if parsed.query:
-            _path_with_query += '?' + parsed.query
-        # safe='/' keeps path separators readable; everything else (including
-        # `?`, `&`, `=`) gets percent-encoded.
-        _next = _urlparse.quote(_path_with_query, safe='/')
-        handler.send_header('Location', 'login?next=' + _next)
+        from api.helpers import send_cors_headers
+
+        handler.send_response(401)
+        handler.send_header('Content-Type', 'application/json')
+        handler.send_header('Cache-Control', 'no-store')
+        send_cors_headers(handler)
         handler.end_headers()
+        handler.wfile.write(b'{"error":"Authentication required"}')
     return False
 
 

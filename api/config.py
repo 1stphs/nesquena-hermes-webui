@@ -1,5 +1,5 @@
 """
-Hermes Web UI -- Shared configuration, constants, and global state.
+Hermes API service -- Shared configuration, constants, and global state.
 Imported by all other api/* modules and by server.py.
 
 Discovery order for all paths:
@@ -8,7 +8,7 @@ Discovery order for all paths:
   3. Hardened defaults relative to $HOME
   4. Fail loudly with a human-readable fix-it message if required modules are missing
 
-中文说明：Hermes Web UI 的共享配置、常量和全局状态。
+中文说明：Hermes API service 的共享配置、常量和全局状态。
 会被所有其他 api/* 模块以及 server.py 导入。
 
 所有路径的 discovery order（发现顺序）：
@@ -444,7 +444,7 @@ def print_startup_config() -> None:
 
     lines = [
         "",
-        "  Hermes Web UI -- startup config",
+        "  Hermes API service -- startup config",
         "  --------------------------------",
         f"  repo root   : {REPO_ROOT}",
         f"  agent dir   : {_AGENT_DIR if _AGENT_DIR else 'NOT FOUND'}  {ok if _AGENT_DIR else err}",
@@ -3422,9 +3422,6 @@ def get_available_models() -> dict:
         _save_models_cache_to_disk(result)
         return copy.deepcopy(result)
 
-
-# ── Static file path ─────────────────────────────────────────────────────────
-_INDEX_HTML_PATH = REPO_ROOT / "static" / "index.html"
 
 # ── Thread synchronisation ───────────────────────────────────────────────────
 LOCK = threading.Lock()

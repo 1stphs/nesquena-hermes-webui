@@ -12,9 +12,6 @@ import re
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 INIT_SH   = (REPO_ROOT / "docker_init.bash").read_text(encoding="utf-8")
-UI_JS     = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-
-
 # ── #569: docker UID/GID auto-detect ─────────────────────────────────────────
 
 def test_569_uid_autodetect_present():
@@ -118,46 +115,3 @@ def test_668_hermes_home_probe_before_workspace():
 
 
 # ── #579: topbar message count already filters tool messages ──────────────────
-
-def test_579_topbar_filters_tool_messages():
-    """ui.js topbar count must filter out role='tool' messages (#579).
-
-    The sidebar previously showed raw message_count (which included tool
-    messages), causing a mismatch with the topbar. PR #584 removed the
-    sidebar count display entirely; the topbar was already correct.
-    This test locks in the existing topbar filter so it can't regress.
-    """
-    # Find the topbarMeta assignment
-    meta_pos = UI_JS.find("topbarMeta")
-    assert meta_pos != -1, "topbarMeta assignment not found in ui.js"
-
-    # Find the filter that precedes it — should exclude role==='tool'
-    context = UI_JS[max(0, meta_pos - 400):meta_pos + 100]
-    assert "role" in context and "tool" in context, (
-        "topbarMeta count must filter by role — "
-        "messages with role='tool' must be excluded from the displayed count"
-    )
-    # The filter must exclude tool messages (not include them)
-    assert "!=='tool'" in context or "!= 'tool'" in context or "role!=='tool'" in context, (
-        "topbar count filter must use !== 'tool' to exclude tool messages"
-    )
-
-
-def test_579_sidebar_count_is_gated_behind_detailed_density():
-    """sessions.js may only show sidebar count inside detailed density mode.
-
-    PR #584 removed the always-visible raw sidebar count to avoid mismatching the
-    topbar's filtered count. PR #673 later reintroduced message_count as
-    optional metadata, but only when the user explicitly opts into detailed
-    sidebar density.
-    """
-    sessions_js = (REPO_ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
-    assert "const density=(window._sidebarDensity==='detailed'?'detailed':'compact');" in sessions_js, (
-        "sessions.js must normalize sidebar density before rendering metadata"
-    )
-    assert "if(density==='detailed'){" in sessions_js, (
-        "sessions.js must gate sidebar metadata behind detailed density mode"
-    )
-    assert "typeof s.message_count==='number'?s.message_count:0" in sessions_js, (
-        "message_count may be rendered only inside the detailed-density branch"
-    )

@@ -52,35 +52,6 @@ def test_all_routes_accessible_without_auth():
     assert "sessions" in d
 
 
-def test_login_page_served():
-    """GET /login should return the login page HTML."""
-    req = urllib.request.Request(BASE + "/login")
-    with urllib.request.urlopen(req, timeout=10) as r:
-        html = r.read().decode()
-        assert r.status == 200
-        assert "Sign in" in html
-        assert "Hermes" in html
-        assert 'src="static/login.js?v=' in html
-        assert 'src="/static/login.js"' not in html
-
-
-def test_login_page_cache_busts_login_script():
-    """GET /login must version login.js so stale cache/SW entries cannot trap old auth code."""
-    from api import routes
-
-    assert "static/login.js?v={{WEBUI_VERSION}}" in routes._LOGIN_PAGE_HTML
-
-
-def test_login_route_injects_webui_version_for_login_script():
-    """The /login route should replace the login.js version placeholder."""
-    req = urllib.request.Request(BASE + "/login")
-    with urllib.request.urlopen(req, timeout=10) as r:
-        html = r.read().decode()
-        assert r.status == 200
-    assert 'src="static/login.js?v=' in html
-    assert "{{WEBUI_VERSION}}" not in html
-
-
 # ── Security headers ─────────────────────────────────────────────────────
 
 def test_security_headers_on_json():

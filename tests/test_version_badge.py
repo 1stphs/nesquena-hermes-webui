@@ -266,60 +266,9 @@ class TestSettingsEndpointVersion:
 # 5. static/index.html — version badges
 # ---------------------------------------------------------------------------
 
-class TestIndexHTMLBadge:
-
-    def _read_html(self):
-        return (REPO_ROOT / 'static' / 'index.html').read_text(encoding='utf-8')
-
-    def test_old_stale_version_removed_from_html(self):
-        """The old hardcoded v0.50.87 badge must not appear in index.html."""
-        html = self._read_html()
-        assert 'v0.50.87' not in html, (
-            'Stale hardcoded version v0.50.87 still present in index.html. '
-            'The badge should be a neutral placeholder; JS populates it at runtime.'
-        )
-
-    def test_badge_element_still_present(self):
-        """System version badge spans must still be in the DOM for both WebUI and Agent pills."""
-        html = self._read_html()
-        assert 'settings-webui-version-badge' in html, (
-            'WebUI badge element missing from index.html'
-        )
-        assert 'settings-agent-version-badge' in html, (
-            'Agent badge element missing from index.html'
-        )
-
-
 # ---------------------------------------------------------------------------
 # 6. static/panels.js — badge population from settings
 # ---------------------------------------------------------------------------
-
-class TestPanelsJSVersionBadge:
-
-    def _read_js(self):
-        return (REPO_ROOT / 'static' / 'panels.js').read_text(encoding='utf-8')
-
-    def test_panels_js_reads_webui_version(self):
-        """loadSettingsPanel must reference settings.webui_version to populate the badge."""
-        src = self._read_js()
-        assert 'webui_version' in src, (
-            'panels.js loadSettingsPanel() must read settings.webui_version '
-            'to populate the badge dynamically'
-        )
-
-    def test_panels_js_targets_version_badges(self):
-        """loadSettingsPanel must target the two version badge elements."""
-        src = self._read_js()
-        assert 'settings-webui-version-badge' in src, (
-            'panels.js must query #settings-webui-version-badge to update the WebUI text'
-        )
-        assert 'settings-agent-version-badge' in src, (
-            'panels.js must query #settings-agent-version-badge to update the Agent text'
-        )
-        assert 'agent_version' in src, (
-            'loadSettingsPanel must read settings.agent_version to populate the agent badge'
-        )
-
 
 # ---------------------------------------------------------------------------
 # 7. server.py — server_version not the old hardcoded string

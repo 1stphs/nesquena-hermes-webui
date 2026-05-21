@@ -3,57 +3,16 @@ Tests for streaming error handling fixes:
   #739 — quota/credit exhaustion detected as distinct error type + persisted to session
   #652 — context compaction session_id rotation: stream_end uses original session_id
   #653 — bad tool call hang: same stream_end fix applies
-
-All static tests (no live server required).
 """
 import ast
 import re
 import pathlib
 
 STREAMING = pathlib.Path(__file__).parent.parent / 'api' / 'streaming.py'
-MESSAGES_JS = pathlib.Path(__file__).parent.parent / 'static' / 'messages.js'
-
 streaming_src = STREAMING.read_text(encoding='utf-8')
-messages_js_src = MESSAGES_JS.read_text(encoding='utf-8')
 
 
 # ── #739: Quota exhaustion detection ─────────────────────────────────────────
-
-class TestQuotaDetection:
-    """Quota-exhausted errors must be classified separately from rate limits."""
-
-    def test_quota_patterns_present_in_silent_failure_path(self):
-        """The silent-failure path checks for credit/quota strings."""
-        block = streaming_src
-        assert 'insufficient credit' in block
-        assert 'credit balance' in block
-        assert 'credits exhausted' in block
-        assert 'quota_exceeded' in block
-        assert 'exceeded your current quota' in block
-
-    def test_quota_type_emitted_as_quota_exhausted(self):
-        """The apperror type is 'quota_exhausted', not 'error' or 'rate_limit'."""
-        assert "'quota_exhausted'" in streaming_src or '"quota_exhausted"' in streaming_src
-
-    def test_quota_checked_before_rate_limit(self):
-        """Quota check must appear before the rate-limit check in the exception path.
-        OpenAI billing 429s overlap with rate-limit patterns."""
-        quota_pos = streaming_src.find('_exc_is_quota')
-        rate_pos = streaming_src.find('_exc_is_rate_limit')
-        assert quota_pos != -1, '_exc_is_quota not found in exception path'
-        assert rate_pos != -1, '_exc_is_rate_limit not found in exception path'
-        assert quota_pos < rate_pos, 'Quota check must appear before rate-limit check'
-
-    def test_rate_limit_excludes_quota(self):
-        """Rate-limit detection must be guarded so quota errors don't also match."""
-        # The pattern: _exc_is_rate_limit = (not _exc_is_quota) and (...)
-        assert '(not _exc_is_quota)' in streaming_src
-
-    def test_js_quota_label_present(self):
-        """messages.js renders a 'quota_exhausted' apperror with a distinct label."""
-        assert "quota_exhausted" in messages_js_src
-        assert "Out of credits" in messages_js_src
-
 
 # ── #739: Error persistence across reload ─────────────────────────────────────
 

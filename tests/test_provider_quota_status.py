@@ -314,31 +314,3 @@ def test_provider_quota_route_is_registered():
     routes = read_route_sources()
     assert 'parsed.path == "/api/provider/quota"' in routes
     assert "get_provider_quota(provider_id)" in routes
-
-
-def test_provider_quota_card_is_rendered_in_providers_panel():
-    """The Providers panel should show active provider quota/status before cards."""
-    panels = (ROOT / "static" / "panels.js").read_text(encoding="utf-8")
-    assert "api('/api/provider/quota')" in panels
-    assert "function _buildProviderQuotaCard" in panels
-    assert "Active provider quota" in panels
-    assert "provider-quota-card" in panels
-    assert "account_limits" in panels
-    assert "remaining_percent" in panels
-    assert "provider-quota-details" in panels
-    assert "5-hour limit" in panels
-
-
-def test_provider_quota_styles_exist():
-    """Quota UI should have visible supported/unavailable/invalid states."""
-    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
-    for token in (
-        ".provider-quota-card",
-        ".provider-quota-metric",
-        ".provider-quota-card-available",
-        ".provider-quota-card-no_key",
-        ".provider-quota-card-invalid_key",
-        ".provider-quota-details",
-        ".provider-quota-window",
-    ):
-        assert token in css

@@ -20,56 +20,70 @@ def dispatch_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
     _sync_routes_bindings()
 
-    if parsed.path.startswith("/session/static/"):
-        # Strip the leading "/session" so _serve_static() sees a path that
-        # starts with "/static/" (its required prefix). _serve_static enforces
-        # its own path-traversal sandbox via Path.resolve()+relative_to().
-        stripped = parsed._replace(path=parsed.path[len("/session"):])
-        return _serve_static(handler, stripped)
+    if parsed.path == "/sw.js":
+        unregister_script = """/* Hermes API service: retire the removed WebUI service worker. */
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+});
 
-    if parsed.path in ("/", "/index.html") or parsed.path.startswith("/session/"):
-        try:
-            from urllib.parse import quote
-            from api.updates import WEBUI_VERSION
-            version_token = quote(WEBUI_VERSION, safe="")
-            from api.extensions import inject_extension_tags
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+    await self.registration.unregister();
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of clients) {
+      client.navigate(client.url);
+    }
+  })());
+});
 
-            html = _INDEX_HTML_PATH.read_text(encoding="utf-8").replace("__WEBUI_VERSION__", version_token)
-            return t(
-                handler,
-                inject_extension_tags(html),
-                content_type="text/html; charset=utf-8",
-            )
-        except Exception as exc:
-            return _serve_shell_unavailable(handler, exc)
+self.addEventListener('fetch', () => {});
+"""
+        data = unregister_script.encode("utf-8")
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/javascript; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Service-Worker-Allowed", "/")
+        handler.send_header("Content-Length", str(len(data)))
+        _security_headers(handler)
+        handler.end_headers()
+        handler.wfile.write(data)
+        return True
+
+    if parsed.path == "/":
+        return j(
+            handler,
+            {
+                "service": "hermes-api",
+                "mode": "api-only",
+                "status": "ok",
+                "health": "/health",
+                "api_base": "/api",
+            },
+        )
+
+    if (
+        parsed.path == "/index.html"
+        or parsed.path.startswith("/session/")
+        or parsed.path.startswith("/static/")
+        or parsed.path in (
+            "/manifest.json",
+            "/manifest.webmanifest",
+            "/favicon.ico",
+        )
+    ):
+        return j(handler, {"error": "WebUI frontend has been removed"}, status=410)
 
     if parsed.path == "/login":
-        _settings = load_settings()
-        _bn = _html.escape(_settings.get("bot_name") or "Hermes")
-        _lang = _settings.get("language", "en")
-        _login_strings = _LOGIN_LOCALE[
-            _resolve_login_locale_key(_lang)
-        ]
-        from urllib.parse import quote
-        from api.updates import WEBUI_VERSION
-        version_token = quote(WEBUI_VERSION, safe="")
-        _page = (
-            _LOGIN_PAGE_HTML.replace("{{BOT_NAME}}", _bn)
-            .replace("{{BOT_NAME_INITIAL}}", _bn[0].upper())
-            .replace("{{WEBUI_VERSION}}", version_token)
-            .replace("{{LANG}}", _html.escape(_login_strings["lang"]))
-            .replace("{{LOGIN_TITLE}}", _html.escape(_login_strings["title"]))
-            .replace("{{LOGIN_SUBTITLE}}", _html.escape(_login_strings["subtitle"]))
-            .replace(
-                "{{LOGIN_PLACEHOLDER}}", _html.escape(_login_strings["placeholder"])
-            )
-            .replace("{{LOGIN_BTN}}", _html.escape(_login_strings["btn"]))
-            .replace("{{LOGIN_INVALID_PW}}", _html.escape(_login_strings["invalid_pw"]))
-            .replace(
-                "{{LOGIN_CONN_FAILED}}", _html.escape(_login_strings["conn_failed"])
-            )
+        return j(
+            handler,
+            {
+                "error": "WebUI login page has been removed",
+                "auth": "/api/auth/token-login",
+            },
+            status=410,
         )
-        return t(handler, _page, content_type="text/html; charset=utf-8")
 
     if parsed.path == "/api/auth/status":
         from api.auth import is_auth_enabled, parse_cookie, verify_session
@@ -79,59 +93,6 @@ def dispatch_get(handler, parsed) -> bool:
             cv = parse_cookie(handler)
             logged_in = bool(cv and verify_session(cv))
         return j(handler, {"auth_enabled": is_auth_enabled(), "logged_in": logged_in})
-
-    if parsed.path in ("/manifest.json", "/manifest.webmanifest"):
-        static_root = Path(__file__).parent.parent / "static"
-        manifest_path = (static_root / "manifest.json").resolve()
-        if manifest_path.exists():
-            data = manifest_path.read_bytes()
-            handler.send_response(200)
-            handler.send_header("Content-Type", "application/manifest+json; charset=utf-8")
-            handler.send_header("Cache-Control", "no-store")
-            handler.send_header("Content-Length", str(len(data)))
-            handler.end_headers()
-            handler.wfile.write(data)
-            return True
-        return j(handler, {"error": "not found"}, status=404)
-
-    if parsed.path == "/sw.js":
-        static_root = Path(__file__).parent.parent / "static"
-        sw_path = (static_root / "sw.js").resolve()
-        if sw_path.exists():
-            # Inject the current git-derived version as the cache name so the
-            # service worker cache busts automatically on every new deploy.
-            from urllib.parse import quote
-            from api.updates import WEBUI_VERSION
-            version_token = quote(WEBUI_VERSION, safe="")
-            text = sw_path.read_text(encoding="utf-8").replace(
-                "__WEBUI_VERSION__", version_token
-            )
-            data = text.encode("utf-8")
-            handler.send_response(200)
-            handler.send_header("Content-Type", "application/javascript; charset=utf-8")
-            handler.send_header("Cache-Control", "no-store")
-            handler.send_header("Service-Worker-Allowed", "/")
-            handler.send_header("Content-Length", str(len(data)))
-            handler.end_headers()
-            handler.wfile.write(data)
-            return True
-        return j(handler, {"error": "not found"}, status=404)
-
-    if parsed.path == "/favicon.ico":
-        static_root = Path(__file__).parent.parent / "static"
-        ico_path = (static_root / "favicon.ico").resolve()
-        if ico_path.exists() and ico_path.is_file():
-            data = ico_path.read_bytes()
-            handler.send_response(200)
-            handler.send_header("Content-Type", "image/x-icon")
-            handler.send_header("Content-Length", str(len(data)))
-            handler.send_header("Cache-Control", "public, max-age=86400")
-            handler.end_headers()
-            handler.wfile.write(data)
-        else:
-            handler.send_response(204)
-            handler.end_headers()
-        return True
 
     # ── Insights / knowledge status ──
     if parsed.path == "/api/insights":
@@ -229,9 +190,6 @@ def dispatch_get(handler, parsed) -> bool:
         from api.extensions import serve_extension_static
 
         return serve_extension_static(handler, parsed)
-
-    if parsed.path.startswith("/static/"):
-        return _serve_static(handler, parsed)
 
     if parsed.path == "/api/session":
         import time as _time
@@ -2313,4 +2271,3 @@ def dispatch_delete(handler, parsed) -> bool:
             return _kanban_unknown_endpoint(handler, parsed, "DELETE")
         return True
     return False
-

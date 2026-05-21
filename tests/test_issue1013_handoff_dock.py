@@ -11,12 +11,6 @@ from tests.route_source import function_source
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INDEX = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-SESSIONS_JS = (ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
-STYLE_CSS = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
-UI_JS = (ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-
-
 def _new_state_db(path: Path) -> sqlite3.Connection:
     """Create a minimal state.db shape for handoff-summary persistence tests."""
     conn = sqlite3.connect(str(path))
@@ -59,79 +53,6 @@ def _extract_handoff_marker_payload(message):
     return data
 
 
-def test_handoff_hint_is_docked_in_composer_flyout_not_transcript():
-    """Handoff should use the Terminal-style composer dock, not transcript flow."""
-    marker = '<div id="handoffHintContainer"'
-    assert marker in INDEX
-    msg_inner_idx = INDEX.index('<div class="messages-inner" id="msgInner">')
-    composer_flyout_idx = INDEX.index('<div class="composer-flyout">')
-    handoff_idx = INDEX.index(marker)
-    assert handoff_idx > composer_flyout_idx
-    assert not (msg_inner_idx < handoff_idx < composer_flyout_idx)
-
-
-def test_handoff_dock_reserves_transcript_space_like_terminal_dock():
-    assert ".messages.handoff-dock-visible" in STYLE_CSS
-    assert ".handoff-hint-container{position:absolute" in STYLE_CSS
-    assert "_syncHandoffDockSpace(true)" in SESSIONS_JS
-    assert "_syncHandoffDockSpace(false)" in SESSIONS_JS
-
-
-def test_handoff_dock_width_aligns_with_existing_slide_up_panels():
-    assert ".handoff-hint-container{position:absolute;left:0;right:0;bottom:-2px;width:min(calc(100% - 112px),560px);" in STYLE_CSS
-    assert ".handoff-hint-container{bottom:-2px;width:calc(100% - 28px);}" in STYLE_CSS
-    start = STYLE_CSS.find(".handoff-hint-container")
-    assert start != -1
-    end = STYLE_CSS.find("}", start)
-    assert end != -1
-    handoff_hint_rule = STYLE_CSS[start:end+1]
-    assert "width:min(calc(100% - 112px),560px)" in handoff_hint_rule
-    assert "border-bottom:none;border-radius:13px 13px 0 0" in STYLE_CSS
-    assert "padding:7px 12px 9px" in STYLE_CSS
-    assert ".handoff-hint-text{min-width:0;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;font-weight:700;line-height:1.2;" in STYLE_CSS
-    assert ".handoff-hint-action,.handoff-hint-dismiss{border:none;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:700;line-height:1.2;" in STYLE_CSS
-    assert ".handoff-hint-dot{width:7px;height:7px;border-radius:999px;background:var(--success);" in STYLE_CSS
-
-
-def test_handoff_summary_fallback_displays_clear_user_note():
-    assert "const isFallback=!!state.fallback;" in UI_JS
-    assert "class=\"handoff-summary-fallback-note\"" in UI_JS
-    assert "Fallback summary generated from recent turns; no model-based rewrite was used." in UI_JS
-
-
-def test_handoff_delete_clears_local_storage_markers():
-    assert "function _clearHandoffStorageForSession(sid) {" in SESSIONS_JS
-    assert "_setHandoffStorageValue(sid, _HANDOFF_SUFFIX_DISMISSED_AT, null);" in SESSIONS_JS
-    assert "_setHandoffStorageValue(sid, _HANDOFF_SUFFIX_SUMMARY_HANDLED_AT, null);" in SESSIONS_JS
-    assert "_clearHandoffStorageForSession(sid);" in SESSIONS_JS
-    assert "ids.forEach(_clearHandoffStorageForSession);" in SESSIONS_JS
-
-
-def test_handoff_summary_renders_as_transcript_card_not_dock_card():
-    assert "function setHandoffUi" in SESSIONS_JS or "function setHandoffUi" in (ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-    ui_js = (ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-    assert "_handoffCardsNode" in ui_js
-    assert "data-handoff-card" in ui_js
-    assert 'data-compression-card="1" data-handoff-card="1"' in ui_js
-    assert 'class="tool-card-result handoff-summary-body"' in ui_js
-    assert "renderMd(detail)" in ui_js
-    assert "_insertCompressionLikeNode(handoffState?_handoffCardsNode" in ui_js
-    assert "window._handoffUi&&(!window._handoffUi.sessionId||window._handoffUi.sessionId===sid)" in ui_js
-    assert "!hasTransientTranscriptUi" in ui_js
-    assert "handoff-summary-card" not in SESSIONS_JS
-    assert "handoff-summary-card" not in STYLE_CSS
-
-
-def test_handoff_summary_card_rendering_uses_persisted_messages():
-    """Persistent summary markers are parsed from message history and rendered via compression-like cards."""
-    assert "_collectHandoffSummaryStates" in UI_JS
-    assert "_handoffSummaryStateFromMessage" in UI_JS
-    assert "_handoffSummaryPayload" in UI_JS or "_parseHandoffSummaryPayload" in UI_JS
-    assert "_insertCompressionLikeNodeByRawIdx" in UI_JS
-    assert "_isHandoffSummaryToolPayload" in UI_JS
-    assert "_buildHandoffSummaryToolMessage" in SESSIONS_JS
-
-
 def test_handoff_summary_does_not_call_removed_agent_get_response():
     """Current Hermes Agent exposes run_conversation/private transports, not get_response."""
     handoff_body = function_source("_handle_handoff_summary")
@@ -151,42 +72,6 @@ def test_handoff_summary_prompt_uses_you_and_你():
     assert "用“你”" in prompt_body
     assert "the user" not in prompt_body.lower()
     assert "用户" not in prompt_body
-
-
-def test_generating_handoff_summary_marks_session_as_handled():
-    """Summary success uses a max(dismissed/handled) baseline for future checks."""
-    generate_start = SESSIONS_JS.index("async function _generateHandoffSummary")
-    resolve_start = SESSIONS_JS.index("function _resolveSessionModelForDisplaySoon", generate_start)
-    generate_body = SESSIONS_JS[generate_start:resolve_start]
-
-    dismiss_start = SESSIONS_JS.index("function _dismissHandoffHint")
-    generate_start_after_dismiss = SESSIONS_JS.index("async function _generateHandoffSummary", dismiss_start)
-    dismiss_body = SESSIONS_JS[dismiss_start:generate_start_after_dismiss]
-
-    assert "_getHandoffSince(sid)" in generate_body
-    assert "_setHandoffSummaryHandledAt(sid, Date.now() / 1000)" in generate_body
-    assert "_hasMatchingHandoffSummary" not in generate_body
-    assert "_setHandoffDismissedAt(" in dismiss_body
-    assert "_setHandoffSummaryHandledAt(" not in dismiss_body
-    assert "_HANDOFF_SUFFIX_SUMMARY_HANDLED_AT" in SESSIONS_JS
-    assert "setHandoffUi({" in generate_body
-    assert "phase: 'done'" not in generate_body
-    assert "_getHandoffSince(sid)" in SESSIONS_JS
-    assert "_HANDOFF_SUFFIX_SUMMARY_HANDLED_AT" in SESSIONS_JS
-    assert "_HANDOFF_SUFFIX_DISMISSED_AT" in SESSIONS_JS
-
-
-def test_handoff_hints_use_max_baseline_since():
-    """Handled and dismissed state are coalesced with max() before calling conversation-rounds."""
-    check_start = SESSIONS_JS.index("async function _checkAndShowHandoffHint")
-    resolve_start = SESSIONS_JS.index("function _showHandoffHint", check_start)
-    check_body = SESSIONS_JS[check_start:resolve_start]
-    assert "_getHandoffSince(sid)" in check_body
-    assert "_getHandoffSummaryHandledAt(sid)" in SESSIONS_JS
-    assert "_getHandoffDismissedAt(sid)" in SESSIONS_JS
-    assert "Math.max(dismissedAt, summaryHandledAt)" in SESSIONS_JS
-
-    assert "_isHandoffSummaryHandled" not in SESSIONS_JS
 
 
 def test_no_api_key_handoff_summary_persists_fallback_summary(monkeypatch):

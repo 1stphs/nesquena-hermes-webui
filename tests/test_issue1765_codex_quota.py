@@ -43,20 +43,3 @@ def test_provider_error_payload_includes_bounded_redacted_details(monkeypatch):
     assert secret not in payload['details']
     assert '[REDACTED]' in payload['details']
     assert len(payload['details']) <= 1200
-
-
-def test_frontend_renders_apperror_details_in_collapsible_block():
-    messages_js = (streaming.Path(__file__).resolve().parent.parent / 'static' / 'messages.js').read_text()
-    ui_js = (streaming.Path(__file__).resolve().parent.parent / 'static' / 'ui.js').read_text()
-    style_css = (streaming.Path(__file__).resolve().parent.parent / 'static' / 'style.css').read_text()
-    apperror_idx = messages_js.find("source.addEventListener('apperror'")
-    warning_idx = messages_js.find("source.addEventListener('warning'", apperror_idx)
-    assert apperror_idx != -1 and warning_idx != -1
-    apperror_block = messages_js[apperror_idx:warning_idx]
-
-    assert 'd.details' in apperror_block
-    assert 'provider_details:details' in apperror_block
-    assert 'm.provider_details' in ui_js
-    assert '<details class="provider-error-details"' in ui_js
-    assert 'Provider details' in ui_js
-    assert '.provider-error-details' in style_css

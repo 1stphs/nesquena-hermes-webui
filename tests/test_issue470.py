@@ -19,9 +19,6 @@ import re
 import html as _html
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
-UI_JS = (REPO_ROOT / "static" / "ui.js").read_text()
-
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def esc(s):
@@ -110,49 +107,6 @@ def render_table_with_links(md):
 
 
 # ── Source-level checks (verify fix is in the JS) ─────────────────────────────
-
-def test_inlinemd_uses_link_stash():
-    """Fixed inlineMd() must stash [label](url) links before autolink runs."""
-    assert '_link_stash' in UI_JS, (
-        "inlineMd() should use _link_stash to prevent double-linking"
-    )
-
-
-def test_inlinemd_no_esc_on_href():
-    """Fixed inlineMd() must not call esc() on the URL in href."""
-    # The old broken pattern had esc(u) inside the href
-    assert 'href="${esc(u)}"' not in UI_JS, (
-        "inlineMd() should not call esc() on href URL — it breaks & in query strings"
-    )
-
-
-def test_outer_link_pass_uses_a_stash():
-    """Fixed outer link pass must stash existing <a> tags before running."""
-    assert '_a_stash' in UI_JS, (
-        "Outer [label](url) pass should stash existing <a> tags to prevent autolink re-matching"
-    )
-
-
-def test_autolink_pass_uses_al_stash():
-    """Fixed autolink pass must stash existing <a> tags before running."""
-    assert '_al_stash' in UI_JS, (
-        "Autolink pass should stash existing <a> tags to prevent double-linking"
-    )
-
-
-def test_autolink_no_esc_on_href():
-    """Fixed autolink pass must not call esc() on href URL."""
-    idx = UI_JS.find('// Autolink: convert plain URLs to clickable links.')
-    assert idx != -1, "New autolink comment not found"
-    autolink_section = UI_JS[idx:idx+600]
-    # The return line should have href="${clean}" (JS template literal, no esc call)
-    assert 'href="${clean}"' in autolink_section, (
-        'Autolink should use href="${clean}" not href="${esc(clean)}"'
-    )
-    assert 'href="${esc(clean)}"' not in autolink_section, (
-        "Autolink should not esc() the URL in href"
-    )
-
 
 # ── Behaviour tests (Python mirror of fixed renderMd) ─────────────────────────
 
@@ -254,21 +208,7 @@ def test_href_quote_sanitized():
     )
 
 
-def test_js_source_sanitizes_quotes_in_href():
-    """JS source must apply quote percent-encoding to URLs before placing in href."""
-    # Both the inlineMd stash and outer link pass must sanitize quotes
-    assert "%22" in UI_JS, (
-        "URL placed in href should have double-quotes percent-encoded via .replace to %22"
-    )
-
 # ── Code-inside-bold tests (pre-existing bug, fixed in same PR) ───────────────
-
-def test_js_inlinemd_stashes_code_before_bold():
-    """Fixed inlineMd() must stash backtick code spans before bold/italic processing."""
-    assert '_code_stash' in UI_JS, (
-        "inlineMd() should use _code_stash to protect backtick spans from bold/italic esc()"
-    )
-
 
 def test_code_inside_bold_renders_correctly():
     """Inline code inside bold text must render as <strong><code>...</code></strong>,

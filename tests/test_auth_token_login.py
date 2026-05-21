@@ -57,6 +57,16 @@ class _FakeHandler:
         return json.loads(self.wfile.getvalue().decode() or "{}")
 
 
+def _dispatch_get_through_auth(path):
+    handler = _FakeHandler()
+    handler.command = "GET"
+    handler.path = path
+    parsed = urlparse(path)
+    if auth.check_auth(handler, parsed):
+        routes.handle_get(handler, parsed)
+    return handler
+
+
 @pytest.fixture(autouse=True)
 def _isolate_token_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_WEBUI_API_TOKENS_FILE", str(tmp_path / "api_tokens.json"))
@@ -181,6 +191,99 @@ def test_token_login_cookie_authorizes_protected_api_when_password_auth_enabled(
     denied_handler = _FakeHandler()
     assert auth.check_auth(denied_handler, urlparse("/api/profiles")) is False
     assert denied_handler.status == 401
+
+
+def test_api_only_root_returns_json_service_info():
+    handler = _FakeHandler()
+
+    assert routes.handle_get(handler, urlparse("/")) is not False
+
+    assert handler.status == 200
+    assert handler.header_value("Content-Type").startswith("application/json")
+    assert handler.json_body() == {
+        "service": "hermes-api",
+        "mode": "api-only",
+        "status": "ok",
+        "health": "/health",
+        "api_base": "/api",
+    }
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/index.html", "/login", "/static/ui.js", "/manifest.json"],
+)
+def test_removed_webui_frontend_routes_return_json_gone(path):
+    handler = _FakeHandler()
+
+    assert routes.handle_get(handler, urlparse(path)) is not False
+
+    assert handler.status == 410
+    assert handler.header_value("Content-Type").startswith("application/json")
+    assert handler.json_body()["error"]
+
+
+def test_removed_webui_service_worker_returns_unregister_script():
+    handler = _FakeHandler()
+
+    assert routes.handle_get(handler, urlparse("/sw.js")) is not False
+
+    body = handler.wfile.getvalue().decode()
+    assert handler.status == 200
+    assert handler.header_value("Content-Type").startswith("application/javascript")
+    assert handler.header_value("Service-Worker-Allowed") == "/"
+    assert "self.registration.unregister()" in body
+    assert "caches.keys()" in body
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/index.html",
+        "/login",
+        "/session/abc",
+        "/session/static/ui.js",
+        "/static/ui.js",
+        "/manifest.json",
+        "/manifest.webmanifest",
+        "/favicon.ico",
+    ],
+)
+def test_removed_webui_routes_reach_json_gone_when_auth_enabled(path, monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "secret")
+
+    handler = _dispatch_get_through_auth(path)
+
+    assert handler.status == 410
+    assert handler.header_value("Content-Type").startswith("application/json")
+    assert handler.json_body()["error"]
+    assert handler.header_value("Location") is None
+
+
+def test_removed_webui_service_worker_reaches_unregister_script_when_auth_enabled(monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "secret")
+
+    handler = _dispatch_get_through_auth("/sw.js")
+
+    body = handler.wfile.getvalue().decode()
+    assert handler.status == 200
+    assert handler.header_value("Content-Type").startswith("application/javascript")
+    assert "self.registration.unregister()" in body
+    assert handler.header_value("Location") is None
+
+
+def test_non_api_unauthorized_request_returns_json_401(monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "secret")
+    handler = _FakeHandler()
+
+    assert auth.check_auth(handler, urlparse("/some-page")) is False
+
+    assert handler.status == 401
+    assert handler.header_value("Content-Type") == "application/json"
+    assert json.loads(handler.wfile.getvalue().decode()) == {
+        "error": "Authentication required"
+    }
+    assert handler.header_value("Location") is None
 
 
 def test_options_returns_credentialed_cors_headers_when_allow_all_enabled(monkeypatch):

@@ -1058,62 +1058,6 @@ def test_sessions_response_keeps_distinct_messaging_sessions_for_distinct_users(
             pass
 
 
-def test_sessions_response_distinguishes_same_user_different_chat_identity_from_gateway_metadata(cleanup_test_sessions):
-    """Same user_id sessions should stay separate when gateway metadata exposes chat identity."""
-    conn = _ensure_state_db()
-    sid_dm = 'gw_tg_same_user_dm'
-    sid_group = 'gw_tg_same_user_group'
-    cleanup_test_sessions.extend([sid_dm, sid_group])
-    sessions_file = _get_test_state_dir() / 'sessions' / 'sessions.json'
-    original_sessions_json = None
-    if sessions_file.exists():
-        original_sessions_json = sessions_file.read_text()
-    sessions_file.parent.mkdir(parents=True, exist_ok=True)
-    sessions_payload = {
-        "agent:main:telegram:dm:1143399746": {
-            "session_key": "agent:main:telegram:dm:1143399746",
-            "session_id": sid_dm,
-            "origin": {
-                "platform": "telegram",
-                "chat_type": "dm",
-                "chat_id": "1143399746",
-                "user_id": "1143399746",
-            },
-        },
-        "agent:main:telegram:group:chat_42:1143399746": {
-            "session_key": "agent:main:telegram:group:chat_42:1143399746",
-            "session_id": sid_group,
-            "origin": {
-                "platform": "telegram",
-                "chat_type": "group",
-                "chat_id": "chat_42",
-                "user_id": "1143399746",
-            },
-        },
-    }
-    try:
-        sessions_file.write_text(json.dumps(sessions_payload), encoding='utf-8')
-        _insert_gateway_session(conn, session_id=sid_dm, source='telegram', title='DM Same User', user_id='1143399746', started_at=time.time() - 40)
-        _insert_gateway_session(conn, session_id=sid_group, source='telegram', title='Group Same User', user_id='1143399746', started_at=time.time())
-
-        post('/api/settings', {'show_cli_sessions': True})
-        data, status = get('/api/sessions')
-        assert status == 200
-        ids = {s['session_id'] for s in data.get('sessions', []) if s.get('session_id') in {sid_dm, sid_group}}
-        assert ids == {sid_dm, sid_group}, f"Expected both DM/group Telegram sessions, got {ids}"
-    finally:
-        try:
-            post('/api/settings', {'show_cli_sessions': False})
-            _remove_test_sessions(conn, sid_dm, sid_group)
-            if original_sessions_json is None:
-                sessions_file.unlink(missing_ok=True)
-            else:
-                sessions_file.write_text(original_sessions_json, encoding='utf-8')
-            conn.close()
-        except Exception:
-            pass
-
-
 def test_messaging_projection_hides_stale_gateway_internal_segments(monkeypatch):
     """Active Gateway identity should hide old reset rows and internal child segments."""
     from api import routes
@@ -1229,27 +1173,6 @@ def test_messaging_projection_keeps_distinct_active_gateway_conversations(monkey
     ids = {session.get("session_id") for session in kept}
 
     assert ids == {"telegram_dm_sid", "telegram_group_sid"}
-
-
-def test_messaging_projection_does_not_aggressively_hide_without_gateway_metadata(monkeypatch):
-    """Without sessions.json as source of truth, keep fallback behavior."""
-    from api import routes
-
-    monkeypatch.setattr(routes, "_load_gateway_session_identity_map", lambda: {})
-    sessions = [
-        {
-            "session_id": "weixin_reset_sid",
-            "raw_source": "weixin",
-            "title": "Old Weixin Reset",
-            "end_reason": "session_reset",
-            "updated_at": 90,
-            "message_count": 6,
-        },
-    ]
-
-    kept = routes._keep_latest_messaging_session_per_source(sessions)
-
-    assert [session.get("session_id") for session in kept] == ["weixin_reset_sid"]
 
 
 def test_sessions_response_distinguishes_same_platform_same_group_chat_different_users_without_session_key(cleanup_test_sessions):

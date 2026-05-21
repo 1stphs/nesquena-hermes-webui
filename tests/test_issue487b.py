@@ -14,17 +14,7 @@ import pathlib
 import re
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
-UI_JS = (REPO_ROOT / "static" / "ui.js").read_text()
-
-
 # ── Source-level check ────────────────────────────────────────────────────────
-
-def test_al_stash_includes_img_tags():
-    """_al_stash regex must stash both <a> and <img> tags to protect src= from autolink."""
-    assert '<img\\b[^>]*>' in UI_JS or '<img\\\\b[^>]*>' in UI_JS, (
-        "_al_stash should include <img> tag pattern to prevent autolink mangling src= URLs"
-    )
-
 
 # ── Behaviour tests (Python mirror of fixed pipeline) ─────────────────────────
 

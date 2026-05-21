@@ -11,7 +11,6 @@ from api import routes
 from tests.route_source import read_route_sources
 
 ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
-PANELS = (ROOT / "static" / "panels.js").read_text(encoding="utf-8")
 ROUTE_SOURCES = read_route_sources()
 
 
@@ -56,18 +55,6 @@ def test_unknown_kanban_endpoint_routes_are_wrapped_for_all_methods():
     assert 'return _kanban_unknown_endpoint(handler, parsed, "DELETE")' in ROUTE_SOURCES
 
 
-def test_kanban_stale_client_error_renders_hard_refresh_escape_hatch():
-    assert "function _kanbanLooksLikeStaleClientError(err)" in PANELS
-    assert "err.status === 404" in PANELS
-    assert "msg === 'not found'" in PANELS
-    assert "msg.includes('unknown kanban endpoint')" in PANELS
-    assert "Kanban needs a hard refresh" in PANELS
-    assert "Hard refresh now" in PANELS
-    assert "navigator.serviceWorker.getRegistrations()" in PANELS
-    assert "caches.keys()" in PANELS
-    assert "window.location.reload()" in PANELS
-
-
 def test_inner_handler_bad_response_does_not_emit_double_404(monkeypatch):
     """Regression: when the kanban bridge already sent a response via bad()
     (returns None), the unknown-endpoint wrapper must not concatenate a second
@@ -91,12 +78,3 @@ def test_inner_handler_bad_response_does_not_emit_double_404(monkeypatch):
     assert body.count("}{") == 0, f"double response detected: {body!r}"
     payload = json.loads(body)
     assert payload["error"] == "task not found"
-
-
-def test_kanban_load_resolves_board_before_board_scoped_requests():
-    boards_pos = PANELS.find("await loadKanbanBoards();")
-    config_pos = PANELS.find("api('/api/kanban/config' + _kanbanBoardQuery())")
-    assert boards_pos != -1
-    assert config_pos != -1
-    assert boards_pos < config_pos
-    assert "_kanbanSetSavedBoard('default');" in PANELS

@@ -244,75 +244,7 @@ class TestRouting:
 
 # ── Frontend: cmdSteer + busy-mode steer use the new endpoint ────────────
 
-class TestFrontendWiring:
-    """The slash command and busy-mode steer paths must call /api/chat/steer."""
-
-    @classmethod
-    def setup_class(cls):
-        cls.cmds = (Path(__file__).parent.parent / "static" / "commands.js").read_text(encoding="utf-8")
-        cls.msgs = (Path(__file__).parent.parent / "static" / "messages.js").read_text(encoding="utf-8")
-        cls.i18n = (Path(__file__).parent.parent / "static" / "i18n.js").read_text(encoding="utf-8")
-
-    def test_cmd_steer_calls_endpoint(self):
-        idx = self.cmds.find("async function cmdSteer(")
-        assert idx >= 0
-        body = self.cmds[idx:idx + 600]
-        # Should call _trySteer (which calls the endpoint), not directly cancelStream
-        assert "_trySteer" in body, "cmdSteer must delegate to _trySteer"
-
-    def test_try_steer_calls_endpoint(self):
-        idx = self.cmds.find("async function _trySteer(")
-        assert idx >= 0
-        body = self.cmds[idx:idx + 1500]
-        assert "/api/chat/steer" in body, "_trySteer must POST to /api/chat/steer"
-        assert "method:'POST'" in body or 'method:"POST"' in body
-
-    def test_try_steer_handles_fallback(self):
-        idx = self.cmds.find("async function _trySteer(")
-        body = self.cmds[idx:idx + 1500]
-        # Must check result.accepted and fall back via queueSessionMessage + cancelStream
-        assert "result&&result.accepted" in body or "result.accepted" in body
-        assert "queueSessionMessage" in body
-        assert "cancelStream" in body, "fallback path must cancel the stream"
-
-    def test_send_busy_steer_uses_try_steer(self):
-        # send() in messages.js: when busyMode === 'steer', should call _trySteer
-        idx = self.msgs.find("busyMode==='steer'")
-        assert idx >= 0
-        block = self.msgs[idx:idx + 800]
-        assert "_trySteer" in block, "send()'s steer branch must delegate to _trySteer"
-
-    def test_pending_steer_leftover_listener(self):
-        """Frontend must listen for pending_steer_leftover SSE events and queue them."""
-        idx = self.msgs.find("addEventListener('pending_steer_leftover'")
-        assert idx >= 0, "messages.js must add a listener for pending_steer_leftover"
-        block = self.msgs[idx:idx + 600]
-        assert "queueSessionMessage" in block, (
-            "pending_steer_leftover handler must queue the leftover text for the next turn"
-        )
-
-
 # ── i18n keys ─────────────────────────────────────────────────────────────
-
-class TestI18nKeys:
-    """The two new keys (cmd_steer_delivered, steer_leftover_queued) must be in all 6 locales."""
-
-    @classmethod
-    def setup_class(cls):
-        cls.i18n = (Path(__file__).parent.parent / "static" / "i18n.js").read_text(encoding="utf-8")
-
-    def test_cmd_steer_delivered_in_all_locales(self):
-        assert self.i18n.count("cmd_steer_delivered:") >= 6, (
-            f"cmd_steer_delivered appears {self.i18n.count('cmd_steer_delivered:')} times; "
-            f"expected ≥6 (one per locale)"
-        )
-
-    def test_steer_leftover_queued_in_all_locales(self):
-        assert self.i18n.count("steer_leftover_queued:") >= 6, (
-            f"steer_leftover_queued appears {self.i18n.count('steer_leftover_queued:')} times; "
-            f"expected ≥6 (one per locale)"
-        )
-
 
 # ── Leftover SSE delivery: streaming.py emits pending_steer_leftover ─────
 

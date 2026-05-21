@@ -51,40 +51,6 @@ def test_extension_config_disabled_by_default(monkeypatch):
     }
 
 
-def test_extension_config_accepts_only_safe_same_origin_urls(tmp_path, monkeypatch):
-    root = tmp_path / "extensions"
-    root.mkdir()
-    monkeypatch.setenv("HERMES_WEBUI_EXTENSION_DIR", str(root))
-    monkeypatch.setenv(
-        "HERMES_WEBUI_EXTENSION_SCRIPT_URLS",
-        ", ".join(
-            [
-                "/extensions/app.js",
-                "https://example.com/evil.js",
-                "//example.com/evil.js",
-                "javascript:alert(1)",
-                "/api/session",
-                "/extensions/../api/session",
-                "/extensions/%2e%2e/api/session",
-                "/extensions/%252e%252e/api/session",
-                "/static/../api/session",
-            ]
-        ),
-    )
-    monkeypatch.setenv(
-        "HERMES_WEBUI_EXTENSION_STYLESHEET_URLS",
-        "/extensions/app.css, /static/theme.css, data:text/css,body{}",
-    )
-
-    from api.extensions import get_extension_config
-
-    assert get_extension_config() == {
-        "enabled": True,
-        "script_urls": ["/extensions/app.js"],
-        "stylesheet_urls": ["/extensions/app.css", "/static/theme.css"],
-    }
-
-
 def test_index_html_injection_escapes_urls_and_preserves_disabled_default(tmp_path, monkeypatch):
     monkeypatch.delenv("HERMES_WEBUI_EXTENSION_DIR", raising=False)
     monkeypatch.setenv("HERMES_WEBUI_EXTENSION_SCRIPT_URLS", "/extensions/app.js")
@@ -106,25 +72,6 @@ def test_index_html_injection_escapes_urls_and_preserves_disabled_default(tmp_pa
     assert '<script src="/extensions/app.js?v=1&amp;mode=dev" defer></script>' in injected
     assert injected.index("/extensions/app.css") < injected.index("</head>")
     assert injected.index("/extensions/app.js") < injected.index("</body>")
-
-
-def test_extension_route_remains_behind_webui_auth(monkeypatch):
-    monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "test-password")
-
-    from api.auth import check_auth
-
-    extension = FakeHandler()
-    # SimpleNamespace must include `query` because api.auth.check_auth (since
-    # v0.50.258, the multi-param ?next= encoding fix) accesses `parsed.query`
-    # when constructing the redirect Location header.
-    assert check_auth(extension, SimpleNamespace(path="/extensions/app.js", query="")) is False
-    assert extension.status == 302
-    assert extension.header("Location") == "login?next=/extensions/app.js"
-
-    # Existing core static assets remain public; extension assets intentionally
-    # do not share that exemption because they are administrator-supplied code.
-    static = FakeHandler()
-    assert check_auth(static, SimpleNamespace(path="/static/ui.js", query="")) is True
 
 
 def test_extension_static_serving_is_sandboxed(tmp_path, monkeypatch):

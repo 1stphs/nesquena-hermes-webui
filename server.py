@@ -1,5 +1,5 @@
 """
-Hermes Web UI -- Main server entry point.
+Hermes API service -- Main server entry point.
 Thin routing shell: imports Handler, delegates to api/routes.py, runs server.
 All business logic lives in api/*.
 """
@@ -255,7 +255,7 @@ def main() -> None:
     if HOST not in ('127.0.0.1', '::1', 'localhost') and not is_auth_enabled():
         print(f'[!!] WARNING: Binding to {HOST} with NO PASSWORD SET.', flush=True)
         print(f'     Anyone on the network can access your filesystem and agent.', flush=True)
-        print(f'     Set a password via Settings or HERMES_WEBUI_PASSWORD env var.', flush=True)
+        print(f'     Set HERMES_WEBUI_PASSWORD or configure a stored password hash.', flush=True)
         print(f'     To suppress: bind to 127.0.0.1 or set a password.', flush=True)
         if within_container:
             print(f'     Note: You are running within a container, must bind to 0.0.0.0 (IPv4) or :: (IPv6) to publish the port.', flush=True)
@@ -308,10 +308,11 @@ def main() -> None:
             print(f'[!!] WARNING: TLS setup failed ({e}), falling back to HTTP', flush=True)
             scheme = 'http'
 
-    print(f'  Hermes Web UI listening on {scheme}://{HOST}:{PORT}', flush=True)
+    print(f'  Hermes API service listening on {scheme}://{HOST}:{PORT}', flush=True)
     if HOST in ('127.0.0.1', '::1') or within_container:
         print(f'  Remote access: ssh -N -L {PORT}:127.0.0.1:{PORT} <user>@<your-server>', flush=True)
-    print(f'  Then open:     {scheme}://localhost:{PORT}', flush=True)
+    print(f'  API root:      {scheme}://localhost:{PORT}/', flush=True)
+    print(f'  Health check:  {scheme}://localhost:{PORT}/health', flush=True)
     print('', flush=True)
     try:
         httpd.serve_forever()

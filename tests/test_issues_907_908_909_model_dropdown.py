@@ -3,91 +3,9 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-UI_JS = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-PANELS_JS = (REPO_ROOT / "static" / "panels.js").read_text(encoding="utf-8")
-
-
 # ── #907: Normalized dedup in _addLiveModelsToSelect ─────────────────────────
 
-class TestIssue907LiveModelDedup:
-    """Live-fetched models with @provider: prefix must not duplicate server-injected bare entries."""
-
-    def test_addLiveModelsToSelect_has_norm_dedup(self):
-        # _normId helper and existingNorm set must be present in _addLiveModelsToSelect
-        fn_idx = UI_JS.find('function _addLiveModelsToSelect(')
-        assert fn_idx != -1, "_addLiveModelsToSelect not found"
-        # Find the closing brace of the function (~800 chars is enough)
-        fn_body = UI_JS[fn_idx:fn_idx + 2000]
-        assert '_normId' in fn_body or 'existingNorm' in fn_body, (
-            "_addLiveModelsToSelect must normalise IDs before dedup check (#907)"
-        )
-
-    def test_normId_strips_at_prefix(self):
-        # The _normId lambda/function must strip @provider: prefix
-        fn_idx = UI_JS.find('function _addLiveModelsToSelect(')
-        fn_body = UI_JS[fn_idx:fn_idx + 2000]
-        has_at_strip = ("startsWith('@')" in fn_body or "split(':'" in fn_body)
-        assert has_at_strip, (
-            "_normId in _addLiveModelsToSelect must strip @provider: prefix for dedup (#907)"
-        )
-
-    def test_existingNorm_used_as_guard(self):
-        fn_idx = UI_JS.find('function _addLiveModelsToSelect(')
-        fn_body = UI_JS[fn_idx:fn_idx + 2000]
-        assert 'existingNorm.has(' in fn_body, (
-            "_addLiveModelsToSelect must check existingNorm before appending (#907)"
-        )
-
-    def test_normId_handles_multi_colon_ollama_ids(self):
-        """_normId must strip ONLY the first colon so multi-colon Ollama tag IDs
-        (e.g. '@ollama-cloud:qwen3-vl:235b-instruct' vs bare 'qwen3-vl:235b-instruct')
-        still dedup correctly. JS `split(':',2)[1]` with limit=2 TRUNCATES in JS
-        (unlike Python's split), so the naive variant would lose the tag suffix
-        and mis-dedup.
-        """
-        fn_idx = UI_JS.find('function _addLiveModelsToSelect(')
-        assert fn_idx != -1
-        fn_body = UI_JS[fn_idx:fn_idx + 2000]
-        # The implementation must use indexOf/substring or split().slice(1).join(),
-        # not split(':', 2)[1] which truncates the tail.
-        good = 'indexOf' in fn_body or "slice(1).join(':')" in fn_body
-        assert good, (
-            "_normId must strip only the first colon to preserve Ollama multi-colon "
-            "tag IDs (e.g. @ollama-cloud:qwen3-vl:235b-instruct). Use "
-            "substring(indexOf(':')+1) or split(':').slice(1).join(':') — NOT "
-            "split(':', 2)[1] which silently truncates in JS."
-        )
-        assert "split(':',2)[1]" not in fn_body and "split(':', 2)[1]" not in fn_body, (
-            "_normId still uses split(':', 2)[1] which truncates multi-colon IDs in JS; "
-            "use indexOf/substring instead."
-        )
-
-
 # ── #908: window._defaultModel updated on settings save ─────────────────────
-
-class TestIssue908DefaultModelSync:
-    """window._defaultModel must be updated when the user saves a new default in Preferences."""
-
-    def test_applySavedSettingsUi_updates_window_defaultModel(self):
-        fn_idx = PANELS_JS.find('function _applySavedSettingsUi(')
-        assert fn_idx != -1, "_applySavedSettingsUi not found"
-        # Find the end of the function (next function definition)
-        fn_end = PANELS_JS.find('\nasync function saveSettings(', fn_idx)
-        fn_body = PANELS_JS[fn_idx:fn_end]
-        assert 'window._defaultModel' in fn_body, (
-            "_applySavedSettingsUi must update window._defaultModel so newSession() "
-            "uses the newly saved default without a page reload (#908)"
-        )
-
-    def test_defaultModel_update_conditioned_on_body_default_model(self):
-        fn_idx = PANELS_JS.find('function _applySavedSettingsUi(')
-        fn_end = PANELS_JS.find('\nasync function saveSettings(', fn_idx)
-        fn_body = PANELS_JS[fn_idx:fn_end]
-        # Must be guarded so we don't clear _defaultModel when body.default_model is absent
-        assert "if(body.default_model)" in fn_body or "body.default_model &&" in fn_body, (
-            "window._defaultModel assignment must be conditional on body.default_model being set"
-        )
-
 
 # ── #909: Injected default model label quality ───────────────────────────────
 

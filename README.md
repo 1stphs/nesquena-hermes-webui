@@ -1,8 +1,8 @@
-# Nesquena Hermes WebUI
+# Nesquena Hermes API Service
 
-这是基于开源 `hermes-webui` 二次开发的内部 fork,用于承载当前 Hermes WebUI 服务、token-login 接入、前端代理对接和 routes 拆分维护。
+这是基于开源 `hermes-webui` 二次开发的内部 fork,当前定位是 Hermes API service,用于承载 token-login、外部前端代理对接和 routes 拆分维护。
 
-本仓库已清理上游宣传、路线图、PR 截图、Windows/WSL 自动启动脚本和 GitHub Actions。后续维护优先看这份 README,再看相邻代码和 `docs/` 中仍保留的运行文档。
+本仓库已删除内置静态 WebUI、PWA、UI 原型文档和旧 UI 测试。后续维护优先看这份 README,再看相邻代码和 `docs/` 中仍保留的运行文档。
 
 ## 1. 快速入口
 
@@ -14,17 +14,14 @@
 - `ctl.sh`: 常驻进程生命周期管理。
 - `Dockerfile`: 容器镜像。
 - `docker-compose.yml`: 当前部署 compose 配置。
-- `requirements.txt`: WebUI 最小 Python 依赖,当前只有 `pyyaml>=6.0`。
+- `requirements.txt`: API service 最小 Python 依赖,当前只有 `pyyaml>=6.0`。
 
-API 与前端:
+API:
 
 - `api/routes.py`: 稳定 API 路由入口。
 - `api/routes_dispatcher.py`: 主 dispatch 实现,按需同步 `api.routes` 全局绑定。
 - `api/routes_handlers/`: 从 `api/routes.py` 拆出的 endpoint handlers。
 - `api/routes_helpers/`: routes 共享 helper。
-- `static/index.html`: 浏览器 app shell。
-- `static/*.js`: 无构建步骤的前端模块。
-- `static/style.css`: 样式入口。
 
 ## 2. 本地启动
 
@@ -65,16 +62,23 @@ python3 bootstrap.py
 
 ## 4. 架构速查
 
-Hermes WebUI 是一个无前端构建步骤的 Python + 静态 JS 应用:
+Hermes API service 是一个 Python HTTP API 服务,不再承载内置浏览器 UI:
 
 - `server.py` 启动 `ThreadingHTTPServer`,设置 socket keepalive、请求日志、鉴权和 profile cookie 上下文。
 - `api/routes.py` 是稳定 public route entrypoint,暴露 `handle_get`、`handle_post`、`handle_patch`、`handle_delete`。
 - `api/routes_dispatcher.py` 承载主 dispatch 实现,按需同步 `api.routes` 全局绑定,保留历史 monkeypatch surface。
 - `api/routes_handlers/` 承载从 `api/routes.py` 拆出的 endpoint handlers。
 - `api/routes_helpers/` 承载 routes 共享 helper,例如 CSRF、cron、model resolve、SSE approval 等。
-- `static/` 是浏览器 UI,由 `static/index.html` 加载 `static/*.js` 和 `static/style.css`。
 
 运行时状态默认写在 `HERMES_WEBUI_STATE_DIR`;Hermes profile/home 相关路径由 `HERMES_HOME`、`HERMES_CONFIG_PATH`、`HERMES_WEBUI_AGENT_DIR` 等环境变量控制。
+
+API-only 路由约定:
+
+- `GET /`: 返回 JSON 服务信息。
+- `GET /health`: 运维健康检查。
+- `GET /index.html`、`/login`、`/session/*`、`/static/*`、`/manifest.json`: 返回 JSON `410`,表示内置 WebUI 已移除。
+- `GET /sw.js`: 返回卸载旧 Service Worker 的临时迁移脚本,用于清理存量浏览器缓存。
+- 外部前端继续通过 `POST /api/auth/token-login` 换取 `HttpOnly hermes_session` cookie,后续请求带 `credentials: include`。
 
 ## 5. 请求链路
 
@@ -127,9 +131,9 @@ Hermes WebUI 是一个无前端构建步骤的 Python + 静态 JS 应用:
 
 新增 handler 以现有 `_base.py` 和相邻模块风格为准,不要引入新 routing framework。
 
-## 8. 前端接入
+## 8. 外部前端接入
 
-当前 WebUI 通过自身 `/api/*` 提供 profile、session、chat、stream、token-login 等接口。前端侧接入细节见本地专用文档:
+当前服务通过 `/api/*` 提供 profile、session、chat、stream、token-login 等接口。外部前端接入细节见本地专用文档:
 
 - `ljl-docs/frontend-hermes-integration.md`
 
@@ -162,7 +166,7 @@ python -m compileall -q api
 不要删除:
 
 - `LICENSE`: MIT license 要求保留原许可声明。
-- `requirements.txt`: bootstrap 和 Docker init 仍依赖它安装 WebUI 最小依赖。
+- `requirements.txt`: bootstrap 和 Docker init 仍依赖它安装 API service 最小依赖。
 - `api/routes-*.md` / `api/routes-handlers-contract.md`: routes 拆分的无上下文续跑资料。
 - `docs/deploy-172.md`: 当前部署事实源。
 

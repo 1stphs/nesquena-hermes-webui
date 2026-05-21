@@ -14,33 +14,6 @@ import subprocess
 import textwrap
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent.resolve()
-SESSIONS_JS = (REPO_ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
-UI_JS = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-
-
-def test_loadsession_preserves_tool_rows():
-    """Reload must keep tool rows in S.messages so snippets can be reconstructed."""
-    assert "if (m.role === 'tool') continue;" not in SESSIONS_JS, (
-        "loadSession() must not drop role='tool' messages; renderMessages() hides them "
-        "visually, but it still needs them for snippet reconstruction"
-    )
-
-
-def test_loadsession_uses_session_toolcalls_only_as_fallback():
-    """Session summaries are the fallback, not the primary reload source."""
-    assert ("if(!hasMessageToolMetadata&&data.session.tool_calls&&data.session.tool_calls.length)" in SESSIONS_JS or
-            "if (!hasMessageToolMetadata && data.session.tool_calls && data.session.tool_calls.length)" in SESSIONS_JS)
-    assert ("S.toolCalls=(data.session.tool_calls||[]).map(tc=>({...tc,done:true}));" in SESSIONS_JS or
-            "S.toolCalls = data.session.tool_calls.map(tc => ({...tc, done: true}));" in SESSIONS_JS)
-    assert "S.toolCalls=[];" in SESSIONS_JS
-
-
-def test_rendermessages_treats_openai_toolcall_assistants_as_visible():
-    """OpenAI assistant rows with empty content but tool_calls must stay anchorable."""
-    assert "const hasTc=Array.isArray(m.tool_calls)&&m.tool_calls.length>0;" in UI_JS
-    assert "if(hasTc||hasTu||_messageHasReasoningPayload(m)) return true;" in UI_JS
-
-
 def _run_js(script_body: str) -> dict:
     script = textwrap.dedent(f"""
         function loadSessionShape(messages, sessionToolCalls) {{

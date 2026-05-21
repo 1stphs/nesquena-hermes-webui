@@ -74,25 +74,3 @@ class TestGemma4TitleLeakDetection:
 
     def test_clean_title_not_flagged(self):
         assert _looks_invalid_generated_title("Python debugging session") is False
-
-
-class TestGemma4MessagesJsThinkPairs:
-    """Verify static/messages.js contains the correct Gemma 4 pair."""
-
-    def test_messages_js_has_correct_gemma4_open(self):
-        js = pathlib.Path("static/messages.js").read_text()
-        # Must have double-pipe format: <|turn|>thinking
-        assert "<|turn|>thinking" in js, (
-            "messages.js is missing correct Gemma 4 open delimiter '<|turn|>thinking'"
-        )
-
-    def test_messages_js_no_wrong_gemma4_open(self):
-        js = pathlib.Path("static/messages.js").read_text()
-        # Must NOT have single-pipe wrong format: <|turn>thinking
-        assert "<|turn>thinking" not in js, (
-            "messages.js still contains wrong Gemma 4 delimiter '<|turn>thinking' (missing |)"
-        )
-
-    def test_messages_js_has_gemma4_close(self):
-        js = pathlib.Path("static/messages.js").read_text()
-        assert "<turn|>" in js, "messages.js missing Gemma 4 close delimiter '<turn|>'"

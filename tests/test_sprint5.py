@@ -42,11 +42,6 @@ def test_server_running_from_new_location():
     data, status = get("/health")
     assert status == 200 and data["status"] == "ok"
 
-def test_app_js_served():
-    """Sprint 9: app.js replaced by modules. Verify ui.js (contains renderMd) is served."""
-    raw, ct, status = get_raw("/static/ui.js")
-    assert status == 200 and "javascript" in ct and b"renderMd" in raw
-
 def test_workspaces_list():
     data, status = get("/api/workspaces")
     assert status == 200 and "workspaces" in data and "last" in data

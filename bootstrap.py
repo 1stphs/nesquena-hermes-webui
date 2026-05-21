@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot bootstrap launcher for Hermes Web UI."""
+"""One-shot bootstrap launcher for Hermes API service."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import time
 import urllib.error
 import urllib.request
 import venv
-import webbrowser
 from pathlib import Path
 
 
@@ -283,21 +282,14 @@ def wait_for_health(url: str, timeout: float = 25.0) -> bool:
     return False
 
 
-def open_browser(url: str) -> None:
-    try:
-        webbrowser.open(url)
-    except Exception as exc:
-        info(f"Could not open browser automatically: {exc}")
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Bootstrap Hermes Web UI onboarding.")
+    parser = argparse.ArgumentParser(description="Bootstrap Hermes API service.")
     parser.add_argument("port", nargs="?", type=int, default=DEFAULT_PORT)
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument(
         "--no-browser",
         action="store_true",
-        help="Do not open a browser tab automatically.",
+        help="Deprecated; the API service does not open a browser by default.",
     )
     parser.add_argument(
         "--skip-agent-install",
@@ -417,7 +409,7 @@ def main() -> int:
     foreground_reason = "--foreground" if args.foreground else _detect_supervisor()
     if foreground_reason:
         info(
-            f"Starting Hermes Web UI on http://{args.host}:{args.port} "
+            f"Starting Hermes API service on http://{args.host}:{args.port} "
             f"(foreground mode: {foreground_reason})"
         )
         try:
@@ -446,7 +438,7 @@ def main() -> int:
     # /health, then return. Suitable for an interactive `bash start.sh` run.
     log_path = state_dir / f"bootstrap-{args.port}.log"
 
-    info(f"Starting Hermes Web UI on http://{args.host}:{args.port}")
+    info(f"Starting Hermes API service on http://{args.host}:{args.port}")
     with log_path.open("ab") as log_file:
         proc = subprocess.Popen(
             [python_exe, server_path],
@@ -460,19 +452,19 @@ def main() -> int:
     health_url = f"http://{args.host}:{args.port}/health"
     if not wait_for_health(health_url):
         raise RuntimeError(
-            f"Web UI did not become healthy at {health_url}. "
+            f"Hermes API service did not become healthy at {health_url}. "
             f"Check the log at {log_path}. Server PID: {proc.pid}"
         )
 
-    app_url = (
+    api_url = (
         f"http://localhost:{args.port}"
         if args.host in ("127.0.0.1", "localhost")
         else f"http://{args.host}:{args.port}"
     )
-    info(f"Web UI is ready: {app_url}")
+    info(f"Hermes API service is ready: {api_url}")
+    info(f"API root: {api_url}/")
+    info(f"Health check: {health_url}")
     info(f"Log file: {log_path}")
-    if not args.no_browser:
-        open_browser(app_url)
     return 0
 
 

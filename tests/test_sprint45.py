@@ -141,17 +141,3 @@ def test_legacy_assistant_language_is_hidden_and_removed_on_next_save():
         assert "assistant_language" not in persisted
     finally:
         _restore_settings_file(original_settings)
-
-
-def test_reply_language_customization_ui_and_runtime_are_removed():
-    index_html = read("static/index.html")
-    panels_js = read("static/panels.js")
-    streaming_py = read("api/streaming.py")
-
-    assert "settingsAssistantLanguage" not in index_html
-    assert "assistant_language" not in panels_js
-    assert "settingsAssistantLanguage" not in panels_js
-    assert "assistant_language" not in streaming_py
-    assert "Default reply language:" not in streaming_py
-
-

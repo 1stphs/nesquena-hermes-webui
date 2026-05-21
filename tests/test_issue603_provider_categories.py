@@ -290,35 +290,6 @@ class TestApplyBaseURL:
 
 # ── Frontend: i18n keys ─────────────────────────────────────────────────
 
-class TestI18nCategoryKeys:
-    def test_en_has_all_category_keys(self):
-        with open("static/i18n.js", encoding="utf-8") as f:
-            content = f.read()
-        for key in ["provider_category_easy_start", "provider_category_self_hosted", "provider_category_specialized"]:
-            assert f"{key}:" in content, f"Missing i18n key: {key}"
-
-    def test_ru_has_all_category_keys(self):
-        with open("static/i18n.js", encoding="utf-8") as f:
-            content = f.read()
-        # Just verify count of category keys (should appear 6+ times: once per locale block)
-        assert content.count("provider_category_easy_start:") >= 4
-
-    def test_es_has_all_category_keys(self):
-        with open("static/i18n.js", encoding="utf-8") as f:
-            content = f.read()
-        assert "Inicio rápido" in content  # Spanish easy_start
-
-    def test_zh_has_all_category_keys(self):
-        with open("static/i18n.js", encoding="utf-8") as f:
-            content = f.read()
-        assert "快速开始" in content  # Chinese easy_start
-
-    def test_zh_hant_has_all_category_keys(self):
-        with open("static/i18n.js", encoding="utf-8") as f:
-            content = f.read()
-        assert "\\u5feb\\u901f\\u958b\\u59cb" in content  # zh-Hant easy_start
-
-
 class TestApplyBaseURLSpecialized:
     """Verify apply_onboarding_setup sets base_url for specialized providers."""
 

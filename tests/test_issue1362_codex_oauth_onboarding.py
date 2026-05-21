@@ -233,19 +233,6 @@ def test_codex_credentials_written_to_active_profile_auth_json(monkeypatch, tmp_
     assert _provider_oauth_authenticated("openai-codex", active_home) is True
 
 
-def test_frontend_uses_onboarding_oauth_endpoints_and_no_secret_poll_url():
-    js = (REPO / "static" / "onboarding.js").read_text(encoding="utf-8")
-    assert "/api/onboarding/oauth/start" in js
-    assert "/api/onboarding/oauth/poll" in js
-    assert "/api/onboarding/oauth/cancel" in js
-    assert "window.open(verification_uri" not in js
-    assert "device_code=" not in js
-    assert "device_code" not in js
-    assert "flow_id" in js
-    assert "copyCodexOAuthCode" in js
-    assert "cancelCodexOAuth" in js
-
-
 def test_unsupported_note_mentions_codex_and_claude_as_in_app():
     src = (REPO / "api" / "onboarding.py").read_text(encoding="utf-8")
     start = src.find("_UNSUPPORTED_PROVIDER_NOTE")
@@ -590,20 +577,3 @@ def test_anthropic_onboarding_setup_allows_linked_oauth_without_api_key(monkeypa
     saved = cfg_path.read_text(encoding="utf-8")
     assert "provider: anthropic" in saved
     assert "default: claude-sonnet-4.6" in saved
-
-
-def test_frontend_has_anthropic_oauth_support():
-    js = (REPO / "static" / "onboarding.js").read_text(encoding="utf-8")
-    assert "startAnthropicOAuth" in js
-    assert "cancelAnthropicOAuth" in js
-    assert "anthropicOAuthBtn" in js
-    assert "Login with Claude Code" in js
-    assert "Anthropic API key" in js
-    assert "Claude Code subscription" in js
-    assert "not the same as an Anthropic API key" in js
-    assert "/api/onboarding/oauth/start" in js
-    assert "/api/onboarding/oauth/poll" in js
-    assert "/api/onboarding/oauth/cancel" in js
-    assert "window.open(" not in js[js.find("startAnthropicOAuth"):]
-    assert "accessToken" not in js[js.find("startAnthropicOAuth"):]
-    assert "refreshToken" not in js[js.find("startAnthropicOAuth"):]

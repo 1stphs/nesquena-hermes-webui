@@ -130,32 +130,3 @@ class TestPluginsApi:
         assert plugin["enabled"] is False
         assert "/tmp/not-a-hook" not in repr(payload)
         assert "/secret" not in repr(payload)
-
-
-class TestPluginsSettingsUi:
-    def test_settings_sidebar_has_plugins_section(self):
-        html = read("static/index.html")
-        js = read("static/panels.js")
-
-        assert 'data-settings-section="plugins"' in html
-        assert "settingsPanePlugins" in html
-        assert "'plugins'" in js
-        assert "loadPluginsPanel()" in js
-
-    def test_plugins_panel_has_list_and_empty_state(self):
-        html = read("static/index.html")
-
-        assert 'id="pluginsList"' in html
-        assert 'id="pluginsEmpty"' in html
-        assert "No Hermes plugins are currently visible" in html
-
-    def test_plugins_panel_fetches_api_and_renders_hook_badges_safely(self):
-        js = read("static/panels.js")
-
-        assert "api('/api/plugins')" in js
-        assert "_buildPluginCard" in js
-        assert "plugin-hook-badge" in js
-        assert "esc(plugin.description" in js
-        segment = js[js.find("function _buildPluginCard"):js.find("// ── Providers panel")]
-        assert ".path" not in segment
-        assert ".callback" not in segment

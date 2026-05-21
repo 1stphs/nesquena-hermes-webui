@@ -16,58 +16,7 @@ from api.streaming import _restore_reasoning_metadata
 
 
 REPO = pathlib.Path(__file__).parent.parent
-UI_JS = (REPO / "static" / "ui.js").read_text(encoding="utf-8")
-UI_CSS = (REPO / "static" / "style.css").read_text(encoding="utf-8")
 STREAMING_PY = (REPO / "api" / "streaming.py").read_text(encoding="utf-8")
-
-
-def test_footer_timestamp_is_not_limited_to_user_messages():
-    assert "const timeHtml = tsTime ?" in UI_JS
-    assert "isUser && tsTime" not in UI_JS, (
-        "Timestamp footer should no longer be gated to user messages only"
-    )
-
-
-def test_footer_timestamp_uses_richer_format_for_older_messages():
-    assert "function _formatMessageFooterTimestamp(tsVal)" in UI_JS
-    assert "month:'short'" in UI_JS or 'month: "short"' in UI_JS
-    assert "day:'numeric'" in UI_JS or 'day: "numeric"' in UI_JS
-    assert "hour:'numeric'" in UI_JS or 'hour: "numeric"' in UI_JS
-    assert "minute:'2-digit'" in UI_JS or 'minute: "2-digit"' in UI_JS
-
-
-def test_timestamp_footer_stays_on_visible_response_segments():
-    assert "if(hasVisibleBody){" in UI_JS
-    assert 'seg.insertAdjacentHTML(\'beforeend\', `${filesHtml}<div class="msg-body">${bodyHtml}</div>${footHtml}`);' in UI_JS, (
-        "Footer timestamp should stay attached to visible response segments"
-    )
-    assert "assistantThinking.set(rawIdx, thinkingText);" in UI_JS, (
-        "Thinking-only assistant segments should preserve thinking for the shared activity dropdown without rendering a footer"
-    )
-    assert "seg.classList.add('assistant-segment-anchor');" in UI_JS, (
-        "Empty assistant anchor segments should stay footerless while anchoring activity metadata"
-    )
-
-
-def test_footer_chrome_is_hover_only_for_user_and_assistant_messages():
-    assert ".msg-row[data-role=\"user\"] .msg-foot {\n  opacity: 0;" in UI_CSS
-    assert ".msg-row[data-role=\"user\"]:hover .msg-foot," in UI_CSS
-    assert ".msg-row[data-role=\"assistant\"] .msg-foot," in UI_CSS
-    assert ".assistant-turn .msg-foot {" in UI_CSS
-    assert ".assistant-turn:hover .msg-foot," in UI_CSS
-
-
-def test_last_assistant_keeps_usage_visible_and_reveals_time_and_actions_on_hover():
-    assert "usage.className='msg-usage-inline';" in UI_JS
-    assert "targetFoot.classList.add('msg-foot-with-usage');" in UI_JS
-    assert (
-        "targetFoot.insertBefore(usage, targetFoot.firstChild);" in UI_JS
-        or "targetFoot.insertBefore(fragments[i], targetFoot.firstChild);" in UI_JS
-    )
-    assert ".assistant-turn .msg-foot-with-usage," in UI_CSS
-    assert ".msg-row[data-role=\"assistant\"] .msg-foot-with-usage {\n  opacity: 1;" in UI_CSS
-    assert ".msg-foot-with-usage .msg-time,\n.msg-foot-with-usage .msg-actions {\n  opacity: 0;" in UI_CSS
-    assert ".assistant-turn:hover .msg-foot-with-usage .msg-time," in UI_CSS
 
 
 def test_restore_reasoning_metadata_preserves_existing_timestamps():

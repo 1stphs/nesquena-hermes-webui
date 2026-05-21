@@ -256,16 +256,6 @@ def test_concurrent_new_sessions_get_correct_profiles():
 
 # ── R19i: sessions.js sends profile in the POST body ─────────────────────────
 
-def test_sessions_js_sends_profile_in_new_session_post():
-    """R19i: sessions.js newSession() must include profile:S.activeProfile in the
-    JSON body sent to /api/session/new — the client-side half of the #798 fix."""
-    js = (Path(__file__).parent.parent / 'static' / 'sessions.js').read_text()
-    assert 'profile:S.activeProfile' in js or 'profile: S.activeProfile' in js, (
-        "sessions.js newSession() must send profile: S.activeProfile in the POST body "
-        "so the server uses the tab's active profile, not the process global."
-    )
-
-
 def test_get_hermes_home_for_profile_rejects_path_traversal():
     """R19j: get_hermes_home_for_profile() must reject names that don't match
     _PROFILE_ID_RE (e.g. path traversal like '../../etc') and return the base

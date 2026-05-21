@@ -108,33 +108,3 @@ class TestWorkspaceReorderEndpoint:
         saved = mock_save.call_args[0][0]
         assert saved[0]["path"] == "/b"
         assert saved[1]["path"] == "/a"
-
-
-class TestWorkspaceReorderFrontend:
-    """Frontend: drag handle and i18n keys."""
-
-    def test_i18n_keys_present_in_all_locales(self):
-        """workspace_drag_hint and workspace_reorder_failed must exist in all locales."""
-        with open("static/i18n.js", "r", encoding="utf-8") as f:
-            content = f.read()
-        for key in ("workspace_drag_hint", "workspace_reorder_failed"):
-            count = content.count(key)
-            assert count >= 7, f"{key} found {count} times, expected >= 7"
-
-    def test_grip_vertical_icon_exists(self):
-        with open("static/icons.js", "r", encoding="utf-8") as f:
-            content = f.read()
-        assert "'grip-vertical'" in content
-
-    def test_renderWorkspacesPanel_has_drag_attrs(self):
-        with open("static/panels.js", "r", encoding="utf-8") as f:
-            content = f.read()
-        for attr in ("draggable=true", "dragstart", "dragover", "dragend",
-                      "ws-drag-handle", "/api/workspaces/reorder"):
-            assert attr in content, f"Missing: {attr}"
-
-    def test_css_drag_classes_exist(self):
-        with open("static/style.css", "r", encoding="utf-8") as f:
-            content = f.read()
-        for cls in (".ws-drag-handle", ".ws-row.dragging", ".ws-row.drag-over"):
-            assert cls in content, f"Missing CSS: {cls}"

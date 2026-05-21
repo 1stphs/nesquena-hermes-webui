@@ -8,9 +8,6 @@ from tests.route_source import read_route_sources
 
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
-UI_JS = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-INDEX_HTML = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
-STYLE_CSS = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
 ROUTE_SOURCES = read_route_sources()
 
 
@@ -116,37 +113,6 @@ def test_agent_health_route_is_registered_with_tri_state_payload_shape():
     assert '"alive"' in src
     assert '"checked_at"' in src
     assert '"details"' in src
-
-
-def test_agent_health_banner_markup_and_styles_exist():
-    assert 'id="agentHealthBanner"' in INDEX_HTML
-    assert 'role="alert"' in INDEX_HTML
-    assert 'aria-live="assertive"' in INDEX_HTML
-    assert 'onclick="dismissAgentHealthAlert()"' in INDEX_HTML
-    assert ".agent-health-banner" in STYLE_CSS
-    assert ".agent-health-banner.visible" in STYLE_CSS
-    assert ".agent-health-dismiss" in STYLE_CSS
-
-
-def test_agent_health_frontend_polls_only_visible_and_distinguishes_states():
-    assert "const AGENT_HEALTH_INTERVAL_MS=30000" in UI_JS
-    assert "api('/api/health/agent')" in UI_JS
-    assert "document.visibilityState !== 'visible'" in UI_JS
-    assert "document.addEventListener('visibilitychange',_syncAgentHealthMonitorVisibility)" in UI_JS
-    assert "if(payload.alive === true)" in UI_JS
-    assert "if(payload.alive === false)" in UI_JS
-    assert "if(payload.alive == null)" in UI_JS
-    assert "_showAgentHealthAlert(payload)" in UI_JS
-    assert "_hideAgentHealthAlert()" in UI_JS
-
-
-def test_agent_health_dismiss_persists_until_recovery():
-    assert "const AGENT_HEALTH_DISMISSED_KEY='agent-health-dismissed'" in UI_JS
-    assert "localStorage.setItem(AGENT_HEALTH_DISMISSED_KEY,'1')" in UI_JS
-    assert "localStorage.removeItem(AGENT_HEALTH_DISMISSED_KEY)" in UI_JS
-    assert "function dismissAgentHealthAlert()" in UI_JS
-    assert "if(_agentHealthDismissed()) return;" in UI_JS
-    assert "_setAgentHealthDismissed(false)" in UI_JS
 
 
 def test_agent_health_backend_does_not_use_shell_or_expose_raw_process_fields():

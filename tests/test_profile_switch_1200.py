@@ -237,38 +237,6 @@ This caused the chip to keep showing the old profile name after switchToProfile(
 import re
 
 
-def test_syncTopbar_early_return_updates_profile_chip():
-    """
-    syncTopbar() must update profileChipLabel inside the !S.session early-return block.
-    Without this, the composer profile chip stays stale when there is no active session.
-    """
-    from pathlib import Path
-    ui_js = (Path(__file__).parent.parent / "static" / "ui.js").read_text(encoding="utf-8")
-
-    # Find the syncTopbar function
-    fn_start = ui_js.find("function syncTopbar(){")
-    assert fn_start != -1, "syncTopbar function not found in ui.js"
-
-    # Find the early-return block (!S.session branch)
-    early_ret_start = ui_js.find("if(!S.session){", fn_start)
-    assert early_ret_start != -1, "!S.session early-return block not found in syncTopbar"
-
-    # Find where the early return ends (the closing brace + return)
-    early_ret_end = ui_js.find("return;", early_ret_start)
-    assert early_ret_end != -1
-
-    early_block = ui_js[early_ret_start : early_ret_end + len("return;")]
-
-    # The profile chip update must be inside this early-return block
-    assert "profileChipLabel" in early_block, (
-        "syncTopbar() early-return block (!S.session) must update profileChipLabel. "
-        "Without this, switching profiles with no active session leaves the chip stale."
-    )
-    assert "S.activeProfile" in early_block, (
-        "profileChipLabel update in early-return block must read S.activeProfile"
-    )
-
-
 # ── Regression guard tests ────────────────────────────────────────────────────
 # These tests exist to catch future regressions in profile switching behavior.
 # Each one corresponds to a specific bug that was fixed in the #1200 PR.
@@ -352,37 +320,6 @@ def test_regression_models_cache_cleared_on_profile_switch():
     # Cache must be cleared
     assert config_module._available_models_cache is None, (
         "REGRESSION: model cache not cleared after profile switch. Bug 2 regressed."
-    )
-
-
-def test_regression_synctopbar_early_return_updates_profile_chip():
-    """
-    REGRESSION GUARD (#1200 Bug 3): the syncTopbar() early-return branch (when
-    S.session is null) must update the profileChipLabel.
-
-    If this fix is reverted, the profile chip stays on the old profile name even
-    though S.activeProfile has been updated, because syncTopbar() exits early
-    before reaching the chip-update code at the end of the function.
-    """
-    from pathlib import Path
-
-    ui_js = (Path(__file__).parent.parent / "static" / "ui.js").read_text(encoding="utf-8")
-
-    fn_start = ui_js.find("function syncTopbar(){")
-    assert fn_start != -1, "syncTopbar not found — has it been renamed?"
-
-    early_start = ui_js.find("if(!S.session){", fn_start)
-    assert early_start != -1, "!S.session early-return block not found in syncTopbar"
-
-    early_end = ui_js.find("return;", early_start)
-    assert early_end != -1, "return; not found after !S.session block"
-
-    early_block = ui_js[early_start : early_end + len("return;")]
-
-    assert "profileChipLabel" in early_block, (
-        "REGRESSION: syncTopbar() early-return no longer updates profileChipLabel. "
-        "Profile name chip won't update after switching profiles with no active session. "
-        "Bug 3 regressed."
     )
 
 

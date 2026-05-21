@@ -100,37 +100,3 @@ class TestMcpToolInventoryApi:
         assert summary["description"] != "use API_KEY=super-secret"
         assert "super-secret" not in summary["description"]
         assert summary["schema_summary"] == []
-
-
-class TestMcpToolInventoryUi:
-    def test_system_settings_contains_searchable_global_mcp_tool_section(self):
-        html = _read("static/index.html")
-        assert 'data-i18n="mcp_tools_title"' in html
-        assert 'id="mcpToolSearch"' in html
-        assert 'id="mcpToolList"' in html
-        assert 'oninput="filterMcpTools()"' in html
-
-    def test_panels_js_loads_tools_and_filters_name_server_description(self):
-        js = _read("static/panels.js")
-        assert "function loadMcpTools" in js
-        assert "api('/api/mcp/tools')" in js
-        assert "function filterMcpTools" in js
-        assert "_filterMcpToolsForSearch" in js
-        assert "tool.name" in js
-        assert "tool.server" in js
-        assert "tool.description" in js
-        assert "mcp-tool-empty-state" in js
-        assert "mcp-tool-error-state" in js
-
-    def test_mcp_tool_i18n_keys_are_present(self):
-        i18n = _read("static/i18n.js")
-        for key in [
-            "mcp_tools_title",
-            "mcp_tools_desc",
-            "mcp_tools_search_placeholder",
-            "mcp_tools_no_tools",
-            "mcp_tools_no_matches",
-            "mcp_tools_load_failed",
-            "mcp_tools_schema_empty",
-        ]:
-            assert key in i18n

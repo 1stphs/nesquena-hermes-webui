@@ -11,10 +11,6 @@ from tests.route_source import read_route_sources
 
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
-UI_JS = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-PANELS_JS = (REPO_ROOT / "static" / "panels.js").read_text(encoding="utf-8")
-INDEX_HTML = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
-STYLE_CSS = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
 ROUTE_SOURCES = read_route_sources()
 AUTH_PY = (REPO_ROOT / "api" / "auth.py").read_text(encoding="utf-8")
 
@@ -138,40 +134,6 @@ def test_system_health_route_returns_only_sanitized_payload(monkeypatch):
     payload = handler.json_body()
     assert payload["cpu"]["percent"] == 12.0
     assert set(payload) == {"status", "available", "checked_at", "cpu", "memory", "disk", "errors"}
-
-
-def test_system_health_panel_markup_and_styles_live_under_insights_not_top_chrome():
-    top_shell = INDEX_HTML[: INDEX_HTML.index('<div class="layout">')]
-    assert 'id="systemHealthPanel"' not in top_shell
-    assert 'aria-label="Host resource health"' not in top_shell
-    assert 'function _renderSystemHealthPanel()' in PANELS_JS
-    assert 'id="systemHealthPanel"' in PANELS_JS
-    assert 'aria-label="Host resource health"' in PANELS_JS
-    assert 'System health' in PANELS_JS
-    assert 'Current VPS resource usage' in PANELS_JS
-    assert PANELS_JS.index('_renderSystemHealthPanel()') < PANELS_JS.index('_renderLlmWikiStatus(wikiStatus)')
-    assert 'data-system-health-metric="cpu"' in PANELS_JS
-    assert 'data-system-health-metric="memory"' in PANELS_JS
-    assert 'data-system-health-metric="disk"' in PANELS_JS
-    assert ".system-health-panel.insights-card" in STYLE_CSS
-    assert ".system-health-bar-fill" in STYLE_CSS
-    assert ".system-health-panel.unavailable" in STYLE_CSS
-    assert "@media(max-width:640px)" in STYLE_CSS and ".system-health-panel.insights-card" in STYLE_CSS
-
-
-def test_system_health_frontend_polls_visible_and_renders_progress_labels():
-    assert "const SYSTEM_HEALTH_INTERVAL_MS=5000" in UI_JS
-    assert "api('/api/system/health')" in UI_JS
-    assert "document.visibilityState !== 'visible'" in UI_JS
-    assert "document.querySelector('main.main.showing-insights')" in UI_JS
-    assert "document.addEventListener('visibilitychange',_syncSystemHealthMonitorVisibility)" in UI_JS
-    assert "typeof _syncSystemHealthMonitorVisibility === 'function'" in PANELS_JS
-    assert "function renderSystemHealth(payload)" in UI_JS
-    assert "setSystemHealthUnavailable" in UI_JS
-    assert "data-system-health-metric" in PANELS_JS
-    assert "CPU" in PANELS_JS and "RAM" in PANELS_JS and "Disk" in PANELS_JS
-    assert "aria-valuenow" in UI_JS
-    assert "style.width=`${percent}%`" in UI_JS
 
 
 def test_system_health_backend_uses_no_shell_or_private_process_sources():

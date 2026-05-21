@@ -13,33 +13,6 @@ def _read(name):
 
 # ── #853: MEDIA: URL restore renders any https:// as <img> ────────────────────
 
-class TestMediaUrlRendersInline:
-    """The `MEDIA:` stash restore in renderMd() must render https:// URLs
-    as <img> even when they lack a recognized file extension (FAL.ai and
-    similar CDNs serve images via content-addressed paths)."""
-
-    def test_render_md_checks_https_scheme_for_img_tag(self):
-        js = _read("static/ui.js")
-        # The fix OR-chains the extension check with a scheme check so any
-        # https:// URL in a MEDIA: token renders as <img>
-        assert re.search(
-            r"_IMAGE_EXTS\.test\(.*?\)\s*\|\|\s*/\^https\?:\\/\\/",
-            js,
-        ), (
-            "renderMd MEDIA: restore must accept any https:// URL as <img>, "
-            "not only those with image file extensions (#853)"
-        )
-
-    def test_img_class_applied_to_media_image(self):
-        """The resulting <img> uses the existing msg-media-img class so the
-        styling/fullscreen-click interaction is preserved."""
-        js = _read("static/ui.js")
-        # The img tag is constructed with the existing class + onclick toggle
-        assert "msg-media-img" in js
-        # PR #1135: CSS class toggle replaced by lightbox. Class removed; _openImgLightbox handles zoom.
-        assert "_openImgLightbox" in js, "Image click must open lightbox overlay"
-
-
 # ── #857: thinking-preamble stripping in auto-title ──────────────────────────
 
 class TestThinkingPreambleStripping:

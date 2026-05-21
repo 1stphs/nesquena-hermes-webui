@@ -200,7 +200,6 @@ from api.config import (
     CANCEL_FLAGS,
     SERVER_START_TIME,
     _resolve_cli_toolsets,
-    _INDEX_HTML_PATH,
     get_available_models,
     IMAGE_EXTS,
     MD_EXTS,
@@ -721,15 +720,6 @@ except ImportError:
     get_clarify_pending = lambda *a, **k: None
     clarify_sse_subscribe = None
     resolve_clarify = lambda *a, **k: 0
-
-# ── Login page locale strings ─────────────────────────────────────────────────
-# Add entries here to support more languages on the login page.
-# The key must match the 'language' setting value (from static/i18n.js LOCALES).
-from api.routes_helpers.login_page import (
-    _LOGIN_LOCALE,
-    _LOGIN_PAGE_HTML,
-    _resolve_login_locale_key,
-)
 
 # ── Insights endpoint ──────────────────────────────────────────────────────────
 
@@ -1320,32 +1310,6 @@ def _handle_plugins(handler, parsed) -> bool:
             },
         )
 
-_SHELL_ERROR_HTML = """<!doctype html>
-<html lang=\"en\">
-<head>
-  <meta charset=\"utf-8\">
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>Hermes is restarting</title>
-</head>
-<body style=\"margin:0;padding:2rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#111827;color:#e5e7eb;\">
-  <main style=\"max-width:40rem;margin:10vh auto;line-height:1.5;\">
-    <h1 style=\"font-size:1.5rem;margin:0 0 0.75rem;\">Hermes is restarting…</h1>
-    <p style=\"margin:0;color:#cbd5e1;\">The WebUI shell could not load cleanly. Refresh in a moment if this page does not update automatically.</p>
-  </main>
-</body>
-</html>"""
-
-def _serve_shell_unavailable(handler, exc: Exception) -> bool:
-    """Return HTML for shell-route failures so `/` never renders JSON."""
-    logger.warning("Failed to serve WebUI shell route: %s", exc)
-    t(
-        handler,
-        _SHELL_ERROR_HTML,
-        status=503,
-        content_type="text/html; charset=utf-8",
-    )
-    return True
-
 from api.routes_dispatcher import (
     dispatch_delete,
     dispatch_get,
@@ -1372,52 +1336,6 @@ def handle_patch(handler, parsed) -> bool:
 def handle_delete(handler, parsed) -> bool:
     """Handle all DELETE routes. Returns True if handled, False for 404."""
     return dispatch_delete(handler, parsed)
-
-# ── GET route helpers ─────────────────────────────────────────────────────────
-
-# MIME types for static file serving. Hoisted to module scope to avoid
-# rebuilding the dict on every request.
-_STATIC_MIME = {
-    "css": "text/css",
-    "js": "application/javascript",
-    "html": "text/html",
-    "svg": "image/svg+xml",
-    "png": "image/png",
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-    "ico": "image/x-icon",
-    "gif": "image/gif",
-    "webp": "image/webp",
-    "woff": "font/woff",
-    "woff2": "font/woff2",
-}
-# MIME types that are text-based and should carry charset=utf-8
-_TEXT_MIME_TYPES = {"text/css", "application/javascript", "text/html", "image/svg+xml", "text/plain"}
-
-def _serve_static(handler, parsed):
-    static_root = (Path(__file__).parent.parent / "static").resolve()
-    # Strip the leading '/static/' prefix, then resolve and sandbox
-    rel = parsed.path[len("/static/") :]
-    static_file = (static_root / rel).resolve()
-    try:
-        static_file.relative_to(static_root)
-    except ValueError:
-        return j(handler, {"error": "not found"}, status=404)
-    if not static_file.exists() or not static_file.is_file():
-        return j(handler, {"error": "not found"}, status=404)
-    ext = static_file.suffix.lower()
-    ct = _STATIC_MIME.get(ext.lstrip("."), "text/plain")
-    ct_header = f"{ct}; charset=utf-8" if ct in _TEXT_MIME_TYPES else ct
-    handler.send_response(200)
-    handler.send_header("Content-Type", ct_header)
-    handler.send_header("Cache-Control", "no-store")
-    raw = static_file.read_bytes()
-    handler.send_header("Content-Length", str(len(raw)))
-    handler.end_headers()
-    handler.wfile.write(raw)
-    return True
-
-
 
 def _handle_terminal_output(handler, parsed):
     qs = parse_qs(parsed.query)

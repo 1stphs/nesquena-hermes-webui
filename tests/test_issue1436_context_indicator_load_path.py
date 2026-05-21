@@ -33,9 +33,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
-UI_JS = Path(__file__).resolve().parent.parent / "static" / "ui.js"
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Backend: GET /api/session load path
 # ─────────────────────────────────────────────────────────────────────────────
@@ -215,50 +212,3 @@ class TestIssue1436BackendFallback:
 # ─────────────────────────────────────────────────────────────────────────────
 # Frontend: static/ui.js _syncCtxIndicator
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestIssue1436FrontendDefense:
-    """The frontend must NOT fall back to cumulative input_tokens when
-    last_prompt_tokens is missing — that produces nonsense percentages."""
-
-    def test_promptTok_does_not_fall_back_to_input_tokens(self):
-        """Verify the line `promptTok = usage.last_prompt_tokens||usage.input_tokens||0`
-        has been removed.  The old fallback divides cumulative input by the
-        context window, producing the >100% bug."""
-        src = UI_JS.read_text(encoding="utf-8")
-        # The bug shape: the `||usage.input_tokens` fragment must NOT appear
-        # on any line that defines `promptTok`.
-        for line_num, line in enumerate(src.splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
-            if "promptTok" in line and "=" in line and "usage.last_prompt_tokens" in line:
-                assert "usage.input_tokens" not in line, (
-                    f"static/ui.js:{line_num} still falls back to cumulative "
-                    f"input_tokens for promptTok — this produces the >100% indicator "
-                    f"bug from #1436.  Line: {line.rstrip()!r}"
-                )
-
-    def test_promptTok_assignment_uses_last_prompt_tokens_only(self):
-        """Verify the new assignment: `promptTok = usage.last_prompt_tokens || 0`."""
-        src = UI_JS.read_text(encoding="utf-8")
-        # Allow whitespace variations.
-        normalized = "".join(src.split())
-        assert "constpromptTok=usage.last_prompt_tokens||0" in normalized, (
-            "static/ui.js _syncCtxIndicator must assign "
-            "`promptTok = usage.last_prompt_tokens || 0` (no input_tokens fallback)"
-        )
-
-    def test_no_data_branch_renders_dot(self):
-        """When promptTok is 0 (no last-prompt data), the `!hasPromptTok` branch
-        must render '·' (U+00B7) on the ring instead of computing a percentage.
-        This is the existing behavior; the test pins it so a future refactor
-        doesn't accidentally re-introduce a numeric fallback."""
-        src = UI_JS.read_text(encoding="utf-8")
-        assert "hasPromptTok=!!promptTok" in src.replace(" ", ""), (
-            "hasPromptTok must be a boolean of promptTok"
-        )
-        # The ring center text uses '·' when !hasPromptTok
-        assert "hasPromptTok?String(pct):'\\u00b7'" in src.replace(" ", ""), (
-            "ring center must show '·' (\\u00b7) when no last-prompt data"
-        )

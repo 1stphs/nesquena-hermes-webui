@@ -24,14 +24,7 @@ STREAMING_PY = (REPO_ROOT / "api" / "streaming.py").read_text()
 # ── Shared helpers for sprint-42 additional tests ────────────────────────────
 
 REPO = REPO_ROOT  # alias used by #427 tests
-_SESSIONS_JS = REPO_ROOT / 'static' / 'sessions.js'
 _STREAMING_PY = REPO_ROOT / 'api' / 'streaming.py'
-_MESSAGES_JS = REPO_ROOT / 'static' / 'messages.js'
-_UI_JS = REPO_ROOT / 'static' / 'ui.js'
-
-def _read_sessions_js():
-    return _SESSIONS_JS.read_text(encoding='utf-8')
-
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSessionDBInjection(unittest.TestCase):
@@ -284,103 +277,8 @@ class TestSessionDBAST(unittest.TestCase):
                     )
 
 
-class TestModelCustomInput(unittest.TestCase):
-    """Tests for issue #444 — custom model ID input in model dropdown."""
-
-    STATIC = pathlib.Path(__file__).parent.parent / 'static'
-
-    def _read(self, filename):
-        path = self.STATIC / filename
-        with open(path, 'r', encoding='utf-8') as f:
-            return f.read()
-
-    def _renderModelDropdown_body(self):
-        src = self._read('ui.js')
-        start = src.find('function renderModelDropdown()')
-        end = src.find('\nasync function selectModelFromDropdown', start)
-        return src[start:end]
-
-    def test_model_custom_input_in_dropdown(self):
-        body = self._renderModelDropdown_body()
-        self.assertIn('model-custom-input', body,
-                      'model-custom-input class must be in renderModelDropdown')
-
-    def test_model_custom_enter_handler(self):
-        body = self._renderModelDropdown_body()
-        self.assertIn('_applyCustom', body,
-                      '_applyCustom function must be defined in renderModelDropdown')
-
-    def test_model_custom_css_defined(self):
-        css = self._read('style.css')
-        self.assertIn('.model-custom-row', css,
-                      '.model-custom-row must be defined in style.css')
-        self.assertIn('.model-custom-input', css,
-                      '.model-custom-input must be defined in style.css')
-
-    def test_model_custom_i18n_keys(self):
-        i18n = self._read('i18n.js')
-        # Find en locale block (appears first before es)
-        en_block_start = i18n.find("'en'")
-        es_block_start = i18n.find("'es'")
-        en_block = i18n[en_block_start:es_block_start]
-        self.assertIn('model_custom_label', en_block,
-                      'model_custom_label must be in en locale')
-        self.assertIn('model_custom_placeholder', en_block,
-                      'model_custom_placeholder must be in en locale')
-
-
 # ── Sprint 42 additional tests: context indicator (#437) ─────────────────
-def test_context_indicator_uses_pick_helper():
-    """The _pick helper must be present in sessions.js to prefer latest over stale values."""
-    content = _read_sessions_js()
-    assert '_pick' in content, "_pick helper not found in static/sessions.js"
-
-
-def test_context_indicator_old_pattern_removed():
-    """The old || pattern that preferred stale session data must be gone."""
-    content = _read_sessions_js()
-    assert '_s.input_tokens||u.input_tokens' not in content, \
-        "Old stale-data-first pattern '_s.input_tokens||u.input_tokens' still present in static/sessions.js"
-
-
-def test_context_indicator_all_six_fields():
-    """All six token/cost fields must appear in the _syncCtxIndicator call."""
-    content = _read_sessions_js()
-    fields = [
-        'input_tokens',
-        'output_tokens',
-        'estimated_cost',
-        'context_length',
-        'last_prompt_tokens',
-        'threshold_tokens',
-    ]
-    for field in fields:
-        assert field in content, \
-            f"Field '{field}' not found in static/sessions.js _syncCtxIndicator call"
-
-
 # ── Sprint 42 additional tests: system prompt title (#441) ──────────────
-def test_system_prompt_title_guard_exists():
-    """The guard that detects [SYSTEM: prefixes must be present in sessions.js."""
-    content = _read_sessions_js()
-    assert '[SYSTEM:' in content, \
-        "sessions.js must contain the [SYSTEM: guard to intercept system-prompt titles"
-    # Make sure it appears in an if-condition context, not just a comment
-    assert "cleanTitle.startsWith('[SYSTEM:')" in content, \
-        "sessions.js must have: cleanTitle.startsWith('[SYSTEM:') guard expression"
-
-
-def test_cleanTitle_is_let_not_const():
-    """cleanTitle must be declared with let (not const) to allow reassignment in the guard."""
-    content = _read_sessions_js()
-    assert 'let cleanTitle' in content, \
-        "cleanTitle must be declared with 'let' (not 'const') to allow reassignment"
-    # Make sure the old const form is gone in this context
-    # (check the specific assignment line pattern)
-    assert "const cleanTitle=tags.length" not in content, \
-        "Old 'const cleanTitle=tags.length...' must be replaced by 'let cleanTitle=...'"
-
-
 # ── Sprint 42 additional tests: thinking panel persistence (#427) ────────
 def test_streaming_persists_reasoning_in_session():
     """streaming.py must accumulate reasoning_text and patch last assistant message."""
@@ -406,49 +304,6 @@ def test_streaming_persists_reasoning_in_session():
     raw_session_idx = src.index("raw_session = s.compact()")
     assert persist_idx < raw_session_idx, \
         "Reasoning persistence block must appear before raw_session assignment"
-
-
-def test_done_handler_patches_reasoning_field():
-    """messages.js done SSE handler must patch reasoningText onto the last assistant message."""
-    src = (REPO / 'static' / 'messages.js').read_text()
-
-    # The persistence comment must be present inside the done handler
-    assert "Persist reasoning trace so thinking card survives page reload" in src, \
-        "Reasoning persistence comment not found in messages.js done handler"
-
-    # The guard and assignment must be present
-    assert "if(reasoningText){" in src, \
-        "reasoningText guard not found in messages.js"
-
-    assert "lastAsst.reasoning=reasoningText" in src, \
-        "lastAsst.reasoning assignment not found in messages.js"
-
-    # Verify the patch is inside the done handler (after 'source.addEventListener' for done)
-    done_handler_idx = src.index("source.addEventListener('done'")
-    persist_idx = src.index("Persist reasoning trace so thinking card survives page reload")
-    assert done_handler_idx < persist_idx, \
-        "Reasoning persistence patch must be inside the done SSE handler"
-
-    # The guard must also check !lastAsst.reasoning to avoid overwriting server value
-    assert "!lastAsst.reasoning" in src, \
-        "Guard '!lastAsst.reasoning' missing — would overwrite server-persisted reasoning"
-
-
-def test_rendermessages_reads_reasoning_from_messages():
-    """ui.js renderMessages must read m.reasoning to display the thinking card."""
-    src = (REPO / 'static' / 'ui.js').read_text()
-
-    # m.reasoning must be read in the render path
-    assert 'm.reasoning' in src, \
-        "m.reasoning not referenced in ui.js — thinking card won't render on reload"
-
-    # The thinking card rendering block must also be present
-    assert 'thinking-card' in src, \
-        "thinking-card CSS class not found in ui.js"
-
-    # Specifically, the fallback that reads from top-level m.reasoning field
-    assert 'thinkingText=m.reasoning' in src.replace(' ', ''), \
-        "thinkingText=m.reasoning assignment not found in ui.js renderMessages"
 
 
 def test_streaming_restores_prior_reasoning_metadata_after_followup():

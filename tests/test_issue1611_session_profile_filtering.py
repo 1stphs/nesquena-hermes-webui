@@ -150,50 +150,6 @@ def test_all_profiles_still_opt_in_with_profile_override():
 # ── No client-side CLI bypass ──────────────────────────────────────────────
 
 
-def test_static_sessions_js_no_cli_session_bypass():
-    """static/sessions.js must NOT filter via `s.is_cli_session || s.profile ===`.
-
-    The original bypass let every CLI-imported session leak into the active-profile
-    sidebar regardless of which profile owned it. After #1611 + the Opus pre-release
-    SHOULD-FIX, the client trusts the server's scoped wire data and does not
-    re-filter by profile at all (a strict-equality client filter would reject
-    the server's renamed-root cross-aliased rows).
-    """
-    from pathlib import Path
-
-    repo_root = Path(__file__).parent.parent
-    src = (repo_root / 'static' / 'sessions.js').read_text(encoding='utf-8')
-
-    assert "s.is_cli_session||s.profile===S.activeProfile" not in src, (
-        "Old CLI-session bypass must be removed (#1611)"
-    )
-    assert "s.is_cli_session || s.profile === S.activeProfile" not in src, (
-        "Old CLI-session bypass must be removed (#1611)"
-    )
-
-
-def test_static_sessions_js_uses_all_profiles_query_when_toggle_on():
-    """Frontend must request /api/sessions?all_profiles=1 when _showAllProfiles is true.
-
-    Without this, flipping the toggle just re-renders client-cached rows that
-    may not contain cross-profile data (since the server scoped on first fetch).
-    """
-    from pathlib import Path
-
-    repo_root = Path(__file__).parent.parent
-    src = (repo_root / 'static' / 'sessions.js').read_text(encoding='utf-8')
-
-    assert "_showAllProfiles ? '?all_profiles=1' : ''" in src, (
-        "Expected fetch path to flip on the toggle state"
-    )
-    assert "api('/api/sessions' + allProfilesQS)" in src, (
-        "Expected /api/sessions fetch to use the variant query"
-    )
-    assert "api('/api/projects' + allProfilesQS)" in src, (
-        "Expected /api/projects fetch to use the variant query"
-    )
-
-
 # ── SHOULD-FIX #2: profile filter must run BEFORE messaging-source dedupe ──
 # Bug shape (Opus pre-release advisor): _messaging_source_key is profile-blind,
 # so if profiles A and B both have a session for the same Slack identity, a
@@ -230,34 +186,6 @@ def test_keep_latest_messaging_runs_after_profile_filter():
 
 
 # ── SHOULD-FIX #1: client filter must NOT strict-equality-reject server cross-aliased rows ──
-
-
-def test_static_sessions_js_trusts_server_profile_scoping():
-    """After SHOULD-FIX #1, the client should NOT re-filter via strict equality.
-
-    Bug shape: server returns rows tagged 'default' to an active 'kinni' user
-    (when kinni is the renamed root) via _profiles_match cross-alias. A
-    naïve `(s.profile||'default')===(S.activeProfile||'default')` client filter
-    rejects them — user loses every legacy 'default'-tagged session.
-
-    Fix: drop the redundant client filter; trust the server."""
-    from pathlib import Path
-
-    repo_root = Path(__file__).parent.parent
-    src = (repo_root / 'static' / 'sessions.js').read_text(encoding='utf-8')
-
-    # The fragile client-side strict-equality filter must be gone.
-    forbidden = "withMessages.filter(s=>(s.profile||'default')===(S.activeProfile||'default'))"
-    assert forbidden not in src, (
-        "Client must not re-filter rows the server already cross-aliased "
-        "(Opus pre-release SHOULD-FIX #1)"
-    )
-
-    # And the count fallback that ran the same broken comparison must be gone too.
-    forbidden_count = "withMessages.filter(s=>(s.profile||'default')!==(S.activeProfile||'default')).length"
-    assert forbidden_count not in src, (
-        "Client otherProfileCount must come from server, not strict-equality fallback"
-    )
 
 
 # ── Cleanup ────────────────────────────────────────────────────────────────

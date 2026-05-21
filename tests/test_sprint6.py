@@ -29,21 +29,6 @@ def make_session_tracked(created_list, ws=None):
     created_list.append(sid)
     return sid, pathlib.Path(d["session"]["workspace"])
 
-# ── Phase E: HTML served from static/index.html ──
-
-def test_index_html_served():
-    raw, headers, status = get_raw("/")
-    assert status == 200
-    assert b"sidebarResize" in raw, "Resize handle not found in HTML"
-    assert b'id="mainTasks"' in raw, "Tasks main-view not found in HTML"
-    assert b'id="settingsMenu"' in raw, "Settings left-rail menu not found in HTML"
-    assert b"btnExportJSON" in raw, "Export JSON button not found in HTML"
-
-def test_index_html_file_exists():
-    p = REPO_ROOT / "static/index.html"
-    assert p.exists(), "static/index.html does not exist"
-    assert p.stat().st_size > 5000, "index.html seems too small"
-
 def test_server_py_has_no_html_string():
     txt = (REPO_ROOT / "server.py").read_text()
     assert 'HTML = r"""' not in txt, "server.py still contains inline HTML string"
@@ -134,19 +119,3 @@ def test_session_export_returns_json(cleanup_test_sessions):
     assert data["session_id"] == sid
     assert "messages" in data
     assert "title" in data
-
-# ── Resizable panels: static files present ──
-
-def test_static_index_has_resize_handles():
-    raw, _, status = get_raw("/")
-    assert status == 200
-    assert b"sidebarResize" in raw
-    assert b"rightpanelResize" in raw
-
-def test_app_js_has_resize_logic():
-    """Sprint 9: app.js replaced by modules. Resize logic lives in boot.js."""
-    raw, _, status = get_raw("/static/boot.js")
-    assert status == 200
-    assert b"_initResizePanels" in raw
-    assert b"hermes-sidebar-w" in raw
-    assert b"hermes-panel-w" in raw

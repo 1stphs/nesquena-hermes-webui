@@ -1,14 +1,14 @@
 # Deploy 172.234.237.195
 
-This runbook is for deploying this fork of Hermes WebUI to the existing server:
+This runbook is for deploying this Hermes API service to the existing server:
 
 ```text
 host: 172.234.237.195
 ssh user: root
-public WebUI URL: http://172.234.237.195:8787
+public API URL: http://172.234.237.195:8787
 ```
 
-Do not write the SSH password, WebUI password, `hermes_session`, long-lived API token, or provider API keys into this repository. Enter secrets interactively or load them from a local password manager.
+Do not write the SSH password, service password, `hermes_session`, long-lived API token, or provider API keys into this repository. Enter secrets interactively or load them from a local password manager.
 
 If you make a private local deployment script, keep the host fixed and leave the password blank in committed files:
 
@@ -26,14 +26,14 @@ Current production relationship on `172.234.237.195`:
 
 | Port | Container | Image | Purpose |
 |---:|---|---|---|
-| `8787` | `hermes-webui` | `hermes-webui-token-login:latest` | Hermes WebUI / Dashboard API. The Vue frontend should call this layer through `/api/*`. |
+| `8787` | `hermes-webui` | `hermes-webui-token-login:latest` | Hermes API service. The Vue frontend should call this layer through `/api/*`. |
 | `8642` | `hermes` | `nousresearch/hermes-agent:latest` | Hermes OpenAI-compatible `/v1` API Server. Publicly reachable, requires API key. |
 | `8643` | `hermes-foxu` | `nousresearch/hermes-agent:latest` | Another Hermes OpenAI-compatible `/v1` API Server. Publicly reachable, requires API key. |
 
-The `8787` WebUI chat flow is not a direct proxy to `8642` or `8643`. It uses WebUI's own profile/session/chat/stream API and the mounted Hermes home plus Hermes agent source:
+The `8787` API chat flow is not a direct proxy to `8642` or `8643`. It uses this service's own profile/session/chat/stream API and the mounted Hermes home plus Hermes agent source:
 
 ```text
-Browser or Vue -> http://172.234.237.195:8787/api/* -> Hermes WebUI process -> shared Hermes home / agent runtime
+Browser or Vue -> http://172.234.237.195:8787/api/* -> Hermes API service -> shared Hermes home / agent runtime
 ```
 
 The API Server ports are separate:
@@ -52,12 +52,12 @@ active compose dir: /var/www/nesquena-hermes-webui
 active compose file: /var/www/nesquena-hermes-webui/docker-compose.yml
 source dir:         /var/www/nesquena-hermes-webui
 Hermes home:        /root/.hermes
-WebUI state:        /root/.hermes/webui-mvp
+API service state:  /root/.hermes/webui-mvp
 workspace:          /root/.hermes/workspace
 agent src:          /var/www/hermes-agent-src
 ```
 
-The WebUI container sees those paths as:
+The API service container sees those paths as:
 
 ```text
 /home/hermeswebui/.hermes
@@ -76,7 +76,7 @@ Current important mounts:
 /var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
 ```
 
-Current important WebUI environment:
+Current important service environment:
 
 ```text
 HERMES_WEBUI_HOST=0.0.0.0
@@ -95,7 +95,7 @@ different compose directory can create a separate compose project and hit a
 
 ## Token Login State
 
-The deployed WebUI includes the long-lived token login patch:
+The deployed API service includes the long-lived token login patch:
 
 ```http
 POST /api/auth/token-login
@@ -123,7 +123,7 @@ Do not print that token in logs or paste it into docs. The JSON config stores on
 
 ## Deploy From Local Changes
 
-From the local development machine, first commit and push the WebUI changes:
+From the local development machine, first commit and push the API service changes:
 
 ```bash
 cd '/Users/mac/Documents/ljl-project/nesquena:hermes-webui'
@@ -366,7 +366,7 @@ new EventSource('/hermes/api/chat/stream?stream_id=...', {
 
 ## Rollback
 
-To roll back only WebUI code, use the previous image or previous git commit while preserving all volumes:
+To roll back only API service code, use the previous image or previous git commit while preserving all volumes:
 
 ```bash
 cd /var/www/nesquena-hermes-webui

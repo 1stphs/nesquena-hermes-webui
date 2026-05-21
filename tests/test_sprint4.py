@@ -35,17 +35,6 @@ def test_server_running_from_new_location():
     data, status = get("/health")
     assert status == 200 and data["status"] == "ok"
 
-def test_static_css_served():
-    raw, ct, status = get_raw("/static/style.css")
-    assert status == 200 and "text/css" in ct and b"--bg" in raw
-
-def test_static_unknown_file_404():
-    try:
-        get_raw("/static/doesnotexist.xyz")
-        assert False
-    except urllib.error.HTTPError as e:
-        assert e.code == 404
-
 def test_session_rename(cleanup_test_sessions):
     sid, _ = make_session_tracked(cleanup_test_sessions)
     result, status = post("/api/session/rename", {"session_id": sid, "title": "Renamed Session"})

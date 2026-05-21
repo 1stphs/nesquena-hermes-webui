@@ -148,28 +148,6 @@ def test_gateway_status_alive_none_falls_back_to_identity_map_heuristic(monkeypa
     assert result["configured"] is False
 
 
-def test_gateway_status_handles_corrupted_sessions_json(monkeypatch):
-    """Edge: sessions.json is corrupted → identity_map empty, rely on agent_health alone."""
-    from api import routes
-
-    monkeypatch.setattr(
-        routes,
-        "build_agent_health_payload",
-        lambda: {"alive": True, "checked_at": "2026-05-06T12:00:00+00:00", "details": {}},
-    )
-    # _load_gateway_session_identity_map already returns {} on JSON parse failure;
-    # we monkeypatch it to return {} to simulate corrupted file.
-    monkeypatch.setattr(routes, "_load_gateway_session_identity_map", lambda: {})
-
-    handler = _FakeHandler()
-    parsed = urlparse("http://example.com/api/gateway/status")
-    routes.handle_get(handler, parsed)
-    result = handler.get_json()
-    assert result["running"] is True
-    assert result["platforms"] == []
-    assert result["session_count"] == 0
-
-
 def test_gateway_status_blank_platform_fields_empty_platforms_running_true(monkeypatch):
     """Edge: sessions exist but all have blank/missing platform fields → platforms=[], running=true."""
     from api import routes

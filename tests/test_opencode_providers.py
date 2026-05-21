@@ -131,17 +131,3 @@ def test_live_models_handler_delegates_to_provider_model_ids():
         "_handle_live_models must not return not_supported for any provider — "
         "provider_model_ids() falls back to static list automatically"
     )
-
-
-def test_live_models_ui_no_longer_skips_any_provider():
-    """_fetchLiveModels in ui.js must not exclude any provider from live fetching.
-    Previously anthropic, google, and gemini were skipped — now provider_model_ids()
-    handles them all (with graceful fallback to static lists).
-    """
-    import pathlib
-    ui_src = (pathlib.Path(__file__).parent.parent / "static" / "ui.js").read_text()
-    # The old exclusion list must be gone
-    assert "includes(provider)" not in ui_src or "anthropic" not in ui_src[:ui_src.find("includes(provider)")+100], (
-        "_fetchLiveModels must not skip anthropic, google, or gemini — "
-        "the backend now returns live models for all providers"
-    )

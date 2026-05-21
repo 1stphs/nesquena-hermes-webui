@@ -164,44 +164,6 @@ def test_redact_session_data_threads_enabled_once_across_recursion():
 # ── 3: voice mode session-id capture ─────────────────────────────────────────
 
 
-def test_voice_mode_speakresponse_guards_against_session_switch():
-    """The `_speakResponse` callback fires from a global override of
-    `autoReadLastAssistant`. If the user navigates to a different session
-    between sending and stream completion, the callback would TTS-read the
-    new session's last assistant message instead of the one they sent to.
-    Fix: capture session_id at thinking-time, bail in _speakResponse if it
-    doesn't match the current S.session.session_id."""
-    src = (REPO / "static" / "boot.js").read_text(encoding="utf-8")
-
-    # Session-id capture state exists.
-    assert "let _voiceModeThinkingSid=" in src, (
-        "voice mode must declare _voiceModeThinkingSid to pin the active "
-        "session id at send-time"
-    )
-
-    # _voiceModeSend captures current session_id at thinking transition.
-    send_idx = src.find("function _voiceModeSend(")
-    assert send_idx != -1
-    send_body = src[send_idx : send_idx + 1200]
-    assert "_voiceModeThinkingSid=" in send_body, (
-        "_voiceModeSend must capture the current session_id at thinking-time"
-    )
-    assert "S.session.session_id" in send_body, (
-        "_voiceModeSend must read S.session.session_id"
-    )
-
-    # _speakResponse compares current sid to captured sid and bails on mismatch.
-    speak_idx = src.find("function _speakResponse(")
-    assert speak_idx != -1
-    speak_body = src[speak_idx : speak_idx + 1500]
-    assert "_voiceModeThinkingSid" in speak_body, (
-        "_speakResponse must consult _voiceModeThinkingSid"
-    )
-    assert "_startListening()" in speak_body, (
-        "_speakResponse mismatch path must drop back to listening, not silently exit"
-    )
-
-
 # ── 4: rollback _inspect_checkpoint except tuple ─────────────────────────────
 
 

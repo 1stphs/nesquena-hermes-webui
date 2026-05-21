@@ -8,12 +8,6 @@ from api.streaming import _normalize_gateway_routing_metadata
 
 REPO = Path(__file__).resolve().parents[1]
 STREAMING_PY = (REPO / "api" / "streaming.py").read_text(encoding="utf-8")
-MESSAGES_JS = (REPO / "static" / "messages.js").read_text(encoding="utf-8")
-UI_JS = (REPO / "static" / "ui.js").read_text(encoding="utf-8")
-SESSIONS_JS = (REPO / "static" / "sessions.js").read_text(encoding="utf-8")
-STYLE_CSS = (REPO / "static" / "style.css").read_text(encoding="utf-8")
-
-
 def test_gateway_routing_metadata_is_safely_normalized_from_response_metadata():
     metadata = {
         "used_provider": "Alibaba Cloud",
@@ -90,16 +84,3 @@ def test_streaming_captures_gateway_metadata_into_usage_payload_and_assistant_tu
     assert "usage['gateway_routing']" in STREAMING_PY
     assert "_dm['_gatewayRouting']" in STREAMING_PY
     assert "s.gateway_routing_history" in STREAMING_PY
-
-
-def test_frontend_copies_and_formats_gateway_metadata_without_absent_noise():
-    assert "d.usage.gateway_routing" in MESSAGES_JS
-    assert "lastAsst._gatewayRouting" in MESSAGES_JS
-    assert "_formatGatewayModelLabel" in UI_JS
-    assert "_gatewayRoutingLabel" in UI_JS
-    assert "msg-gateway-inline" in UI_JS
-    assert "msg-model-warning-inline" in UI_JS
-    assert "gateway-failover-inline" in UI_JS
-    assert "if(!routing)return''" in UI_JS.replace(" ", "")
-    assert "_formatSessionModelWithGateway" in SESSIONS_JS
-    assert ".msg-model-warning-inline" in STYLE_CSS

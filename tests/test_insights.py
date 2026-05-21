@@ -8,11 +8,6 @@ from types import SimpleNamespace
 REPO_ROOT = pathlib.Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO_ROOT))
 
-PANELS_JS = (REPO_ROOT / "static" / "panels.js").read_text(encoding="utf-8")
-STYLE_CSS = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
-INDEX_HTML = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
-
-
 class _FakeHandler:
     def __init__(self):
         self.status = None
@@ -138,27 +133,3 @@ def test_insights_model_breakdown_tracks_tokens_cost_and_shares(monkeypatch, tmp
     assert cheap["output_tokens"] == 200
     assert cheap["total_tokens"] == 700
     assert cheap["cost"] == 0.05
-
-
-def test_insights_frontend_renders_daily_token_chart_and_model_usage_table():
-    assert "daily_tokens" in PANELS_JS
-    assert "insights_daily_tokens" in PANELS_JS
-    assert "insights-daily-token-chart" in PANELS_JS
-    assert "insights-daily-bar-input" in PANELS_JS
-    assert "insights-daily-bar-output" in PANELS_JS
-    assert "insights_model_tokens" in PANELS_JS
-    assert "insights_model_cost" in PANELS_JS
-    assert "insights_model_share" in PANELS_JS
-    assert "insights_no_usage_data" in PANELS_JS
-
-
-def test_insights_frontend_has_daily_chart_styles_and_range_switching_hooks():
-    assert "insightsPeriod" in INDEX_HTML
-    assert 'option value="7"' in INDEX_HTML
-    assert 'option value="30"' in INDEX_HTML
-    assert 'option value="90"' in INDEX_HTML
-    assert "loadInsights()" in INDEX_HTML
-    assert "/api/insights?days=${period}" in PANELS_JS
-    assert ".insights-daily-token-chart" in STYLE_CSS
-    assert ".insights-daily-bar-output" in STYLE_CSS
-    assert ".insights-model-cost" in STYLE_CSS

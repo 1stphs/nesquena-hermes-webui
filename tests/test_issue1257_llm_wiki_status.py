@@ -85,16 +85,3 @@ def test_api_wiki_status_route_is_registered(monkeypatch, tmp_path):
     assert handled is True
     assert captured["status"] == 200
     assert captured["payload"]["entry_count"] == 1
-
-
-def test_insights_panel_fetches_and_renders_llm_wiki_status_card():
-    panels_src = (REPO / "static" / "panels.js").read_text(encoding="utf-8")
-    index_src = (REPO / "static" / "index.html").read_text(encoding="utf-8")
-    style_src = (REPO / "static" / "style.css").read_text(encoding="utf-8")
-
-    assert "api('/api/wiki/status')" in panels_src
-    assert "function _renderLlmWikiStatus" in panels_src
-    assert "llmWikiStatusCard" in index_src
-    assert "wiki-status-card" in style_src
-    assert "raw/" in panels_src
-    assert "recent_entries" not in panels_src

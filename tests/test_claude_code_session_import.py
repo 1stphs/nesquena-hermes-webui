@@ -128,28 +128,3 @@ def test_session_import_cli_returns_read_only_claude_code_payload(monkeypatch, t
     assert session["session_source"] == "external_agent"
     assert session["source_label"] == "Claude Code"
     assert session["is_cli_session"] is True
-
-
-def test_read_only_source_badge_ui_guards_are_present():
-    from tests.route_source import read_route_sources
-    sessions_js = (REPO_ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
-    messages_js = (REPO_ROOT / "static" / "messages.js").read_text(encoding="utf-8")
-    ui_js = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-    panels_js = (REPO_ROOT / "static" / "panels.js").read_text(encoding="utf-8")
-    style_css = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
-    routes_py = read_route_sources()
-
-    assert "function _isReadOnlySession" in sessions_js
-    assert "read-only-session" in sessions_js
-    assert "if(!readOnly)" in sessions_js
-    assert "Read-only imported sessions cannot be renamed" in sessions_js
-    assert "Read-only imported sessions cannot be modified" in sessions_js
-    assert "S.session.read_only||S.session.is_read_only" in messages_js
-    assert "topbar-source-badge" in ui_js
-    assert " · read-only" in ui_js
-    assert "topbar-source-badge" in panels_js
-    assert "S.session.read_only || S.session.is_read_only" in panels_js
-    assert 'data-source-key="claude_code"' in style_css
-    assert ".session-item.cli-session.read-only-session:hover::after" in style_css
-    assert "Read-only imported sessions cannot be deleted" in routes_py
-    assert "Read-only imported sessions cannot be archived" in routes_py

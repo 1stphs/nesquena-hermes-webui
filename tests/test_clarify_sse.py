@@ -17,9 +17,6 @@ from tests.route_source import read_route_sources
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 _CLARIFY = os.path.join(os.path.dirname(__file__), "..", "api", "clarify.py")
-_MESSAGES = os.path.join(os.path.dirname(__file__), "..", "static", "messages.js")
-
-
 def _read(path):
     if path == _ROUTES:
         return read_route_sources()
@@ -76,37 +73,6 @@ class TestClarifySSERoutesCode:
     def test_imports_sse_unsubscribe(self):
         src = _read(_ROUTES)
         assert "clarify_sse_unsubscribe" in src
-
-
-class TestClarifySSEFrontendCode:
-    @pytest.fixture(autouse=True)
-    def _load_js(self):
-        self.js = _read(_MESSAGES)
-
-    def test_uses_event_source(self):
-        assert "new EventSource" in self.js
-        assert "api/clarify/stream" in self.js
-        assert "EventSource('/api/clarify/stream" not in self.js
-
-    def test_frontend_listens_initial_event(self):
-        assert "'initial'" in self.js or '"initial"' in self.js
-
-    def test_frontend_listens_clarify_event(self):
-        assert "'clarify'" in self.js or '"clarify"' in self.js
-
-    def test_frontend_has_fallback_poll(self):
-        assert "_startClarifyFallbackPoll" in self.js or "clarifyFallbackTimer" in self.js
-
-    def test_frontend_fallback_interval_3s(self):
-        # Fallback poll interval should be 3000ms
-        assert "3000" in self.js
-
-    def test_frontend_stop_closes_event_source(self):
-        assert "_clarifyEventSource" in self.js
-        assert ".close()" in self.js
-
-    def test_frontend_has_health_timer(self):
-        assert "_clarifyHealthTimer" in self.js
 
 
 # ══════════════════════════════════════════════════════════════════════════════

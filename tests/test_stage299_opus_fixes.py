@@ -68,18 +68,3 @@ def test_count_files_returns_zero_for_forbidden_root(tmp_path, monkeypatch):
     if forbidden_root.exists():  # skip on systems without /etc (Windows)
         result = routes._llm_wiki_count_files(forbidden_root)
         assert result == 0, "Walking /etc should return 0 (forbidden root guard)"
-
-
-def test_render_llm_wiki_status_uses_url_scheme_guard():
-    """Opus SHOULD-FIX #1: docs_url interpolated into href must be scheme-guarded."""
-    panels_js = (Path(__file__).parent.parent / "static" / "panels.js").read_text()
-    # Find the _renderLlmWikiStatus function body
-    start = panels_js.find("function _renderLlmWikiStatus")
-    end = panels_js.find("\nfunction ", start + 1)
-    body = panels_js[start:end]
-    # Must use a scheme-guarded form, not raw esc()
-    assert "/^https?:" in body or "test(rawDocsUrl)" in body or "test(docsUrl)" in body, (
-        "Expected URL scheme guard (e.g. /^https?:\\/\\//.test(...)) before "
-        "interpolating docsUrl into href to prevent javascript: scheme XSS "
-        "if docs_url ever becomes config-driven."
-    )
