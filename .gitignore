@@ -29,6 +29,9 @@ copilot-instructions.md
 screenshot-*.png
 full-UI.png
 
+# Load-test outputs
+loadtests/results/
+
 # Version file written by Docker/CI build — generated, never committed
 api/_version.py
 
