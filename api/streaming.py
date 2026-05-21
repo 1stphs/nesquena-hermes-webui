@@ -3248,7 +3248,7 @@ def _run_agent_streaming(
 # SECTION: HTTP Request Handler
 # do_GET: read-only API endpoints + SSE stream + static HTML
 # do_POST: mutating endpoints (session CRUD, chat, upload, approval)
-# Routing is a flat if/elif chain. See ARCHITECTURE.md section 4.1.
+# Routing contract is documented in README.md "路由拆分契约".
 # ============================================================
 
 
