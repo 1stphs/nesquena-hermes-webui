@@ -2,20 +2,36 @@
 
 ## 目标 / 范围
 
-step2 阶段 3(Z-PR1 ~ Z-PR8)推进过程中,**与拆分本身无关、但每次跑全套测试都干扰信号**的若干债务清理。也包括拆分工程留痕和 CI 加固。
+step2 阶段 3(Z-PR1 ~ Z-PR8)推进过程中,**与拆分本身无关、但每次跑全套测试都干扰信号**的若干债务清理。也包括拆分工程留痕、contract scan 加固和 master 最新 routes 拆分状态回填。
 
 本文档不规划新的拆分批次,只覆盖:
 
 - 跑全套测试时噪音化的"既有失败/污染"
-- CI gate 的触发面加固
+- contract scan 的触发面加固
 - step2.md 的实际进度回填
+- `master` 最新 `routes.py` / dispatcher / API-only 变更后的后续边界
 
 ## 不在范围(明确写出来)
 
-- 任何 `_handle_*` 端点的新搬迁(走 Z-PR4 ~ Z-PR8)
-- 测试现代化(那是 step3 提案,涉及把"扫 routes.py 字面量"改成"扫 api/**")
-- `scan_routes_contracts.py` 的契约覆盖扩展 —— 实测 `_check_contracts` 已经覆盖了 R1 类回归会触发的契约面(`assert "X" in routes_src` / `def _handle_X(` / re-export / 全限定调用),不需重复造轮子
+- 任何 `_handle_*` 端点的新 Z-PR 搬迁;Z-PR1 ~ Z-PR8 已归档,后续不再沿用这个批次编号
+- 直接重写 dispatcher registry;当前只记录边界,不把 `api/routes_dispatcher.py` 改成 route table
+- API-only 后续清理的代码实现;这里只记录哪些方向需要单独立项
 - routes.py 顶部 re-export 块的精简 —— 显式列举是 `mock.patch("api.routes._handle_xxx")` 兼容性所必需,**主动不动**
+
+## 当前状态(2026-05-21 回填)
+
+`master` 已在 Z-PR8 之后继续完成两次大拆分:
+
+| 项 | 状态 | 证据 / 处理 |
+|---|---|---|
+| D1 dispatcher 下沉 | 已完成 | `f84e8c3 refactor(routes): 拆分主路由分发与扩展处理器`;新增 `api/routes_dispatcher.py`,四个 method dispatcher 改为 thin wrapper |
+| D2 API-only 转换 | 已完成 | `dd4a0ea refactor!(api): 转为 API-only 服务`;删除 WebUI shell / login HTML 和 `api/routes_helpers/login_page.py` |
+| D3 `api/routes.py` 行数 | 已回填 | 当前 `1762` 行;相对 `master-backup-cxg` 的 `6618` 行继续减少 `4856` 行 |
+| D4 handler/helper 规模 | 已回填 | `api/routes_handlers/` 当前 22 个文件、4788 行、76 个 `_handle_*`;`api/routes_helpers/` 当前 8 个文件、1512 行 |
+| D5 contract scan 结果 | 已回填 | 当前 `api/routes-handlers-contract.md` 摘要为 `green=80 yellow=3 red=0` |
+| D6 后续边界 | 已明确 | 剩余工作拆成 yellow 契约现代化、dispatcher registry 评估、API-only 兼容清理、re-export 兼容面收缩,不要混在一个普通瘦身任务里 |
+
+当前 `api/routes.py` 已不是主分发大文件。后续不要再以"继续把 routes.py 降到某个行数"作为目标;更合理的目标是降低兼容层复杂度和收敛 API-only 后遗留路径。
 
 ## 当前状态(2026-05-20 回填)
 
@@ -28,7 +44,7 @@ step2 阶段 3(Z-PR1 ~ Z-PR8)推进过程中,**与拆分本身无关、但每次
 | C1 `routes-refactor-step2.md` 进度回填 | 已完成 | 本轮在 `api/routes-refactor-step2.md` 追加 Z-PR1 到 Z-PR8 实际记录和 red/yellow 留存清单 |
 | `.gitignore` unignore routes refactor docs | 已完成 | 当前 `.gitignore` 已包含 `!api/routes-refactor-step1.md`、`!api/routes-refactor-step2.md`、`!api/routes-refactor-followups.md`、`!api/routes-handlers-contract.md` |
 
-当前 step2 不再继续规划新的 handler 搬迁。剩余 red/yellow 端点进入 step3:先测试现代化,再谈迁移。
+当前 step2 不再继续规划新的 handler 搬迁。2026-05-21 最新 contract scan 已无 red,只剩 3 个 yellow:`_handle_cron_run`、`_handle_session_export`、`_handle_session_import_cli`。这些不按 Z-PR 继续硬搬,应先做契约现代化。
 
 ## A 类:测试基础设施债务
 
@@ -111,14 +127,15 @@ Includes Sprint 10 cancel support via CANCEL_FLAGS.
 
 ## B 类:CI gate 加固
 
-### B1. `routes-contracts.yml` 触发 paths 扩展到 `tests/test_*.py`
+### B1. contract scan 触发面扩展
 
-**2026-05-21 状态**:本 fork 不再使用 GitHub Actions workflow。以下内容只保留为历史参考;继续拆分 routes 时改为本地手动执行 `python scripts/scan_routes_contracts.py --check`。
+**2026-05-21 状态**:本 fork 不再使用 GitHub Actions workflow。以下内容只保留为历史参考;继续拆分 routes 时改为本地手动执行 `python scripts/scan_routes_contracts.py --check`。当前扫描范围已经扩展到 `api/routes_dispatcher.py`。
 
 **现状**:CI workflow 当前 paths 只覆盖:
 
 ```yaml
 - 'api/routes.py'
+- 'api/routes_dispatcher.py'
 - 'api/routes_helpers/**'
 - 'api/routes_handlers/**'
 - 'api/routes-handlers-contract.md'
@@ -136,6 +153,7 @@ on:
     branches: [master]
     paths:
       - 'api/routes.py'
+      - 'api/routes_dispatcher.py'
       - 'api/routes_helpers/**'
       - 'api/routes_handlers/**'
       - 'api/routes-handlers-contract.md'
@@ -150,7 +168,13 @@ on:
 
 **代价**:几乎所有 tests/ 改动都会触发这个 workflow,但 scan 本身秒级(本地实测 < 1s),CI 上 setup-python 慢一点,整体 < 30s,值得。
 
-**验证**:故意改一个无关的 `tests/test_*.py`(比如加注释),push 个测试分支,看 routes-contracts workflow 是否触发。
+**验证**:本 fork 以本地验证为准:
+
+```bash
+python scripts/scan_routes_contracts.py --check --no-report
+```
+
+若未来恢复 GitHub Actions,再故意改一个无关的 `tests/test_*.py`(比如加注释),push 个测试分支,看 routes-contracts workflow 是否触发。
 
 **commit 策略**:`ci(routes): extend contract gate to tests changes`,独立 commit。
 
@@ -160,6 +184,8 @@ on:
 
 **2026-05-20 状态**:已完成。本轮已在 `api/routes-refactor-step2.md` 追加实际进度记录、当前 routes.py 行数、Z-PR1 到 Z-PR8 实际表、red/yellow 留存清单和 step3 边界。
 
+**2026-05-21 状态**:已被 `master` 后续拆分刷新。最新总览以 `api/routes-refactor-report.md` 为准: `api/routes.py` 当前 1762 行,`f84e8c3` 抽出 `api/routes_dispatcher.py`,`dd4a0ea` 转为 API-only。
+
 **现状**:step2.md 表格写的预估和 Z-PR1~Z-PR3 实际值偏差很大:
 
 | 项 | step2.md 预估 | 实际 |
@@ -167,7 +193,7 @@ on:
 | Z-PR1 profile | ~500 行 | 740 行 |
 | Z-PR2 skill+memory | ~250 行 | 214 行(skill 3 + memory 1) |
 | Z-PR3 mcp 补齐 | ~200 行 | 71 行 |
-| 终态 routes.py | 5500-6500 行 | 外推 ~4300-4500 行 |
+| 终态 routes.py | 5500-6500 行 | Z-PR8 后 6921 行;收尾后 6618 行;当前 master 1762 行 |
 
 **改法**:等 Z-PR8 全部跑完,**在 step2.md 末尾增加一节 `## 实际进度记录`**,完整表格:
 
@@ -182,7 +208,7 @@ on:
 | ...
 | 合计 | N | X | 2500 | |
 
-终态 routes.py: A 行(起点 10043 - X)
+终态 routes.py: 1762 行(当前 master)
 ```
 
 **用途**:下次有类似 8000+ 行级别拆分时,有真实参考数据点。
@@ -193,7 +219,7 @@ on:
 
 ## 优先顺序与节奏
 
-**2026-05-20 状态**:本节已归档。A/B/C 项均已有当前状态标注;不要再按下面旧排期继续执行。若要继续处理 routes 拆分,从 step3 测试现代化另开文档。
+**2026-05-21 状态**:本节已归档。A/B/C 项均已有当前状态标注;不要再按下面旧排期继续执行。若要继续处理 routes 拆分,按 D6 的四类边界分别立项。
 
 原计划按时间紧迫度和 ROI 排:
 
@@ -205,7 +231,7 @@ on:
 | 4 | **A2** profile_workspace_default | 跟 A1 一起 / A1 后 | 否 |
 | 5 | **C1** 进度回填 | Z-PR8 后 | 否(本就是收尾) |
 
-**归档说明**:原建议节奏已经执行完或不再适用。当前不要并行起 Z-PR4 ~ Z-PR8;这些 PR 已收口到 Z-PR8。
+**归档说明**:原建议节奏已经执行完或不再适用。当前不要并行起 Z-PR4 ~ Z-PR8;这些 PR 已收口到 Z-PR8,且 master 已进一步完成 dispatcher 下沉和 API-only 转换。
 
 ## 实施时间预估
 
