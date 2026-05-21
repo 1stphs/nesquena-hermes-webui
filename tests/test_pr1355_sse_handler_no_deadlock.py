@@ -106,15 +106,12 @@ def test_handler_snapshot_does_not_deadlock_when_queue_has_entry():
 
 
 def test_routes_handler_does_not_call_get_pending_under_lock():
-    """Source-level invariant: routes.py must not call get_clarify_pending()
+    """Source-level invariant: route handler must not call get_clarify_pending()
     inside the `with _clarify_lock:` block — that would re-acquire _lock and
     deadlock."""
-    src = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
-    # Find _handle_clarify_sse_stream
-    start = src.find("def _handle_clarify_sse_stream(")
-    assert start != -1, "_handle_clarify_sse_stream must exist"
-    end = src.find("\ndef ", start + 1)
-    body = src[start:end if end != -1 else len(src)]
+    from tests.route_source import function_source
+
+    body = function_source("_handle_clarify_sse_stream")
 
     # Find the lock block
     lock_start = body.find("with _clarify_lock:")

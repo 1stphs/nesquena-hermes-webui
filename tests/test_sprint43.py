@@ -17,12 +17,14 @@ import re
 import sys
 import unittest
 
+from tests.route_source import read_route_sources
+
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 GATEWAY_WATCHER_PY = (REPO_ROOT / "api" / "gateway_watcher.py").read_text()
 CONFIG_PY = (REPO_ROOT / "api" / "config.py").read_text()
 BOOTSTRAP_PY = (REPO_ROOT / "bootstrap.py").read_text()
 SERVER_PY = (REPO_ROOT / "server.py").read_text()
-ROUTES_PY = (REPO_ROOT / "api" / "routes.py").read_text()
+ROUTE_SOURCES = read_route_sources()
 AUTH_PY = (REPO_ROOT / "api" / "auth.py").read_text()
 PROFILES_PY = (REPO_ROOT / "api" / "profiles.py").read_text()
 STREAMING_PY = (REPO_ROOT / "api" / "streaming.py").read_text()
@@ -120,7 +122,7 @@ class TestBareExceptLogging(unittest.TestCase):
         ("api/streaming.py", STREAMING_PY),
         ("api/workspace.py", WORKSPACE_PY),
         ("api/state_sync.py", STATE_SYNC_PY),
-        ("api/routes.py", ROUTES_PY),
+        ("route sources", ROUTE_SOURCES),
     ]
 
     def test_module_level_loggers_present(self):
@@ -239,7 +241,7 @@ class TestSessionTitleRedaction(unittest.TestCase):
     def test_redact_text_called_on_session_titles(self):
         """routes.py must call _redact_text on session titles in /api/sessions."""
         self.assertRegex(
-            ROUTES_PY,
+            ROUTE_SOURCES,
             r'_redact_text\([^)]*\btitle\b[^)]*\)',
             "routes.py: session titles must be redacted via _redact_text in /api/sessions",
         )
@@ -248,6 +250,6 @@ class TestSessionTitleRedaction(unittest.TestCase):
         """routes.py must import _redact_text from api.helpers."""
         self.assertIn(
             "_redact_text",
-            ROUTES_PY,
+            ROUTE_SOURCES,
             "routes.py: _redact_text must be imported from api.helpers",
         )

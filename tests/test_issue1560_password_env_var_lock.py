@@ -18,8 +18,12 @@ import urllib.request
 
 REPO = pathlib.Path(__file__).parent.parent
 
+from tests.route_source import read_route_sources
+
 
 def _read(rel_path):
+    if rel_path == 'api/routes.py':
+        return read_route_sources()
     return (REPO / rel_path).read_text(encoding='utf-8')
 
 

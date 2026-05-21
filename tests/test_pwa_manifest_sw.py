@@ -12,12 +12,14 @@ import json
 import re
 from pathlib import Path
 
+from tests.route_source import read_route_sources
+
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "static" / "manifest.json"
 SW = ROOT / "static" / "sw.js"
 INDEX = ROOT / "static" / "index.html"
-ROUTES = ROOT / "api" / "routes.py"
+ROUTE_SOURCES = read_route_sources()
 
 
 class TestManifest:
@@ -119,7 +121,7 @@ class TestServiceWorker:
 
 class TestPWARoutes:
     def test_manifest_route_serves_correct_content_type(self):
-        src = ROUTES.read_text(encoding="utf-8")
+        src = ROUTE_SOURCES
         # The handler block for /manifest.json
         idx = src.find('"/manifest.json"')
         assert idx != -1, "routes.py must handle /manifest.json"
@@ -132,7 +134,7 @@ class TestPWARoutes:
         )
 
     def test_sw_route_injects_cache_version(self):
-        src = ROUTES.read_text(encoding="utf-8")
+        src = ROUTE_SOURCES
         idx = src.find('"/sw.js"')
         assert idx != -1, "routes.py must handle /sw.js"
         block = src[idx:idx + 1000]
@@ -144,7 +146,7 @@ class TestPWARoutes:
         )
 
     def test_sw_route_url_encodes_cache_version(self):
-        src = ROUTES.read_text(encoding="utf-8")
+        src = ROUTE_SOURCES
         idx = src.find('"/sw.js"')
         assert idx != -1, "routes.py must handle /sw.js"
         block = src[idx:idx + 1200]
@@ -154,7 +156,7 @@ class TestPWARoutes:
         )
 
     def test_sw_route_sets_service_worker_allowed(self):
-        src = ROUTES.read_text(encoding="utf-8")
+        src = ROUTE_SOURCES
         idx = src.find('"/sw.js"')
         block = src[idx:idx + 1000]
         assert "Service-Worker-Allowed" in block, (
@@ -237,7 +239,7 @@ class TestIndexHtmlIntegration:
             )
 
     def test_index_route_url_encodes_asset_version(self):
-        src = ROUTES.read_text(encoding="utf-8")
+        src = ROUTE_SOURCES
         idx = src.find('parsed.path in ("/", "/index.html")')
         if idx == -1:
             idx = src.find('parsed.path.startswith("/session/")')

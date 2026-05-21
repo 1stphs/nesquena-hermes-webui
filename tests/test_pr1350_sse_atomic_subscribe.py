@@ -19,7 +19,9 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO_ROOT))
 
-ROUTES_SRC = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+from tests.route_source import function_source
+
+
 
 
 def _extract_lock_block(body: str) -> str:
@@ -59,10 +61,7 @@ def _extract_lock_block(body: str) -> str:
 
 
 def _handler_body() -> str:
-    start = ROUTES_SRC.find("def _handle_approval_sse_stream(")
-    assert start != -1, "_handle_approval_sse_stream must exist"
-    end = ROUTES_SRC.find("\ndef ", start + 1)
-    return ROUTES_SRC[start:end if end != -1 else len(ROUTES_SRC)]
+    return function_source("_handle_approval_sse_stream")
 
 
 def test_snapshot_taken_under_lock():

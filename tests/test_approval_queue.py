@@ -12,7 +12,9 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO_ROOT))
 
-ROUTES_SRC = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+from tests.route_source import read_route_sources
+
+ROUTES_SRC = read_route_sources()
 MESSAGES_JS = (REPO_ROOT / "static" / "messages.js").read_text(encoding="utf-8")
 INDEX_HTML = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
 

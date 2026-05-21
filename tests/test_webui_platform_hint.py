@@ -36,7 +36,8 @@ def test_streaming_uses_webui_platform():
 
 def test_routes_uses_webui_platform_for_all_agent_calls():
     """api/routes.py must use platform='webui' for all AIAgent instantiations."""
-    routes_py = _load_source("api/routes.py")
+    from tests.route_source import read_route_sources
+    routes_py = read_route_sources()
     webui_count = _count_platform_kwargs(routes_py, "webui")
     cli_count = _count_platform_kwargs(routes_py, "cli")
     assert cli_count == 0, (

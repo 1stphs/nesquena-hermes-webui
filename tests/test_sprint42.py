@@ -472,7 +472,8 @@ def test_streaming_restores_prior_reasoning_metadata_after_followup():
 
 def test_routes_restores_prior_reasoning_metadata_after_followup():
     """The non-streaming route path must preserve prior reasoning metadata too."""
-    src = (REPO / 'api' / 'routes.py').read_text()
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
     assert "_restore_reasoning_metadata" in src, \
         "routes.py must import reasoning metadata restoration helper"
     assert "s.context_messages = _next_context_messages" in src, \

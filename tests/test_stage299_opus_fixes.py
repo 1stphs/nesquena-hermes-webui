@@ -14,11 +14,11 @@ These tests pin the defenses applied per Opus advisor on stage-299:
 """
 from pathlib import Path
 
-ROUTES_PY = Path(__file__).parent.parent / "api" / "routes.py"
+from tests.route_source import read_route_sources
 
 
 def _read_source():
-    return ROUTES_PY.read_text()
+    return read_route_sources()
 
 
 def test_wiki_max_files_constant_present():

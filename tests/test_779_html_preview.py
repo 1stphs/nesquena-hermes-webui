@@ -1,9 +1,11 @@
 """Tests for inline HTML preview in workspace panel (issue #779)."""
 import pytest
 
+from tests.route_source import read_route_sources
+
 
 def _get_routes_content():
-    return open("api/routes.py", encoding="utf-8").read()
+    return read_route_sources()
 
 
 def _get_workspace_js():

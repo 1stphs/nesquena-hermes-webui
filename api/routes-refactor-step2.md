@@ -152,7 +152,7 @@ workspace 系列(_handle_workspace_reorder 除外,因有测试直接 import):
 
 每个 commit 走完整流程:搬出 → routes.py re-export → 跑 `scan_routes_contracts.py --check` → 跑 `pytest tests/` 全套 → 通过才合下一个。
 
-CI gate 已接入 `.github/workflows/routes-contracts.yml`:凡 PR / push 改到 `api/routes.py`、`api/routes_helpers/**`、`api/routes_handlers/**`、`api/routes-handlers-contract.md` 或 `scripts/scan_routes_contracts.py`,都会自动跑 `python scripts/scan_routes_contracts.py --check`,并用 `git diff --exit-code` 确认报告没有被重新生成改脏。这个 gate 只验证 routes.py 源码契约,不能替代全套 pytest。
+本 fork 已清理 GitHub Actions workflow。继续拆分 routes 时,本地必须手动跑 `python scripts/scan_routes_contracts.py --check`,并确认 `api/routes-handlers-contract.md` 没有被扫描工具重新生成改脏。这个检查只验证 routes.py 源码契约,不能替代全套 pytest。
 
 **这一阶段的核心目的是验证扫描工具的判断对,以及 re-export / 薄壳代理机制对 mock.patch / monkeypatch 真的兼容。**
 

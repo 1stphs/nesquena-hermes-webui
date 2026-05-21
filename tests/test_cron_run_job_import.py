@@ -6,22 +6,18 @@ Before the fix, run_job was only imported inside _handle_cron_run
 (a local scope invisible to _run_cron_tracked), causing NameError.
 """
 import ast
-import inspect
-from pathlib import Path
 
 import pytest
 
-ROUTES_PY = Path(__file__).resolve().parent.parent / "api" / "routes.py"
+from tests.route_source import function_source
 
 
 def _get_function_source(func_name: str) -> str:
-    """Extract a top-level function's source via AST for stability."""
-    tree = ast.parse(ROUTES_PY.read_text(encoding="utf-8"))
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
-            lines = ROUTES_PY.read_text(encoding="utf-8").splitlines()
-            return "\n".join(lines[node.lineno - 1 : node.end_lineno])
-    pytest.fail(f"Function {func_name} not found in {ROUTES_PY}")
+    """Extract a route-layer function source via the repo-wide contract helper."""
+    try:
+        return function_source(func_name)
+    except AssertionError as exc:
+        pytest.fail(str(exc))
 
 
 class TestRunCronTrackedImport:

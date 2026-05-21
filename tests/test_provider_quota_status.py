@@ -310,7 +310,8 @@ def test_anthropic_oauth_usage_unavailable_reason_is_reported(monkeypatch, tmp_p
 
 def test_provider_quota_route_is_registered():
     """The backend must expose a route for the UI to poll quota status."""
-    routes = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+    from tests.route_source import read_route_sources
+    routes = read_route_sources()
     assert 'parsed.path == "/api/provider/quota"' in routes
     assert "get_provider_quota(provider_id)" in routes
 

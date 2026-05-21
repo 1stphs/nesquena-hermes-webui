@@ -8,10 +8,11 @@ from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from api import routes
+from tests.route_source import read_route_sources
 
 ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
 PANELS = (ROOT / "static" / "panels.js").read_text(encoding="utf-8")
-ROUTES = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+ROUTE_SOURCES = read_route_sources()
 
 
 class _FakeHandler:
@@ -49,10 +50,10 @@ def test_unknown_kanban_endpoint_get_returns_stale_client_diagnostic():
 
 
 def test_unknown_kanban_endpoint_routes_are_wrapped_for_all_methods():
-    assert 'return _kanban_unknown_endpoint(handler, parsed, "GET")' in ROUTES
-    assert 'return _kanban_unknown_endpoint(handler, parsed, "POST")' in ROUTES
-    assert 'return _kanban_unknown_endpoint(handler, parsed, "PATCH")' in ROUTES
-    assert 'return _kanban_unknown_endpoint(handler, parsed, "DELETE")' in ROUTES
+    assert 'return _kanban_unknown_endpoint(handler, parsed, "GET")' in ROUTE_SOURCES
+    assert 'return _kanban_unknown_endpoint(handler, parsed, "POST")' in ROUTE_SOURCES
+    assert 'return _kanban_unknown_endpoint(handler, parsed, "PATCH")' in ROUTE_SOURCES
+    assert 'return _kanban_unknown_endpoint(handler, parsed, "DELETE")' in ROUTE_SOURCES
 
 
 def test_kanban_stale_client_error_renders_hard_refresh_escape_hatch():

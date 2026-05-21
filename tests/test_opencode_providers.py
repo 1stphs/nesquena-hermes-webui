@@ -8,6 +8,7 @@ import sys
 import types
 import pytest
 import api.config as config
+from tests.route_source import function_source
 
 
 @pytest.fixture(autouse=True)
@@ -116,8 +117,7 @@ def test_live_models_handler_delegates_to_provider_model_ids():
     """_handle_live_models must delegate to the agent's provider_model_ids()
     rather than maintain its own per-provider fetch logic.
     """
-    import pathlib
-    routes_src = (pathlib.Path(__file__).parent.parent / "api" / "routes.py").read_text()
+    routes_src = function_source("_handle_live_models")
     assert "provider_model_ids" in routes_src, (
         "_handle_live_models must call hermes_cli.models.provider_model_ids() "
         "to delegate all provider-specific live-fetch logic to the agent"

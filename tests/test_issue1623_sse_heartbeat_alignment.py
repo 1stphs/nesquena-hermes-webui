@@ -14,6 +14,8 @@ the misalignment.
 
 from pathlib import Path
 
+from tests.route_source import read_route_sources
+
 
 REPO = Path(__file__).parent.parent
 
@@ -21,7 +23,7 @@ REPO = Path(__file__).parent.parent
 def test_sse_heartbeat_constant_below_kernel_keepalive_window():
     """The named constant exists and is at most half the kernel keepalive
     timeout (10 + 5*3 = 25s). 5s gives the kernel ~5x headroom."""
-    src = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
+    src = read_route_sources()
 
     # The constant must be defined.
     assert "_SSE_HEARTBEAT_INTERVAL_SECONDS" in src, (
@@ -55,7 +57,7 @@ def test_no_sse_handler_uses_30s_or_higher_timeout():
     """No SSE/long-poll handler in routes.py should still be using the old
     30s/25s timeout. Every queue.get(timeout=...) call inside an SSE handler
     must reference the named constant, not a hard-coded number."""
-    src = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
+    src = read_route_sources()
 
     import re
     # Catch q.get(timeout=30), subscriber.get(timeout=30), term.output.get(timeout=25), etc.
@@ -68,7 +70,7 @@ def test_no_sse_handler_uses_30s_or_higher_timeout():
 
 def test_each_named_sse_handler_uses_constant():
     """Each known SSE handler queue-poll site must reference the constant."""
-    src = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
+    src = read_route_sources()
 
     expected_callers = [
         "subscriber.get(timeout=_SSE_HEARTBEAT_INTERVAL_SECONDS)",     # main agent SSE

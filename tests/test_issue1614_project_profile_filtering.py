@@ -226,8 +226,8 @@ def test_profile_field_on_project_dict_default_create(monkeypatch):
     instead we pin the file-level invariant: the create handler now stamps
     `profile` on the created dict.
     """
-    from pathlib import Path
-    src = (Path(__file__).parent.parent / 'api' / 'routes.py').read_text(encoding='utf-8')
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
 
     # The create handler must now include get_active_profile_name() for the new dict
     create_idx = src.find('"/api/projects/create"')
@@ -241,8 +241,8 @@ def test_profile_field_on_project_dict_default_create(monkeypatch):
 
 def test_project_rename_rejects_cross_profile():
     """Source-string check that rename's active-profile guard is in place."""
-    from pathlib import Path
-    src = (Path(__file__).parent.parent / 'api' / 'routes.py').read_text(encoding='utf-8')
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
 
     rename_idx = src.find('"/api/projects/rename"')
     assert rename_idx > 0
@@ -254,8 +254,8 @@ def test_project_rename_rejects_cross_profile():
 
 
 def test_project_delete_rejects_cross_profile():
-    from pathlib import Path
-    src = (Path(__file__).parent.parent / 'api' / 'routes.py').read_text(encoding='utf-8')
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
 
     delete_idx = src.find('"/api/projects/delete"')
     assert delete_idx > 0
@@ -267,8 +267,8 @@ def test_project_delete_rejects_cross_profile():
 
 def test_session_move_rejects_cross_profile_project():
     """/api/session/move must refuse moves into a project from another profile."""
-    from pathlib import Path
-    src = (Path(__file__).parent.parent / 'api' / 'routes.py').read_text(encoding='utf-8')
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
 
     move_idx = src.find('"/api/session/move"')
     assert move_idx > 0

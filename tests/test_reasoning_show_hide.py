@@ -372,7 +372,8 @@ class TestStreamingReasoningWiring:
 class TestReasoningRoutes:
 
     def test_get_api_reasoning_route_exists(self):
-        src = read('api/routes.py')
+        from tests.route_source import read_route_sources
+        src = read_route_sources()
         assert 'parsed.path == "/api/reasoning"' in src, (
             "GET /api/reasoning route must exist"
         )
@@ -381,7 +382,8 @@ class TestReasoningRoutes:
         )
 
     def test_post_api_reasoning_accepts_display(self):
-        src = read('api/routes.py')
+        from tests.route_source import read_route_sources
+        src = read_route_sources()
         # The POST branch reads 'display' from body and dispatches to
         # set_reasoning_display.
         assert 'set_reasoning_display' in src, (
@@ -390,7 +392,8 @@ class TestReasoningRoutes:
         )
 
     def test_post_api_reasoning_accepts_effort(self):
-        src = read('api/routes.py')
+        from tests.route_source import read_route_sources
+        src = read_route_sources()
         assert 'set_reasoning_effort' in src, (
             "POST /api/reasoning must route effort changes through "
             "set_reasoning_effort"

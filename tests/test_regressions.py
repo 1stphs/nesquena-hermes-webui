@@ -171,15 +171,10 @@ def test_server_py_sse_loop_breaks_on_cancel(cleanup_test_sessions):
     When missing, the connection hung after the cancel event was processed.
     Sprint 11: logic moved from server.py to api/routes.py -- check both.
     """
-    import re
-    # Check server.py first, then api/routes.py (Sprint 11 extracted routes)
-    src = (REPO_ROOT / "server.py").read_text()
-    routes_src = (REPO_ROOT / "api" / "routes.py").read_text() if (REPO_ROOT / "api" / "routes.py").exists() else ""
-    combined = src + routes_src
-    m = re.search(r"if event in \([^)]+\):\s*break", combined)
-    assert m, "SSE break condition not found in server.py or api/routes.py"
-    assert "cancel" in m.group(), \
-        f"'cancel' missing from SSE break condition: {m.group()}"
+    from tests.route_source import function_source
+    src = function_source("_handle_sse_stream")
+    assert 'if event in ("stream_end", "error", "cancel"):' in src, \
+        "chat SSE stream must break on cancel events"
 
 
 # ── R6: Test cron isolation (Sprint 10) ──────────────────────────────────────
@@ -317,9 +312,10 @@ def test_server_delete_invalidates_index(cleanup_test_sessions):
     Sprint 11: handler moved from server.py to api/routes.py -- check both.
     """
     src = (REPO_ROOT / "server.py").read_text()
-    routes_src = (REPO_ROOT / "api" / "routes.py").read_text() if (REPO_ROOT / "api" / "routes.py").exists() else ""
+    from tests.route_source import read_route_sources
+    routes_src = read_route_sources()
     # Find the delete handler in either file
-    for label, text in [("server.py", src), ("api/routes.py", routes_src)]:
+    for label, text in [("server.py", src), ("route sources", routes_src)]:
         # Accept both single-quote and double-quote style (formatting varies by contributor)
         delete_idx = max(
             text.find("if parsed.path == '/api/session/delete':"),
@@ -527,7 +523,8 @@ def test_chat_start_persists_pending_turn_metadata_for_reload_recovery(cleanup_t
     """R15c: chat/start must expose enough pending-turn metadata for a reload to
     rebuild the in-flight conversation instead of showing a blank session.
     """
-    routes_src = (REPO_ROOT / "api/routes.py").read_text()
+    from tests.route_source import read_route_sources
+    routes_src = read_route_sources()
     assert 's.active_stream_id = stream_id' in routes_src
     assert 's.pending_user_message = msg' in routes_src
     assert 's.pending_attachments = attachments' in routes_src

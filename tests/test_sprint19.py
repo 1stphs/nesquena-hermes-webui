@@ -73,12 +73,12 @@ def test_login_page_cache_busts_login_script():
 
 def test_login_route_injects_webui_version_for_login_script():
     """The /login route should replace the login.js version placeholder."""
-    from pathlib import Path
-
-    src = Path(__file__).resolve().parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-    login_block = src[src.find('if parsed.path == "/login"'):src.find('if parsed.path == "/api/auth/status"')]
-    assert "WEBUI_VERSION" in login_block
-    assert "{{WEBUI_VERSION}}" in login_block
+    req = urllib.request.Request(BASE + "/login")
+    with urllib.request.urlopen(req, timeout=10) as r:
+        html = r.read().decode()
+        assert r.status == 200
+    assert 'src="static/login.js?v=' in html
+    assert "{{WEBUI_VERSION}}" not in html
 
 
 # ── Security headers ─────────────────────────────────────────────────────

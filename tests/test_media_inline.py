@@ -212,31 +212,36 @@ class TestMediaEndpointUnit(unittest.TestCase):
 
     def test_api_media_route_registered(self):
         """The GET dispatch must include the /api/media path."""
-        routes_src = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+        from tests.route_source import read_route_sources
+        routes_src = read_route_sources()
         self.assertIn('"/api/media"', routes_src,
                       '/api/media must be registered in the GET route dispatch')
 
     def test_allowed_roots_include_tmp(self):
         """Handler must allow /tmp so screenshot paths work."""
-        routes_src = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+        from tests.route_source import read_route_sources
+        routes_src = read_route_sources()
         self.assertIn('/tmp', routes_src,
                       '/tmp must be in the allowed roots list for /api/media')
 
     def test_svg_forces_download(self):
         """.svg must not be served inline (XSS risk)."""
-        routes_src = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+        from tests.route_source import read_route_sources
+        routes_src = read_route_sources()
         # SVG should be in _DOWNLOAD_TYPES or explicitly excluded from inline
         self.assertIn("image/svg+xml", routes_src,
                       "SVG MIME type must be handled (forced download) in _handle_media")
 
     def test_non_image_forces_download(self):
         """Non-image files should be forced to download, not served inline."""
-        routes_src = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+        from tests.route_source import read_route_sources
+        routes_src = read_route_sources()
         self.assertIn("_INLINE_IMAGE_TYPES", routes_src,
                       "_INLINE_IMAGE_TYPES whitelist must exist in _handle_media")
 
     def test_media_endpoints_advertise_byte_range_support(self):
-        routes_src = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+        from tests.route_source import read_route_sources
+        routes_src = read_route_sources()
         self.assertIn("Accept-Ranges", routes_src)
         self.assertIn("Content-Range", routes_src)
         self.assertIn("206", routes_src)

@@ -205,10 +205,8 @@ def test_static_sessions_js_uses_all_profiles_query_when_toggle_on():
 def test_keep_latest_messaging_runs_after_profile_filter():
     """Source-string check: api/routes.py /api/sessions handler must call
     _keep_latest_messaging_session_per_source AFTER the profile filter."""
-    from pathlib import Path
-
-    repo_root = Path(__file__).parent.parent
-    src = (repo_root / 'api' / 'routes.py').read_text(encoding='utf-8')
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
 
     handler_idx = src.find('parsed.path == "/api/sessions":')
     assert handler_idx > 0

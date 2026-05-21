@@ -232,14 +232,48 @@ def _create_session_with_credentials() -> str:
 
 
 def test_api_session_redacts_messages():
-    """GET /api/session route must call redact_session_data() before returning."""
-    import inspect
+    """GET /api/session must redact credentials in the returned session payload."""
     import api.routes as routes
-    src = inspect.getsource(routes.handle_get)
-    # Verify redact_session_data is applied to the session payload
-    assert "redact_session_data" in src, (
-        "api/routes.py handle_get must call redact_session_data() on /api/session response"
-    )
+    from tests.route_test_utils import invoke_route
+
+    class FakeSession:
+        session_id = "redact-session"
+        title = f"session with {_FAKE_GITHUB_PAT}"
+        workspace = "/tmp"
+        model = "test"
+        model_provider = None
+        messages = [{"role": "user", "content": f"my PAT is {_FAKE_GITHUB_PAT}"}]
+        tool_calls = [{"name": "terminal", "snippet": f"blocked {_FAKE_SK_KEY}"}]
+        active_stream_id = None
+        pending_user_message = None
+        pending_attachments = []
+        pending_started_at = None
+        context_length = 0
+        threshold_tokens = 0
+        last_prompt_tokens = 0
+
+        def compact(self):
+            return {
+                "session_id": self.session_id,
+                "title": self.title,
+                "model": self.model,
+                "messages": self.messages,
+                "tool_calls": self.tool_calls,
+            }
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(routes, "get_session", lambda sid, metadata_only=False: FakeSession())
+        monkeypatch.setattr(routes, "_clear_stale_stream_state", lambda session: False)
+        monkeypatch.setattr(routes, "_resolve_effective_session_model_for_display", lambda session: session.model)
+        monkeypatch.setattr(routes, "_resolve_effective_session_model_provider_for_display", lambda session: None)
+        monkeypatch.setattr(routes, "_lookup_cli_session_metadata", lambda sid: {})
+        response = invoke_route("get", "/api/session?session_id=redact-session")
+    finally:
+        monkeypatch.undo()
+
+    dump = json.dumps(response.body)
+    _assert_no_plaintext_credentials(dump, "GET /api/session")
 
 
 def test_api_session_redacts_title():

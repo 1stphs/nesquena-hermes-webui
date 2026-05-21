@@ -23,38 +23,42 @@ REPO = Path(__file__).resolve().parents[1]
 def test_branch_endpoint_rejects_non_string_session_id():
     """The handler must reject a non-string session_id with a 400 before
     reaching get_session()."""
-    src = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
-    branch_handler_idx = src.find('parsed.path == "/api/session/branch":')
-    assert branch_handler_idx != -1, "branch handler not found"
-    # Look at the next ~1500 chars
-    block = src[branch_handler_idx : branch_handler_idx + 1500]
-    assert 'isinstance(body["session_id"], str)' in block, (
-        "branch handler must isinstance-check session_id before passing to "
-        "get_session() — without this, non-string values raise TypeError "
-        "and surface as a confusing 500 instead of a 400."
-    )
-    assert '"session_id must be a string"' in block, (
-        "branch handler must return a clear error message for non-string "
-        "session_id, not a generic bad-request."
-    )
+    from tests.route_test_utils import invoke_route
+
+    response = invoke_route("post", "/api/session/branch", body={"session_id": 123})
+
+    assert response.status == 400
+    assert response.body == {"error": "session_id must be a string"}
 
 
 def test_branch_endpoint_rejects_negative_keep_count():
     """The handler must reject keep_count < 0 with a 400. Otherwise Python
     slicing would produce a "all but last N" semantic instead of a forward
     prefix, which is confusing fork behavior."""
-    src = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
-    branch_handler_idx = src.find('parsed.path == "/api/session/branch":')
-    block = src[branch_handler_idx : branch_handler_idx + 2000]
-    assert "keep_count < 0" in block, (
-        "branch handler must reject negative keep_count — Python's slice "
-        "semantics on negative values are 'all but last N', not 'prefix N', "
-        "and that's a confusing fork behavior."
-    )
-    assert '"keep_count must be non-negative"' in block, (
-        "branch handler must return a clear error message for negative "
-        "keep_count."
-    )
+    import api.routes as routes
+    from tests.route_test_utils import invoke_route
+
+    class FakeSession:
+        title = "Source"
+        workspace = "/tmp"
+        model = "test"
+        profile = "default"
+        session_id = "source"
+        messages = [{"role": "user", "content": "hello"}]
+
+    original = routes.get_session
+    routes.get_session = lambda sid: FakeSession()
+    try:
+        response = invoke_route(
+            "post",
+            "/api/session/branch",
+            body={"session_id": "source", "keep_count": -1},
+        )
+    finally:
+        routes.get_session = original
+
+    assert response.status == 400
+    assert response.body == {"error": "keep_count must be non-negative"}
 
 
 # ── 3: orphan wiki_* i18n keys must not return ────────────────────────────────

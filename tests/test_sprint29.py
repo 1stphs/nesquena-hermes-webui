@@ -554,10 +554,8 @@ class TestContentDisposition:
 
     def test_dangerous_mime_types_set_complete(self):
         """The set of dangerous MIME types must include html, xhtml, and svg."""
-        import ast
-        import pathlib
-        routes_src = pathlib.Path(__file__).parent.parent / "api" / "routes.py"
-        src = routes_src.read_text()
+        from tests.route_source import read_route_sources
+        src = read_route_sources()
         assert "text/html" in src
         assert "application/xhtml+xml" in src
         assert "image/svg+xml" in src

@@ -8,10 +8,13 @@ Tests for issues #373, #374, and #375.
 import pathlib
 import re
 
+from tests.route_source import function_source, read_route_sources
+
 REPO = pathlib.Path(__file__).parent.parent
 STREAMING_PY = (REPO / "api" / "streaming.py").read_text(encoding="utf-8")
 CONFIG_PY    = (REPO / "api" / "config.py").read_text(encoding="utf-8")
-ROUTES_PY    = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
+ROUTE_SOURCES = read_route_sources()
+LIVE_MODELS_SRC = function_source("_handle_live_models")
 MESSAGES_JS  = (REPO / "static" / "messages.js").read_text(encoding="utf-8")
 UI_JS        = (REPO / "static" / "ui.js").read_text(encoding="utf-8")
 
@@ -154,26 +157,26 @@ class TestLiveModelFetching:
     """Backend and frontend must support live model fetching from provider APIs."""
 
     def test_live_models_endpoint_exists_in_routes(self):
-        """routes.py must have a /api/models/live endpoint (#375)."""
-        assert "/api/models/live" in ROUTES_PY, (
-            "routes.py must define /api/models/live endpoint (#375)"
+        """The route layer must expose a /api/models/live endpoint (#375)."""
+        assert "/api/models/live" in ROUTE_SOURCES, (
+            "route sources must define /api/models/live endpoint (#375)"
         )
 
     def test_live_models_handler_function_exists(self):
-        """routes.py must define _handle_live_models() function (#375)."""
-        assert "def _handle_live_models(" in ROUTES_PY, (
-            "routes.py must define _handle_live_models() for live model fetching (#375)"
+        """Route sources must define _handle_live_models() function (#375)."""
+        assert "def _handle_live_models(" in ROUTE_SOURCES, (
+            "route sources must define _handle_live_models() for live model fetching (#375)"
         )
 
     def test_live_models_handler_validates_scheme(self):
         """_handle_live_models must validate URL scheme to prevent file:// injection (B310)."""
-        assert "nosec B310" in ROUTES_PY or ("scheme" in ROUTES_PY and "http" in ROUTES_PY), (
+        assert "nosec B310" in LIVE_MODELS_SRC or ("scheme" in LIVE_MODELS_SRC and "http" in LIVE_MODELS_SRC), (
             "_handle_live_models must validate URL scheme before urlopen (#375)"
         )
 
     def test_live_models_handler_has_ssrf_guard(self):
         """_handle_live_models must guard against SSRF (private IP access)."""
-        assert "ssrf_blocked" in ROUTES_PY or ("is_private" in ROUTES_PY and "live" in ROUTES_PY), (
+        assert "ssrf_blocked" in ROUTE_SOURCES or ("is_private" in ROUTE_SOURCES and "live" in ROUTE_SOURCES), (
             "_handle_live_models must have SSRF protection for private IP ranges (#375)"
         )
 
@@ -182,7 +185,7 @@ class TestLiveModelFetching:
         providers gracefully — live fetch where possible, static fallback otherwise.
         The old 'not_supported' return for Anthropic/Google is superseded: those
         providers now return live or static model lists via the agent delegate."""
-        assert "provider_model_ids" in ROUTES_PY, (
+        assert "provider_model_ids" in LIVE_MODELS_SRC, (
             "_handle_live_models must delegate to hermes_cli.models.provider_model_ids() "
             "so all providers are handled uniformly (#375 upgrade)"
         )
@@ -223,13 +226,9 @@ class TestLiveModelFetching:
             )
 
     def test_live_models_endpoint_wired_in_routes(self):
-        """The /api/models/live path must be handled in handle_get()."""
-        # Find handle_get and check our route appears inside it
-        handle_get_pos = ROUTES_PY.find("def handle_get(")
-        live_route_pos = ROUTES_PY.find('"/api/models/live"')
-        assert handle_get_pos != -1 and live_route_pos != -1
-        assert live_route_pos > handle_get_pos, (
-            "/api/models/live must be inside handle_get() (#375)"
+        """The /api/models/live path must be wired into the route dispatcher."""
+        assert '"/api/models/live"' in ROUTE_SOURCES and "_handle_live_models" in ROUTE_SOURCES, (
+            "/api/models/live must be wired to _handle_live_models (#375)"
         )
 
 

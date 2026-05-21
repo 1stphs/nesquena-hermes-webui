@@ -185,7 +185,8 @@ def test_terminal_restart_ignores_stale_sse_events():
 
 
 def test_terminal_routes_are_registered():
-    routes = _read("api/routes.py")
+    from tests.route_source import read_route_sources
+    routes = read_route_sources()
     for path in (
         "/api/terminal/start",
         "/api/terminal/input",

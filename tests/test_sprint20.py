@@ -340,7 +340,8 @@ def test_boot_js_media_recorder_fallback_posts_to_transcribe_api():
 
 def test_routes_define_transcribe_endpoint():
     """Server routes must expose /api/transcribe for MediaRecorder fallback uploads."""
-    routes = pathlib.Path(__file__).parent.parent.joinpath("api/routes.py").read_text(encoding="utf-8")
+    from tests.route_source import read_route_sources
+    routes = read_route_sources()
     assert '"/api/transcribe"' in routes
 
 

@@ -13,15 +13,21 @@ import textwrap
 
 import pytest
 
+from tests.route_source import read_route_sources
+
 # ── Paths ────────────────────────────────────────────────────────────────────
-_ROUTES = os.path.join(os.path.dirname(__file__), "..", "api", "routes.py")
 _CLARIFY = os.path.join(os.path.dirname(__file__), "..", "api", "clarify.py")
 _MESSAGES = os.path.join(os.path.dirname(__file__), "..", "static", "messages.js")
 
 
 def _read(path):
+    if path == _ROUTES:
+        return read_route_sources()
     with open(path) as f:
         return f.read()
+
+
+_ROUTES = "__route_sources__"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

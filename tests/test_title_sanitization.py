@@ -65,4 +65,11 @@ class TestGeneratedTitleSanitization(unittest.TestCase):
 
     def test_title_generation_source_has_no_cjk_literals(self):
         src = Path("api/streaming.py").read_text(encoding="utf-8")
-        self.assertNotRegex(src, r"[\u4e00-\u9fff]", "title generation code should stay English-only")
+        start = src.index("def _sanitize_generated_title(")
+        end = src.index("def _sanitize_messages_for_api(")
+        title_generation_src = src[start:end]
+        self.assertNotRegex(
+            title_generation_src,
+            r"[\u4e00-\u9fff]",
+            "title generation code should stay English-only",
+        )

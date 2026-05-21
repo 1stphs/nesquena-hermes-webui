@@ -334,7 +334,8 @@ class TestForceUpdateRoute:
     """#813 — /api/updates/force route must exist in routes.py."""
 
     def test_force_route_exists(self):
-        src = read('api/routes.py')
+        from tests.route_source import read_route_sources
+        src = read_route_sources()
         assert '"/api/updates/force"' in src, (
             "routes.py must handle POST /api/updates/force"
         )
@@ -665,4 +666,3 @@ class TestCheckForUpdatesButton:
         assert count >= 5, (
             f"settings_check_now found in only {count} locale blocks (expected ≥5: en, ru, es, zh, zh-Hant)"
         )
-

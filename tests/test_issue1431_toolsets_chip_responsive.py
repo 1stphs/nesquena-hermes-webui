@@ -141,25 +141,8 @@ class TestToolsetsAPIStillWorks:
 
     def test_session_toolsets_endpoint_exists(self):
         """The api/session/toolsets endpoint must still be registered."""
-        # Check api/routes.py for the endpoint
-        try:
-            with open("api/routes.py") as f:
-                src = f.read()
-        except FileNotFoundError:
-            # If routes.py is named differently, search
-            import os
-            found = False
-            for root, _, files in os.walk("api"):
-                for f in files:
-                    if f.endswith(".py"):
-                        with open(os.path.join(root, f)) as fp:
-                            if "session/toolsets" in fp.read():
-                                found = True
-                                break
-                if found:
-                    break
-            assert found, "api/session/toolsets endpoint must exist somewhere in api/"
-            return
+        from tests.route_source import read_route_sources
+        src = read_route_sources()
         assert "session/toolsets" in src, (
             "/api/session/toolsets endpoint must still be registered "
             "(only the visual chip is hidden, not the underlying state)"

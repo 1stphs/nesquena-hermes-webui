@@ -20,6 +20,11 @@ import tempfile
 import pytest
 
 from tests.conftest import TEST_BASE, TEST_STATE_DIR, _post, TEST_WORKSPACE, _wait_for_server
+from tests.route_source import read_route_sources
+
+
+def _route_sources():
+    return read_route_sources()
 
 
 def _get(path):
@@ -67,8 +72,7 @@ def test_duplicate_session_endpoint_exists():
     Test that the duplicate endpoint is registered.
     """
     # This test verifies that the endpoint exists in routes.py
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
 
     assert '/api/session/duplicate' in content, \
         "Duplicate endpoint should be registered in routes.py"
@@ -88,8 +92,7 @@ def test_duplicate_creates_independent_session():
 
     This test verifies the implementation logic by inspecting routes.py.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
 
     # Verify that parent_session_id is NOT set (this would make it a fork)
     # Find the duplicate endpoint
@@ -120,8 +123,7 @@ def test_duplicate_session_copies_title_logic():
     """
     Test that the duplicate session title includes (copy) suffix.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
 
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
@@ -143,8 +145,7 @@ def test_duplicate_session_copies_messages_logic():
     """
     Test that the duplicate session copies all messages.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
 
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
@@ -164,8 +165,7 @@ def test_duplicate_session_copies_model_logic():
     """
     Test that the duplicate session copies the model.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
 
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
@@ -182,8 +182,7 @@ def test_duplicate_session_copies_workspace_logic():
     """
     Test that the duplicate session copies the workspace.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
 
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
@@ -200,8 +199,7 @@ def test_duplicate_session_copies_all_session_properties():
     """
     Test that the duplicate session copies all properties.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
 
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
@@ -252,8 +250,7 @@ def test_duplicate_uses_deepcopy_for_messages():
     `messages=session.messages` was a plain reference assignment, leaving
     both sessions sharing the same list object in memory.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
     lines = content[duplicate_start:].split('\n')
@@ -272,8 +269,7 @@ def test_duplicate_explicitly_persists_to_disk():
     sent a turn (which triggered _handle_chat_start save). Refreshing
     mid-flow lost the duplicate.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
     lines = content[duplicate_start:].split('\n')
@@ -289,8 +285,7 @@ def test_duplicate_resets_pinned_and_archived():
     (un-archived) copy. Inheriting `archived=True` makes the duplicate
     invisible in the sidebar and users think the operation didn't work.
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
     lines = content[duplicate_start:].split('\n')
@@ -313,8 +308,7 @@ def test_duplicate_returns_404_when_session_not_found():
     Pre-fix, `bad(handler, "Session not found")` defaulted to status=400.
     A missing resource is conceptually 404, not "malformed request".
     """
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
     lines = content[duplicate_start:].split('\n')
@@ -326,8 +320,7 @@ def test_duplicate_returns_404_when_session_not_found():
 def test_duplicate_local_imports_removed():
     """Style: `import uuid` and `import time` should not be re-imported inside
     the handler — both are already at the top of routes.py."""
-    with open('api/routes.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = _route_sources()
     duplicate_start = content.find('if parsed.path == "/api/session/duplicate":')
     assert duplicate_start != -1, "Duplicate endpoint not found"
     # Only check the next ~10 lines — the local imports were right at the top of the handler

@@ -19,6 +19,8 @@ import unittest.mock as mock
 
 import pytest
 
+from tests.route_source import function_source
+
 REPO = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO.parent / ".hermes" / "hermes-agent"))
@@ -117,15 +119,7 @@ class TestLiveModelsProviderNormalization:
     """_handle_live_models must normalize the provider query param."""
 
     def test_live_models_normalizes_provider_alias(self):
-        src = read("api/routes.py")
-        # Find _handle_live_models function
-        m = re.search(
-            r"def _handle_live_models\(.*?\ndef ",
-            src,
-            re.DOTALL,
-        )
-        assert m, "_handle_live_models not found"
-        fn = m.group(0)
+        fn = function_source("_handle_live_models")
         assert "_resolve_provider_alias" in fn, (
             "_handle_live_models must normalize provider via "
             "api.config._resolve_provider_alias so 'z.ai' -> 'zai' "
@@ -134,7 +128,7 @@ class TestLiveModelsProviderNormalization:
 
     def test_live_models_normalization_before_provider_model_ids(self):
         """Normalization call must appear before the provider_model_ids call site."""
-        src = read("api/routes.py")
+        src = function_source("_handle_live_models")
         alias_match = re.search(
             r"provider\s*=\s*_resolve_provider_alias\(provider\)",
             src,
@@ -178,14 +172,7 @@ class TestLiveModelsCustomProviderFallback:
     /api/models/live must fall back to custom_providers entries from config.yaml."""
 
     def test_custom_fallback_code_present(self):
-        src = read("api/routes.py")
-        m = re.search(
-            r"def _handle_live_models\(.*?\ndef ",
-            src,
-            re.DOTALL,
-        )
-        assert m, "_handle_live_models not found"
-        fn = m.group(0)
+        fn = function_source("_handle_live_models")
         assert "custom_providers" in fn, (
             "_handle_live_models must read custom_providers from config "
             "as fallback when provider='custom' and provider_model_ids() returns []"

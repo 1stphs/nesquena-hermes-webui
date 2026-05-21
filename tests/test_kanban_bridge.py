@@ -487,13 +487,15 @@ def test_kanban_events_payload_matches_polling_shape(monkeypatch):
 
 
 def test_routes_dispatches_api_kanban_get_to_bridge():
-    src = open("api/routes.py", encoding="utf-8").read()
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
     assert 'parsed.path.startswith("/api/kanban/")' in src
     assert "handle_kanban_get(handler, parsed)" in src
 
 
 def test_routes_dispatches_api_kanban_post_to_bridge():
-    src = open("api/routes.py", encoding="utf-8").read()
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
     assert 'parsed.path.startswith("/api/kanban/")' in src
     assert "handle_kanban_post(handler, parsed, body)" in src
 
@@ -536,7 +538,8 @@ def test_kanban_only_mine_bulk_dispatch_and_block_unblock(monkeypatch):
 
 
 def test_routes_dispatches_canonical_kanban_patch_and_delete_verbs():
-    src = open("api/routes.py", encoding="utf-8").read()
+    from tests.route_source import read_route_sources
+    src = read_route_sources()
     server = open("server.py", encoding="utf-8").read()
     assert "def do_PATCH" in server
     assert "def do_DELETE" in server

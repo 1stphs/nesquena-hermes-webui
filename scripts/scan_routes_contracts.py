@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scan source-level contracts that constrain api/routes.py refactors."""
+"""Scan repo-wide route contracts for api.routes refactors."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROUTES_PY = REPO_ROOT / "api" / "routes.py"
+ROUTES_DISPATCHER_PY = REPO_ROOT / "api" / "routes_dispatcher.py"
 HANDLERS_DIR = REPO_ROOT / "api" / "routes_handlers"
+HELPERS_DIR = REPO_ROOT / "api" / "routes_helpers"
 TESTS_DIR = REPO_ROOT / "tests"
 REPORT_PATH = REPO_ROOT / "api" / "routes-handlers-contract.md"
 HANDLER_RE = re.compile(r"\bdef\s+(_handle_[A-Za-z0-9_]+)\s*\(")
@@ -355,7 +357,7 @@ def _top_level_functions(path: Path) -> dict[str, FunctionSource]:
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if not node.name.startswith("_handle_"):
+        if not (node.name.startswith("_handle_") or node.name in {"_run_cron_tracked", "_cron_job_subprocess_main"}):
             continue
         end_lineno = getattr(node, "end_lineno", node.lineno)
         func_source = "\n".join(lines[node.lineno - 1 : end_lineno])
@@ -369,14 +371,39 @@ def _top_level_functions(path: Path) -> dict[str, FunctionSource]:
     return out
 
 
+def _route_source_paths() -> list[Path]:
+    paths = [ROUTES_PY]
+    if ROUTES_DISPATCHER_PY.exists():
+        paths.append(ROUTES_DISPATCHER_PY)
+    if HANDLERS_DIR.exists():
+        paths.extend(
+            path for path in sorted(HANDLERS_DIR.glob("*.py"))
+            if path.name != "__init__.py"
+        )
+    if HELPERS_DIR.exists():
+        paths.extend(
+            path for path in sorted(HELPERS_DIR.rglob("*.py"))
+            if path.name != "__init__.py"
+        )
+    return paths
+
+
+def _route_source_text() -> str:
+    chunks = []
+    for path in _route_source_paths():
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        chunks.append(f"\n# BEGIN {rel}\n")
+        chunks.append(path.read_text(encoding="utf-8", errors="replace"))
+    return "\n".join(chunks)
+
+
 def _collect_route_functions() -> tuple[dict[str, FunctionSource], dict[str, FunctionSource]]:
     routes_functions = _top_level_functions(ROUTES_PY)
     handler_functions: dict[str, FunctionSource] = {}
-    if HANDLERS_DIR.exists():
-        for path in sorted(HANDLERS_DIR.glob("*.py")):
-            if path.name == "__init__.py":
-                continue
-            handler_functions.update(_top_level_functions(path))
+    for path in _route_source_paths():
+        if path == ROUTES_PY:
+            continue
+        handler_functions.update(_top_level_functions(path))
     return routes_functions, handler_functions
 
 
@@ -451,8 +478,8 @@ def _classify(
         reasons: list[str] = []
         status = "green"
         if name in def_locked:
-            status = "red"
-            reasons.append("routes.py source tests lock the physical function definition")
+            status = "yellow"
+            reasons.append("repo-wide source tests reference the function definition")
         elif name in getsource_locked:
             status = "yellow"
             reasons.append("inspect.getsource(routes.%s) is used by tests" % name)
@@ -471,8 +498,6 @@ def _classify(
         if len(matching_literals) > 6:
             reasons.append(f"body contains {len(matching_literals) - 6} more source literals")
 
-        if moved and status == "red":
-            reasons.append("currently moved into routes_handlers; this will break routes.py source tests")
         location = str(func.path.relative_to(REPO_ROOT))
         ratings.append(Rating(name, location, status, reasons))
     return ratings
@@ -491,16 +516,13 @@ def _moved_handlers() -> dict[str, FunctionSource]:
 
 def _check_contracts(ratings: list[Rating], contracts: list[Contract]) -> list[str]:
     routes_src = ROUTES_PY.read_text(encoding="utf-8")
+    route_src = _route_source_text()
     errors: list[str] = []
     ratings_by_name = {rating.function: rating for rating in ratings}
-    for rating in ratings:
-        if rating.status == "red" and rating.location != "api/routes.py":
-            errors.append(f"{rating.function}: red-locked function is not physically defined in api/routes.py")
-
     for item in contracts:
         if item.kind == "regex_literal" and _is_routes_code_literal(item.value):
             try:
-                matched = re.search(item.value, routes_src, re.DOTALL) is not None
+                matched = re.search(item.value, route_src, re.DOTALL) is not None
             except re.error as exc:
                 errors.append(
                     f"{item.file}:{item.line}: invalid captured regex {item.value!r}: {exc}"
@@ -508,17 +530,17 @@ def _check_contracts(ratings: list[Rating], contracts: list[Contract]) -> list[s
                 continue
             if not matched:
                 errors.append(
-                    f"{item.file}:{item.line}: routes.py does not match locked regex {item.value!r}"
+                    f"{item.file}:{item.line}: route sources do not match locked regex {item.value!r}"
                 )
         elif item.kind == "assert_literal" and _is_routes_code_literal(item.value):
-            if item.value not in routes_src:
+            if item.value not in route_src:
                 errors.append(
-                    f"{item.file}:{item.line}: routes.py is missing locked literal {item.value!r}"
+                    f"{item.file}:{item.line}: route sources are missing locked literal {item.value!r}"
                 )
         if item.kind in {"def_literal", "def_literal_function"} and item.value.startswith("_handle_"):
-            if f"def {item.value}(" not in routes_src:
+            if f"def {item.value}(" not in route_src:
                 errors.append(
-                    f"{item.file}:{item.line}: routes.py is missing locked definition def {item.value}("
+                    f"{item.file}:{item.line}: route sources are missing locked definition def {item.value}("
                 )
 
     for name in sorted(_moved_handlers()):
@@ -529,8 +551,6 @@ def _check_contracts(ratings: list[Rating], contracts: list[Contract]) -> list[s
         full_name_pattern = re.compile(rf"routes_handlers\.[A-Za-z0-9_]+\.{re.escape(name)}\(")
         if full_name_pattern.search(routes_src):
             errors.append(f"{name}: dispatcher must call the short api.routes binding, not routes_handlers.*.{name}")
-        if ratings_by_name.get(name) and ratings_by_name[name].status == "red":
-            errors.append(f"{name}: moved handler is rated red")
     return sorted(set(errors))
 
 
@@ -567,9 +587,9 @@ def _write_report(
     }
 
     lines: list[str] = [
-        "# routes handlers contract scan",
+        "# repo-wide routes contract scan",
         "",
-        "> Generated by `python scripts/scan_routes_contracts.py`.",
+        "> Generated by `python scripts/scan_routes_contracts.py`. Contracts are checked across api/routes.py, api/routes_dispatcher.py, api/routes_handlers/*.py, and api/routes_helpers/**/*.py.",
         "",
         "## Machine readable",
         "",

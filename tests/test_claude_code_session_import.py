@@ -131,12 +131,13 @@ def test_session_import_cli_returns_read_only_claude_code_payload(monkeypatch, t
 
 
 def test_read_only_source_badge_ui_guards_are_present():
+    from tests.route_source import read_route_sources
     sessions_js = (REPO_ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
     messages_js = (REPO_ROOT / "static" / "messages.js").read_text(encoding="utf-8")
     ui_js = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
     panels_js = (REPO_ROOT / "static" / "panels.js").read_text(encoding="utf-8")
     style_css = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
-    routes_py = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+    routes_py = read_route_sources()
 
     assert "function _isReadOnlySession" in sessions_js
     assert "read-only-session" in sessions_js

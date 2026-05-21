@@ -5,13 +5,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests.route_source import function_source
+
 
 REPO = Path(__file__).resolve().parents[1]
 INDEX_HTML = (REPO / "static" / "index.html").read_text(encoding="utf-8")
 BOOT_JS = (REPO / "static" / "boot.js").read_text(encoding="utf-8")
 UI_JS = (REPO / "static" / "ui.js").read_text(encoding="utf-8")
 STYLE_CSS = (REPO / "static" / "style.css").read_text(encoding="utf-8")
-ROUTES_PY = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
 
 
 def _slice_after(source: str, needle: str, chars: int = 900) -> str:
@@ -68,7 +69,7 @@ def test_html_media_open_full_uses_inline_new_tab_not_download():
 
 def test_media_html_inline_keeps_csp_sandbox():
     """api/media may serve HTML inline only behind a CSP sandbox."""
-    body = _slice_after(ROUTES_PY, "def _handle_media", 4000)
+    body = function_source("_handle_media")
     assert 'html_inline_ok = inline_preview and mime == "text/html"' in body
     assert 'csp = "sandbox allow-scripts" if html_inline_ok else None' in body
     assert "csp=csp" in body
@@ -77,7 +78,7 @@ def test_media_html_inline_keeps_csp_sandbox():
 
 def test_sandboxed_file_responses_do_not_send_x_frame_options():
     """X-Frame-Options: DENY would block the sandbox iframe preview."""
-    body = _slice_after(ROUTES_PY, "def _serve_file_bytes", 1800)
+    body = function_source("_serve_file_bytes")
     csp_branch = body[body.find("if csp:") : body.find("else:", body.find("if csp:"))]
     assert "Content-Security-Policy" in csp_branch
     assert 'send_header("X-Frame-Options"' not in csp_branch

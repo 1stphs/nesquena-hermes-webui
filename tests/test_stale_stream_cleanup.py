@@ -4,9 +4,12 @@ from pathlib import Path
 
 import api.config as config
 import api.routes as routes
+from tests.route_source import function_source, read_route_sources
+from tests.route_test_utils import invoke_route
 
 REPO = Path(__file__).resolve().parents[1]
-ROUTES_SRC = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
+ROUTE_SOURCES = read_route_sources()
+CHAT_START_SRC = function_source("_handle_chat_start")
 SESSIONS_SRC = (REPO / "static" / "sessions.js").read_text(encoding="utf-8")
 SW_SRC = (REPO / "static" / "sw.js").read_text(encoding="utf-8")
 
@@ -33,37 +36,78 @@ class _FakeSession:
     session_id = "issue1533-session"
 
     def __init__(self):
+        self.title = "Issue 1533"
+        self.model = "test"
+        self.model_provider = None
+        self.messages = []
+        self.tool_calls = []
         self.active_stream_id = "stale-stream"
         self.pending_user_message = "old prompt"
         self.pending_attachments = ["old.txt"]
         self.pending_started_at = 123
+        self.context_length = 0
+        self.threshold_tokens = 0
+        self.last_prompt_tokens = 0
         self.saved_stream_ids = []
 
     def save(self):
         self.saved_stream_ids.append(self.active_stream_id)
 
+    def compact(self):
+        return {
+            "session_id": self.session_id,
+            "title": self.title,
+            "model": self.model,
+            "message_count": len(self.messages),
+        }
+
 
 def test_stale_stream_cleanup_helper_exists():
-    assert "def _clear_stale_stream_state(session)" in ROUTES_SRC
-    assert "stream_id in STREAMS" in ROUTES_SRC
-    assert "session.active_stream_id = None" in ROUTES_SRC
-    assert "session.pending_user_message = None" in ROUTES_SRC
-    assert "session.pending_attachments = []" in ROUTES_SRC
-    assert "session.pending_started_at = None" in ROUTES_SRC
-    assert "session.save()" in ROUTES_SRC
+    assert "def _clear_stale_stream_state(session)" in ROUTE_SOURCES
+    assert "stream_id in STREAMS" in ROUTE_SOURCES
+    assert "session.active_stream_id = None" in ROUTE_SOURCES
+    assert "session.pending_user_message = None" in ROUTE_SOURCES
+    assert "session.pending_attachments = []" in ROUTE_SOURCES
+    assert "session.pending_started_at = None" in ROUTE_SOURCES
+    assert "session.save()" in ROUTE_SOURCES
 
 
 def test_session_load_clears_stale_stream_before_response():
-    load_pos = ROUTES_SRC.index("s = get_session(sid, metadata_only=(not load_messages))")
-    cleanup_pos = ROUTES_SRC.index("_clear_stale_stream_state(s)", load_pos)
-    response_pos = ROUTES_SRC.index('"active_stream_id": getattr(s, "active_stream_id", None)', cleanup_pos)
-    assert load_pos < cleanup_pos < response_pos
+    session = _FakeSession()
+    response = {}
+
+    def fake_get_session(sid, metadata_only=False):
+        response["metadata_only"] = metadata_only
+        return session
+
+    original_get_session = routes.get_session
+    original_model = routes._resolve_effective_session_model_for_display
+    original_provider = routes._resolve_effective_session_model_provider_for_display
+    original_lookup = routes._lookup_cli_session_metadata
+    try:
+        routes.get_session = fake_get_session
+        routes._resolve_effective_session_model_for_display = lambda _session: "test"
+        routes._resolve_effective_session_model_provider_for_display = lambda _session: None
+        routes._lookup_cli_session_metadata = lambda _sid: {}
+        config.STREAMS.clear()
+
+        result = invoke_route("get", "/api/session?session_id=issue1533-session")
+    finally:
+        routes.get_session = original_get_session
+        routes._resolve_effective_session_model_for_display = original_model
+        routes._resolve_effective_session_model_provider_for_display = original_provider
+        routes._lookup_cli_session_metadata = original_lookup
+
+    assert response["metadata_only"] is False
+    assert result.body["session"]["active_stream_id"] is None
+    assert result.body["session"]["pending_user_message"] is None
+    assert result.body["session"]["pending_attachments"] == []
 
 
 def test_chat_start_clears_stale_pending_state_not_only_active_id():
-    stale_comment_pos = ROUTES_SRC.index("# Stale stream id from a previous run; clear and continue.")
-    cleanup_pos = ROUTES_SRC.index("_clear_stale_stream_state(s)", stale_comment_pos)
-    stream_id_pos = ROUTES_SRC.index("stream_id = uuid.uuid4().hex", cleanup_pos)
+    stale_comment_pos = CHAT_START_SRC.index("# Stale stream id from a previous run; clear and continue.")
+    cleanup_pos = CHAT_START_SRC.index("_clear_stale_stream_state(s)", stale_comment_pos)
+    stream_id_pos = CHAT_START_SRC.index("stream_id = uuid.uuid4().hex", cleanup_pos)
     assert stale_comment_pos < cleanup_pos < stream_id_pos
 
 

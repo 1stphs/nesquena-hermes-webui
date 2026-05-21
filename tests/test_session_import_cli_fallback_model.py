@@ -16,18 +16,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.route_source import function_source
+
 REPO = Path(__file__).resolve().parents[1]
-ROUTES_PY = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
 
 
 def _extract_handler(name: str) -> str:
-    """Return the source of the handler function `name` from api/routes.py."""
-    marker = f"def {name}("
-    idx = ROUTES_PY.find(marker)
-    assert idx != -1, f"{name} not found in api/routes.py"
-    # Walk forward until a top-level `def ` (col 0) appears.
-    next_def = ROUTES_PY.find("\ndef ", idx + len(marker))
-    return ROUTES_PY[idx : next_def if next_def != -1 else len(ROUTES_PY)]
+    """Return the source of a route-layer handler function."""
+    return function_source(name)
 
 
 def test_import_cli_initializes_model_before_metadata_loop():
@@ -275,9 +271,78 @@ def test_merge_cli_sidebar_metadata_keeps_larger_sidecar_message_count():
 
 
 def test_messaging_session_loader_prefers_longer_sidecar_transcript():
-    """Pin the /api/session invariant that repaired sidecars can be longer than state.db segments."""
-    handler = _extract_handler("handle_get")
-    old = "if is_messaging_session and cli_messages:\n                    _all_msgs = cli_messages"
-    assert old not in handler
-    assert "sidecar_messages = getattr(s, \"messages\", []) or []" in handler
-    assert "len(sidecar_messages) > len(cli_messages)" in handler
+    """GET /api/session should prefer a longer repaired sidecar over state.db rows."""
+    import api.routes as routes
+    from tests.route_test_utils import invoke_route
+
+    session_id = "messaging_sidecar_longer_001"
+
+    class FakeSession:
+        title = "Recovered"
+        workspace = "/tmp"
+        model = "test-model"
+        model_provider = None
+        session_source = "messaging"
+        raw_source = "discord"
+        source_tag = "discord"
+        source_label = "Discord"
+        messages = [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "two"},
+            {"role": "user", "content": "three"},
+        ]
+        tool_calls = []
+        active_stream_id = None
+        pending_user_message = None
+        pending_attachments = []
+        pending_started_at = None
+        context_length = 0
+        threshold_tokens = 0
+        last_prompt_tokens = 0
+
+        def __init__(self):
+            self.session_id = session_id
+
+        def compact(self):
+            return {
+                "session_id": self.session_id,
+                "title": self.title,
+                "model": self.model,
+                "message_count": len(self.messages),
+                "session_source": self.session_source,
+                "raw_source": self.raw_source,
+            }
+
+    sidecar = FakeSession()
+    cli_messages = [{"role": "user", "content": "one"}]
+
+    original_get_session = routes.get_session
+    original_get_cli_messages = routes.get_cli_session_messages
+    original_get_cli_sessions = routes.get_cli_sessions
+    original_model = routes._resolve_effective_session_model_for_display
+    original_provider = routes._resolve_effective_session_model_provider_for_display
+    try:
+        routes.get_session = lambda sid, metadata_only=False: sidecar
+        routes.get_cli_session_messages = lambda sid: cli_messages if sid == session_id else []
+        routes.get_cli_sessions = lambda: [{
+            "session_id": session_id,
+            "session_source": "messaging",
+            "raw_source": "discord",
+            "source_tag": "discord",
+            "source_label": "Discord",
+            "message_count": len(cli_messages),
+        }]
+        routes._resolve_effective_session_model_for_display = lambda session: session.model
+        routes._resolve_effective_session_model_provider_for_display = lambda session: None
+
+        response = invoke_route("get", f"/api/session?session_id={session_id}")
+    finally:
+        routes.get_session = original_get_session
+        routes.get_cli_session_messages = original_get_cli_messages
+        routes.get_cli_sessions = original_get_cli_sessions
+        routes._resolve_effective_session_model_for_display = original_model
+        routes._resolve_effective_session_model_provider_for_display = original_provider
+
+    assert response.status == 200
+    assert response.body["session"]["messages"] == sidecar.messages
+    assert response.body["session"]["messages"] != cli_messages

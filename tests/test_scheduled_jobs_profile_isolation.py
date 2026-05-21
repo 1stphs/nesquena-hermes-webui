@@ -172,14 +172,12 @@ def test_cron_run_does_not_silently_swallow_profile_resolution_errors():
     Source-level assertion to catch any future re-introduction of the
     over-broad except clause.
     """
-    from pathlib import Path
-    src = (Path(__file__).resolve().parent.parent / "api" / "routes.py").read_text(encoding="utf-8")
+    from tests.route_source import function_source
+    src = function_source("_handle_cron_run")
 
     # Locate _handle_cron_run definition; assert the spawn block does NOT
     # wrap get_active_hermes_home() in a bare except that falls back to None.
-    idx = src.find("def _handle_cron_run(handler, body):")
-    assert idx != -1, "_handle_cron_run not found"
-    body = src[idx : idx + 4000]
+    body = src
 
     # The spawn site must call get_active_hermes_home() unguarded (no
     # try/except around it specifically), because a silent fallback to None
@@ -295,12 +293,9 @@ def test_cron_worker_does_not_silently_fall_back_on_profile_context_failure():
     as #1573. The child process may report the exception to the parent, but it
     must not continue into run_job outside the requested profile context.
     """
-    from pathlib import Path
-    src = (Path(__file__).resolve().parent.parent / "api" / "routes.py").read_text(encoding="utf-8")
+    from tests.route_source import function_source
 
-    idx = src.find("def _cron_job_subprocess_main(job")
-    assert idx != -1, "_cron_job_subprocess_main not found"
-    body = src[idx : idx + 2000]
+    body = function_source("_cron_job_subprocess_main")
 
     assert "with cron_profile_context_for_home(execution_profile_home):" in body
     assert "result = _run()" in body

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import pathlib
 
+from tests.route_source import read_route_sources
+
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 UI_JS = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
 INDEX_HTML = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
 STYLE_CSS = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
-ROUTES_PY = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+ROUTE_SOURCES = read_route_sources()
 
 
 class _FakeGatewayStatus:
@@ -108,8 +110,8 @@ def test_agent_health_payload_unknown_when_gateway_is_not_configured(monkeypatch
 
 
 def test_agent_health_route_is_registered_with_tri_state_payload_shape():
-    assert 'parsed.path == "/api/health/agent"' in ROUTES_PY
-    assert "build_agent_health_payload()" in ROUTES_PY
+    assert 'parsed.path == "/api/health/agent"' in ROUTE_SOURCES
+    assert "build_agent_health_payload()" in ROUTE_SOURCES
     src = (REPO_ROOT / "api" / "agent_health.py").read_text(encoding="utf-8")
     assert '"alive"' in src
     assert '"checked_at"' in src

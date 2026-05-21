@@ -19,10 +19,11 @@ post-merge save) writes from getattr(agent, 'context_compressor', None).
 import re
 from pathlib import Path
 
+from tests.route_source import read_route_sources
+
 ROOT = Path(__file__).resolve().parent.parent
 STREAMING = ROOT / "api" / "streaming.py"
 MODELS = ROOT / "api" / "models.py"
-ROUTES = ROOT / "api" / "routes.py"
 
 
 def test_streaming_persists_context_fields_on_session_before_save():
@@ -107,7 +108,7 @@ def test_session_compact_exposes_context_fields():
 
 def test_routes_session_get_returns_context_fields():
     """GET /api/session response must include the three fields."""
-    src = ROUTES.read_text(encoding="utf-8")
+    src = read_route_sources()
     # The session-detail response builder uses getattr(s, ..., 0) or 0 pattern.
     # Look for the three keys in the same response shape.
     assert '"context_length"' in src, "GET /api/session response must include context_length"

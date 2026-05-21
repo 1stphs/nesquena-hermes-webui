@@ -16,7 +16,6 @@ from unittest.mock import patch, MagicMock
 REPO = pathlib.Path(__file__).parent.parent
 SESSIONS_JS = (REPO / "static" / "sessions.js").read_text(encoding="utf-8")
 WORKSPACE_JS = (REPO / "static" / "workspace.js").read_text(encoding="utf-8")
-ROUTES_PY = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
 
 
 # ── 1. workspace.js: expanded-dir pre-fetch is parallelized ─────────────────

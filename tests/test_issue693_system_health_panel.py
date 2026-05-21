@@ -7,13 +7,15 @@ import pathlib
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
+from tests.route_source import read_route_sources
+
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 UI_JS = (REPO_ROOT / "static" / "ui.js").read_text(encoding="utf-8")
 PANELS_JS = (REPO_ROOT / "static" / "panels.js").read_text(encoding="utf-8")
 INDEX_HTML = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
 STYLE_CSS = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
-ROUTES_PY = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+ROUTE_SOURCES = read_route_sources()
 AUTH_PY = (REPO_ROOT / "api" / "auth.py").read_text(encoding="utf-8")
 
 
@@ -103,8 +105,8 @@ def test_system_health_payload_partial_and_unavailable_are_graceful(monkeypatch)
 
 
 def test_system_health_route_registered_and_auth_gated(monkeypatch):
-    assert 'parsed.path == "/api/system/health"' in ROUTES_PY
-    assert "build_system_health_payload()" in ROUTES_PY
+    assert 'parsed.path == "/api/system/health"' in ROUTE_SOURCES
+    assert "build_system_health_payload()" in ROUTE_SOURCES
     assert '"/api/system/health"' not in AUTH_PY, "system metrics must not be public"
 
     monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "test-password")

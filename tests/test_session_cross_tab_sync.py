@@ -4,13 +4,15 @@ import re
 import subprocess
 from pathlib import Path
 
+from tests.route_source import read_route_sources
+
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 SESSIONS_JS = (REPO_ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
 BOOT_JS = (REPO_ROOT / "static" / "boot.js").read_text(encoding="utf-8")
 COMMANDS_JS = (REPO_ROOT / "static" / "commands.js").read_text(encoding="utf-8")
 MESSAGES_JS = (REPO_ROOT / "static" / "messages.js").read_text(encoding="utf-8")
 INDEX_HTML = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
-ROUTES_PY = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+ROUTE_SOURCES = read_route_sources()
 
 
 def test_sessions_js_listens_for_active_session_storage_changes():
@@ -59,7 +61,7 @@ def test_long_lived_stream_urls_resolve_against_document_base():
 
 
 def test_session_url_route_serves_index_and_base_href_handles_session_path():
-    assert 'parsed.path.startswith("/session/")' in ROUTES_PY
+    assert 'parsed.path.startswith("/session/")' in ROUTE_SOURCES
     assert "marker='/session/'" in INDEX_HTML
     assert "path.slice(0,i+1)" in INDEX_HTML
 

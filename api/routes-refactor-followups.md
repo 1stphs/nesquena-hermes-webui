@@ -113,7 +113,7 @@ Includes Sprint 10 cancel support via CANCEL_FLAGS.
 
 ### B1. `routes-contracts.yml` 触发 paths 扩展到 `tests/test_*.py`
 
-**2026-05-20 状态**:已完成。`beda8fa ci(routes): extend contract gate to tests changes` 已在 pull_request 和 push 的 paths 中加入 `tests/test_*.py`。
+**2026-05-21 状态**:本 fork 不再使用 GitHub Actions workflow。以下内容只保留为历史参考;继续拆分 routes 时改为本地手动执行 `python scripts/scan_routes_contracts.py --check`。
 
 **现状**:CI workflow 当前 paths 只覆盖:
 
@@ -123,7 +123,7 @@ Includes Sprint 10 cancel support via CANCEL_FLAGS.
 - 'api/routes_handlers/**'
 - 'api/routes-handlers-contract.md'
 - 'scripts/scan_routes_contracts.py'
-- '.github/workflows/routes-contracts.yml'
+- 'tests/test_*.py'
 ```
 
 **风险**:如果有人在 `tests/test_*.py` 新加一个源码扫描契约(比如又一条 `assert "Foo" in ROUTES_PY`),scan 工具不会被强制重跑,`contract.md` 不会被强制更新,直到下一个改 routes 的 PR 才暴露——可能这时已经晚了一个迭代。
@@ -140,7 +140,6 @@ on:
       - 'api/routes_handlers/**'
       - 'api/routes-handlers-contract.md'
       - 'scripts/scan_routes_contracts.py'
-      - '.github/workflows/routes-contracts.yml'
       - 'tests/test_*.py'    # 新增
   push:
     branches: [master]

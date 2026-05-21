@@ -236,7 +236,8 @@ class TestRouting:
     """The POST handler must dispatch /api/chat/steer to _handle_chat_steer."""
 
     def test_route_registered(self):
-        src = (Path(__file__).parent.parent / "api" / "routes.py").read_text(encoding="utf-8")
+        from tests.route_source import read_route_sources
+        src = read_route_sources()
         assert '/api/chat/steer' in src
         assert '_handle_chat_steer' in src
 

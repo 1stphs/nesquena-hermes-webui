@@ -19,3 +19,13 @@ def _routes_binding(name: str):
     if hasattr(helpers, name):
         return getattr(helpers, name)
     raise AttributeError(name)
+
+
+def _sync_routes_bindings(target_globals: dict) -> None:
+    routes = sys.modules.get("api.routes")
+    if routes is None:
+        return
+    for name, value in vars(routes).items():
+        if name.startswith("__") and name.endswith("__"):
+            continue
+        target_globals[name] = value

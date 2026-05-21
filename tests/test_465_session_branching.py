@@ -12,21 +12,25 @@ Verifies:
 """
 import re
 
+from tests.route_source import read_route_sources
+
+
+def _routes_source():
+    return read_route_sources()
+
 
 # ── Backend ────────────────────────────────────────────────────────────────────
 
 def test_branch_endpoint_exists():
     """Verify the POST /api/session/branch route handler exists."""
-    with open('api/routes.py') as f:
-        src = f.read()
+    src = _routes_source()
     assert '"POST /api/session/branch"' in src or '"/api/session/branch"' in src, \
         "Missing /api/session/branch route"
 
 
 def test_branch_endpoint_validates_session_id():
     """Verify the branch endpoint requires session_id."""
-    with open('api/routes.py') as f:
-        src = f.read()
+    src = _routes_source()
     # Find the branch block
     branch_match = re.search(
         r'parsed\.path == "/api/session/branch"(.*?)(?=\n    if parsed\.path|$)',
@@ -40,8 +44,7 @@ def test_branch_endpoint_validates_session_id():
 
 def test_branch_endpoint_returns_new_session_id():
     """Verify the branch endpoint returns session_id and title."""
-    with open('api/routes.py') as f:
-        src = f.read()
+    src = _routes_source()
     branch_match = re.search(
         r'parsed\.path == "/api/session/branch"(.*?)(?=\n    if parsed\.path|$)',
         src, re.DOTALL
@@ -56,8 +59,7 @@ def test_branch_endpoint_returns_new_session_id():
 
 def test_branch_creates_session_with_parent():
     """Verify the branch creates a Session with parent_session_id set."""
-    with open('api/routes.py') as f:
-        src = f.read()
+    src = _routes_source()
     branch_match = re.search(
         r'parsed\.path == "/api/session/branch"(.*?)(?=\n    if parsed\.path|$)',
         src, re.DOTALL
@@ -70,8 +72,7 @@ def test_branch_creates_session_with_parent():
 
 def test_branch_keep_count_support():
     """Verify the branch endpoint supports keep_count parameter."""
-    with open('api/routes.py') as f:
-        src = f.read()
+    src = _routes_source()
     branch_match = re.search(
         r'parsed\.path == "/api/session/branch"(.*?)(?=\n    if parsed\.path|$)',
         src, re.DOTALL
@@ -85,8 +86,7 @@ def test_branch_keep_count_support():
 
 def test_branch_auto_title():
     """Verify fork title defaults to '<original> (fork)'."""
-    with open('api/routes.py') as f:
-        src = f.read()
+    src = _routes_source()
     branch_match = re.search(
         r'parsed\.path == "/api/session/branch"(.*?)(?=\n    if parsed\.path|$)',
         src, re.DOTALL

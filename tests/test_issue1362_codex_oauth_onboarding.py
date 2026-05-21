@@ -15,19 +15,37 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def test_onboarding_codex_oauth_routes_use_post_start_cancel_and_get_poll():
-    routes = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
-    get_idx = routes.find("def handle_get(")
-    post_idx = routes.find("def handle_post(")
-    assert get_idx != -1 and post_idx != -1
-    get_body = routes[get_idx:post_idx]
-    post_body = routes[post_idx:]
+    from tests.route_source import read_route_sources
+    routes = read_route_sources()
 
-    assert '"/api/onboarding/oauth/poll"' in get_body
-    assert '"/api/onboarding/oauth/start"' not in get_body
     assert '"/api/oauth/codex/start"' not in routes
     assert '"/api/oauth/codex/poll"' not in routes
-    assert '"/api/onboarding/oauth/start"' in post_body
-    assert '"/api/onboarding/oauth/cancel"' in post_body
+
+
+def test_onboarding_oauth_routes_enforce_method_contract(monkeypatch):
+    import api.routes as routes
+    import api.oauth as oauth
+    from tests.route_test_utils import invoke_route
+
+    monkeypatch.setenv("HERMES_WEBUI_ONBOARDING_OPEN", "1")
+    monkeypatch.setattr(oauth, "start_onboarding_oauth_flow", lambda body: {"ok": True, "provider": body["provider"]})
+    monkeypatch.setattr(routes, "start_onboarding_oauth_flow", oauth.start_onboarding_oauth_flow)
+    monkeypatch.setattr(oauth, "cancel_onboarding_oauth_flow", lambda body: {"ok": True, "status": "cancelled"})
+    monkeypatch.setattr(routes, "cancel_onboarding_oauth_flow", oauth.cancel_onboarding_oauth_flow)
+    monkeypatch.setattr(oauth, "poll_onboarding_oauth_flow", lambda flow_id: {"ok": True, "flow_id": flow_id})
+    monkeypatch.setattr(routes, "poll_onboarding_oauth_flow", oauth.poll_onboarding_oauth_flow)
+
+    assert invoke_route("get", "/api/onboarding/oauth/poll?flow_id=f1").body == {"ok": True, "flow_id": "f1"}
+    assert invoke_route("post", "/api/onboarding/oauth/start", body={"provider": "openai-codex"}).body == {
+        "ok": True,
+        "provider": "openai-codex",
+    }
+    assert invoke_route("post", "/api/onboarding/oauth/cancel", body={"flow_id": "f1"}).body == {
+        "ok": True,
+        "status": "cancelled",
+    }
+    assert invoke_route("get", "/api/onboarding/oauth/start").handled is False
+    assert invoke_route("get", "/api/oauth/codex/poll?flow_id=f1").handled is False
 
 
 def test_onboarding_oauth_rejects_unsupported_providers(monkeypatch):
@@ -545,7 +563,8 @@ def test_anthropic_env_clear_waits_for_chat_env_read_lock(monkeypatch, tmp_path)
 
 def test_runtime_provider_reads_use_anthropic_env_lock():
     streaming_src = (REPO / "api" / "streaming.py").read_text(encoding="utf-8")
-    routes_src = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
+    from tests.route_source import read_route_sources
+    routes_src = read_route_sources()
 
     assert "resolve_runtime_provider_with_anthropic_env_lock" in streaming_src
     assert "resolve_runtime_provider_with_anthropic_env_lock" in routes_src
