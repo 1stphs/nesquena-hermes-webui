@@ -2,7 +2,9 @@
 
 import json
 import logging
+import os
 import re
+import shutil
 import uuid
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -557,6 +559,127 @@ def _handle_profile_agents_list(handler):
         "profiles": profiles,
         "active": get_active_profile_name(),
     })
+
+def _talent_market_profiles_root() -> Path:
+    return Path(
+        os.getenv("HERMES_TALENT_MARKET_DIR", "/var/www/hermes_talent_market")
+    ).expanduser().resolve()
+
+def _coerce_profile_install_path(raw_path: str) -> Path:
+    value = str(raw_path or "").strip()
+    if not value:
+        raise ValueError("profile_path is required")
+
+    normalized = value.replace("\\", "/")
+    lowered = normalized.lower()
+    suffix = None
+    for prefix in ("/.hermes", ".hermes"):
+        if lowered == prefix:
+            suffix = ""
+            break
+        if lowered.startswith(prefix + "/"):
+            suffix = normalized[len(prefix):].lstrip("/")
+            break
+
+    if suffix is None:
+        marker = "/.hermes"
+        marker_with_sep = marker + "/"
+        idx = lowered.find(marker_with_sep)
+        if idx >= 0:
+            suffix = normalized[idx + len(marker):].lstrip("/")
+        elif lowered.endswith(marker):
+            suffix = ""
+
+    if suffix is None:
+        return Path(value).expanduser().resolve()
+
+    from api.profiles import _DEFAULT_HERMES_HOME
+
+    base_home = Path(_DEFAULT_HERMES_HOME).expanduser().resolve()
+    candidate = (base_home / suffix).resolve()
+    candidate.relative_to(base_home)
+    return candidate
+
+def _handle_profile_install_profiles(handler, body):
+    profile_name = str(body.get("profile_name") or "").strip()
+    source_raw = str(body.get("source_path") or "").strip()
+    profile_path_raw = str(body.get("profile_path") or "").strip()
+    if not profile_name:
+        return _routes_binding("bad")(handler, "profile_name is required")
+    if not source_raw:
+        return _routes_binding("bad")(handler, "source_path is required")
+    if not profile_path_raw:
+        return _routes_binding("bad")(handler, "profile_path is required")
+
+    try:
+        from api.profiles import _invalidate_root_profile_cache, _profiles_root, _validate_profile_name
+
+        _validate_profile_name(profile_name)
+        talent_root = _talent_market_profiles_root()
+        source_dir = Path(source_raw).expanduser().resolve()
+        try:
+            source_dir.relative_to(talent_root)
+        except ValueError as exc:
+            raise ValueError("source_path must be inside the talent market directory") from exc
+
+        profiles_root = Path(_profiles_root()).expanduser().resolve()
+        destination = _coerce_profile_install_path(profile_path_raw).resolve()
+        try:
+            destination.relative_to(profiles_root)
+        except ValueError as exc:
+            raise ValueError("profile_path must be inside the Hermes profiles directory") from exc
+        if destination.name != profile_name:
+            raise ValueError("profile_path must end with profile_name")
+        if destination.parent != profiles_root:
+            raise ValueError("profile_path must be a direct child of the Hermes profiles directory")
+        if source_dir == destination:
+            raise ValueError("source_path and profile_path must be different")
+
+        if not source_dir.exists() or not source_dir.is_dir():
+            return _routes_binding("bad")(handler, "Profile source not found", 404)
+
+        overwrite = bool(body.get("overwrite", False))
+        if destination.exists() and not overwrite:
+            return _routes_binding("bad")(handler, "Profile already installed", 409)
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_destination = destination.parent / f".{profile_name}.installing-{uuid.uuid4().hex}"
+        try:
+            shutil.copytree(source_dir, temp_destination, symlinks=True)
+            if destination.exists():
+                if destination.is_dir() and not destination.is_symlink():
+                    shutil.rmtree(destination)
+                else:
+                    destination.unlink()
+            temp_destination.rename(destination)
+        except OSError as exc:
+            try:
+                if temp_destination.exists():
+                    if temp_destination.is_dir() and not temp_destination.is_symlink():
+                        shutil.rmtree(temp_destination)
+                    else:
+                        temp_destination.unlink()
+            except OSError:
+                pass
+            logger.exception("Failed to install talent market profile")
+            return _routes_binding("bad")(handler, _routes_binding("_sanitize_error")(exc), 500)
+
+        _invalidate_root_profile_cache()
+        return _routes_binding("j")(handler, {
+            "ok": True,
+            "profile": {
+                "name": profile_name,
+                "path": str(destination),
+            },
+            "source_path": str(source_dir),
+            "installed_path": str(destination),
+            "overwritten": overwrite,
+        })
+    except ValueError as exc:
+        return _routes_binding("bad")(handler, str(exc), 400)
+    except OSError as exc:
+        logger.exception("Failed to install talent market profile")
+        return _routes_binding("bad")(handler, _routes_binding("_sanitize_error")(exc), 500)
 
 def _handle_profile_agent_create(handler, body):
     try:

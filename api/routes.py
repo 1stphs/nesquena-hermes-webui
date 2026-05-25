@@ -395,6 +395,7 @@ from api.routes_handlers.profile import (
     _resolve_profile_agent_update_target,
     _handle_profile_agent_skills,
     _handle_profile_agents_list,
+    _handle_profile_install_profiles,
     _handle_profile_agent_create,
     _handle_profile_agent_update,
     _handle_profile_memory_write,

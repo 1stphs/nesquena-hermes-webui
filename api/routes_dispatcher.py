@@ -1717,6 +1717,9 @@ def dispatch_post(handler, parsed) -> bool:
     if parsed.path == "/api/profile/create-agent":
         return _handle_profile_agent_create(handler, body)
 
+    if parsed.path == "/api/profile/install_profiles":
+        return _handle_profile_install_profiles(handler, body)
+
     if parsed.path == "/api/profile/update-agent":
         return _handle_profile_agent_update(handler, body)
 
