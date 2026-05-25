@@ -68,7 +68,6 @@ def test_install_market_profile_clones_entire_directory(monkeypatch, tmp_path):
     payload, status = _post_install({
         "profile_name": "market-analyst",
         "source_path": str(source),
-        "profile_path": "/home/hermeswebui/.hermes/profiles/market-analyst",
     })
 
     installed = hermes_home / "profiles" / "market-analyst"
@@ -102,7 +101,6 @@ def test_install_market_profile_rejects_source_outside_talent_root(monkeypatch, 
     payload, status = _post_install({
         "profile_name": "market-analyst",
         "source_path": str(outside),
-        "profile_path": "/home/hermeswebui/.hermes/profiles/market-analyst",
     })
 
     assert status == 400
@@ -126,7 +124,6 @@ def test_install_market_profile_conflict_requires_overwrite(monkeypatch, tmp_pat
     payload, status = _post_install({
         "profile_name": "market-analyst",
         "source_path": str(source),
-        "profile_path": "/home/hermeswebui/.hermes/profiles/market-analyst",
     })
     assert status == 409
     assert payload["error"] == "Profile already installed"
@@ -135,7 +132,6 @@ def test_install_market_profile_conflict_requires_overwrite(monkeypatch, tmp_pat
     payload, status = _post_install({
         "profile_name": "market-analyst",
         "source_path": str(source),
-        "profile_path": "/home/hermeswebui/.hermes/profiles/market-analyst",
         "overwrite": True,
     })
     assert status == 200

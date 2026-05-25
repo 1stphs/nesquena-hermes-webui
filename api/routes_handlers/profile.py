@@ -608,8 +608,6 @@ def _handle_profile_install_profiles(handler, body):
         return _routes_binding("bad")(handler, "profile_name is required")
     if not source_raw:
         return _routes_binding("bad")(handler, "source_path is required")
-    if not profile_path_raw:
-        return _routes_binding("bad")(handler, "profile_path is required")
 
     try:
         from api.profiles import _invalidate_root_profile_cache, _profiles_root, _validate_profile_name
@@ -623,7 +621,11 @@ def _handle_profile_install_profiles(handler, body):
             raise ValueError("source_path must be inside the talent market directory") from exc
 
         profiles_root = Path(_profiles_root()).expanduser().resolve()
-        destination = _coerce_profile_install_path(profile_path_raw).resolve()
+        destination = (
+            _coerce_profile_install_path(profile_path_raw).resolve()
+            if profile_path_raw
+            else (profiles_root / profile_name).resolve()
+        )
         try:
             destination.relative_to(profiles_root)
         except ValueError as exc:
