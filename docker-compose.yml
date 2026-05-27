@@ -11,14 +11,14 @@ services:
     ports:
       - "8787:8787"
 
-    volumes:
-      - /var/www/hermes_talent_market:/var/www/hermes_talent_market:ro  
+    volumes: 
       - /var/www/hermes-agent/.hermes:/home/hermeswebui/.hermes
       - /var/www/hermes-agent/.hermes:/.hermes
       - /var/www/hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
       - /var/www/hermes-community-skills:/var/www/hermes-community-skills:ro
       - /var/www/hermes-built-in-skills:/var/www/hermes-built-in-skills:ro
       - /var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
+      - /var/www/hermes_talent_market:/var/www/hermes_talent_market:ro 
 
     environment:
       # macOS bind mounts often use UID/GID 501+; run `id -u` and `id -g`
