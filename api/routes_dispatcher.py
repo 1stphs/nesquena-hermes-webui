@@ -255,8 +255,15 @@ self.addEventListener('fetch', () => {});
                     _all_msgs = sidecar_messages if len(sidecar_messages) > len(cli_messages) else cli_messages
                 else:
                     _all_msgs = s.messages
+                from api.streaming import _filter_agent_control_messages
+                _all_msgs = _filter_agent_control_messages(_all_msgs)
+                _visible_user_message_count = sum(
+                    1 for message in _all_msgs
+                    if isinstance(message, dict) and message.get("role") == "user"
+                )
             else:
                 _all_msgs = []
+                _visible_user_message_count = 0
             if load_messages:
                 if msg_before is not None:
                     # Scroll-to-top paging: msg_before is a 0-based index into
@@ -301,6 +308,9 @@ self.addEventListener('fetch', () => {});
                 "threshold_tokens": getattr(s, "threshold_tokens", 0) or 0,
                 "last_prompt_tokens": getattr(s, "last_prompt_tokens", 0) or 0,
             }
+            if load_messages:
+                raw["message_count"] = len(_all_msgs)
+                raw["user_message_count"] = _visible_user_message_count
             if cli_meta and _is_messaging_session_record(cli_meta):
                 raw = _merge_cli_sidebar_metadata(raw, cli_meta)
             # Signal to the frontend that older messages were omitted.

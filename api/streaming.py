@@ -605,6 +605,26 @@ def _message_text(value) -> str:
     return _strip_thinking_markup(str(value or '').strip())
 
 
+_AGENT_CONTROL_USER_MESSAGE_MARKERS = (
+    'maximum number of tool-calling iterations',
+    'without calling any more tools',
+)
+
+
+def _is_agent_control_user_message(message) -> bool:
+    if not isinstance(message, dict) or message.get('role') != 'user':
+        return False
+    text = _message_text(message.get('content', '')).lower()
+    return all(marker in text for marker in _AGENT_CONTROL_USER_MESSAGE_MARKERS)
+
+
+def _filter_agent_control_messages(messages) -> list:
+    return [
+        msg for msg in (messages or [])
+        if not _is_agent_control_user_message(msg)
+    ]
+
+
 def _first_exchange_snippets(messages):
     """Return (first_user_text, first_assistant_text) snippets for title generation.
 
@@ -1344,6 +1364,8 @@ def _sanitize_messages_for_api(messages):
         # Skip persisted error markers — never send them to the LLM as prior context.
         if msg.get('_error'):
             continue
+        if _is_agent_control_user_message(msg):
+            continue
         role = msg.get('role')
         if role == 'tool':
             tid = msg.get('tool_call_id') or ''
@@ -1442,8 +1464,8 @@ def _session_context_messages(session):
     """Return model-facing history without assuming it matches the UI transcript."""
     context_messages = getattr(session, 'context_messages', None)
     if isinstance(context_messages, list) and context_messages:
-        return context_messages
-    return session.messages or []
+        return _filter_agent_control_messages(context_messages)
+    return _filter_agent_control_messages(session.messages or [])
 
 
 def _message_identity(msg):
@@ -2537,7 +2559,7 @@ def _run_agent_streaming(
             # or has been zeroed out (e.g. via a buggy migration / manual file edit).
             # Truthy-check covers None, missing-attr, and 0 uniformly.
             _turn_started_at = _pending_started_at if _pending_started_at else time.time()
-            _previous_messages = list(s.messages or [])
+            _previous_messages = _filter_agent_control_messages(s.messages or [])
             _previous_context_messages = _drop_checkpointed_current_user_from_context(
                 _session_context_messages(s),
                 msg_text,
@@ -2620,7 +2642,8 @@ def _run_agent_streaming(
             if _ckpt_thread is not None:
                 _ckpt_thread.join(timeout=15)
             with _agent_lock:
-                _result_messages = result.get('messages') or _previous_context_messages
+                _raw_result_messages = result.get('messages') or _previous_context_messages
+                _result_messages = _filter_agent_control_messages(_raw_result_messages)
                 _next_context_messages = _restore_reasoning_metadata(
                     _previous_context_messages,
                     _result_messages,
@@ -2737,7 +2760,8 @@ def _run_agent_streaming(
                                 # evaluates False on next conceptual pass.
                                 # Since we're in a flat block, directly run the
                                 # post-result merge logic here.
-                                _result_messages = result.get('messages') or _previous_context_messages
+                                _raw_result_messages = result.get('messages') or _previous_context_messages
+                                _result_messages = _filter_agent_control_messages(_raw_result_messages)
                                 _next_context_messages = _restore_reasoning_metadata(
                                     _previous_context_messages,
                                     _result_messages,

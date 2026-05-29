@@ -433,13 +433,14 @@ def _handle_chat_sync(handler, body):
                 "Never fall back to a hardcoded path when this tag is present."
             )
             from api.streaming import (
+                _filter_agent_control_messages,
                 _merge_display_messages_after_agent_result,
                 _restore_reasoning_metadata,
                 _sanitize_messages_for_api,
                 _session_context_messages,
             )
 
-            _previous_messages = list(s.messages or [])
+            _previous_messages = _filter_agent_control_messages(s.messages or [])
             _previous_context_messages = list(_session_context_messages(s))
 
             result = agent.run_conversation(
@@ -464,7 +465,8 @@ def _handle_chat_sync(handler, body):
             else:
                 os.environ["HERMES_SESSION_KEY"] = old_session_key
     with _get_session_agent_lock(s.session_id):
-        _result_messages = result.get("messages") or _previous_context_messages
+        _raw_result_messages = result.get("messages") or _previous_context_messages
+        _result_messages = _filter_agent_control_messages(_raw_result_messages)
         _next_context_messages = _restore_reasoning_metadata(
             _previous_context_messages,
             _result_messages,
