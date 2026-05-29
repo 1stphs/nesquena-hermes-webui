@@ -74,6 +74,7 @@ Current important mounts:
 /var/www/hermes-community-skills:/var/www/hermes-community-skills:ro
 /var/www/hermes-built-in-skills:/var/www/hermes-built-in-skills:ro
 /var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
+/var/www/hermes-bioclaw-skills:/var/www/hermes-bioclaw-skills:ro
 ```
 
 Current important service environment:

@@ -119,9 +119,14 @@ def test_install_community_skill_rejects_source_outside_root(monkeypatch, tmp_pa
 
 def test_install_community_skill_accepts_builtin_and_optional_roots(monkeypatch, tmp_path):
     copied_sources = []
+    root_names = (
+        "hermes-built-in-skills",
+        "hermes-optional-skills",
+        "hermes-bioclaw-skills",
+    )
     source_paths = {
         root_name: str(Path(f"/var/www/{root_name}/git-commit-ai").resolve())
-        for root_name in ("hermes-built-in-skills", "hermes-optional-skills")
+        for root_name in root_names
     }
     skill_md_paths = {
         root_name: str((Path(source_path) / "SKILL.md").resolve())
@@ -162,7 +167,7 @@ def test_install_community_skill_accepts_builtin_and_optional_roots(monkeypatch,
     monkeypatch.setattr(Path, "is_file", fake_is_file)
     monkeypatch.setattr(shutil, "copytree", fake_copytree)
 
-    for root_name in ("hermes-built-in-skills", "hermes-optional-skills"):
+    for root_name in root_names:
         skill_dir = source_paths[root_name]
         target_skills = tmp_path / root_name / "profiles" / "xiongmao" / "skills"
 
@@ -181,6 +186,7 @@ def test_install_community_skill_accepts_builtin_and_optional_roots(monkeypatch,
     assert copied_sources == [
         source_paths["hermes-built-in-skills"],
         source_paths["hermes-optional-skills"],
+        source_paths["hermes-bioclaw-skills"],
     ]
 
 

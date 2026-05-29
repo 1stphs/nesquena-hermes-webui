@@ -65,6 +65,7 @@ def _community_skill_roots() -> tuple[Path, ...]:
         _community_skills_root(),
         Path("/var/www/hermes-built-in-skills").resolve(),
         Path("/var/www/hermes-optional-skills").resolve(),
+        Path("/var/www/hermes-bioclaw-skills").resolve(),
     )
 
 
