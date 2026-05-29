@@ -441,3 +441,168 @@ class TestCredentialPoolBackwardCompat(unittest.TestCase):
         # Agent was constructed successfully
         self.assertIn("session_id", captured["init_kwargs"])
         self.assertEqual(captured["init_kwargs"]["session_id"], "sess-compat-test")
+
+
+class TestWebuiGlobalEphemeralPrompt(unittest.TestCase):
+    """Verify WebUI agent runs receive the profile-local cron prompt."""
+
+    def _run_streaming_capture(self, *, personality=None, config=None):
+        import api.streaming as streaming
+
+        captured = {}
+        session_id = f"sess-webui-prompt-{personality or 'none'}"
+        stream_id = f"stream-webui-prompt-{personality or 'none'}"
+        profile_name = "default_366843698282497"
+        profile_home = pathlib.Path(
+            "/var/www/hermes-agent/.hermes/profiles/default_366843698282497"
+        )
+
+        class FakeSession:
+            def __init__(self):
+                self.session_id = session_id
+                self.title = "Prompt Test"
+                self.workspace = "/tmp"
+                self.model = "gpt-5.4"
+                self.messages = []
+                self.context_messages = []
+                self.personality = personality
+                self.profile = profile_name
+                self.input_tokens = 0
+                self.output_tokens = 0
+                self.estimated_cost = None
+                self.tool_calls = []
+                self.active_stream_id = None
+                self.pending_user_message = None
+                self.pending_attachments = []
+                self.pending_started_at = None
+                self.gateway_routing = None
+                self.gateway_routing_history = []
+
+            def save(self, *args, **kwargs):
+                self._saved = True
+
+            def compact(self):
+                return {
+                    "session_id": self.session_id,
+                    "title": self.title,
+                    "workspace": self.workspace,
+                    "model": self.model,
+                    "created_at": 0,
+                    "updated_at": 0,
+                    "pinned": False,
+                    "archived": False,
+                    "project_id": None,
+                    "profile": self.profile,
+                    "input_tokens": self.input_tokens,
+                    "output_tokens": self.output_tokens,
+                    "estimated_cost": self.estimated_cost,
+                    "personality": self.personality,
+                }
+
+        class CapturingAgent:
+            def __init__(self, model=None, provider=None, base_url=None, api_key=None,
+                         platform=None, quiet_mode=False, enabled_toolsets=None,
+                         fallback_model=None, session_id=None, session_db=None,
+                         stream_delta_callback=None, reasoning_callback=None,
+                         tool_progress_callback=None, clarify_callback=None, **kwargs):
+                self.session_id = session_id
+                self.context_compressor = None
+                self.session_prompt_tokens = 0
+                self.session_completion_tokens = 0
+                self.session_estimated_cost_usd = None
+                self.reasoning_config = None
+                self.ephemeral_system_prompt = None
+                self._last_error = None
+
+            def run_conversation(self, **kwargs):
+                captured["ephemeral_system_prompt"] = self.ephemeral_system_prompt
+                captured["run_kwargs"] = kwargs
+                return {
+                    "messages": [
+                        {"role": "user", "content": kwargs.get("persist_user_message", "")},
+                        {"role": "assistant", "content": "ok"},
+                    ]
+                }
+
+            def interrupt(self, _message):
+                captured["interrupted"] = True
+
+        fake_rt_module = types.ModuleType("hermes_cli.runtime_provider")
+        fake_rt_module.resolve_runtime_provider = mock.Mock(return_value={
+            "provider": "openai",
+            "base_url": None,
+            "api_key": "sk-test",
+            "api_mode": "chat_completions",
+            "command": None,
+            "args": [],
+            "credential_pool": None,
+        })
+        fake_hermes_cli = types.ModuleType("hermes_cli")
+        fake_hermes_cli.runtime_provider = fake_rt_module
+        fake_hermes_state = types.ModuleType("hermes_state")
+        fake_hermes_state.SessionDB = mock.Mock(return_value=None)
+
+        with mock.patch.object(streaming, "get_session", return_value=FakeSession()), \
+             mock.patch.object(streaming, "_get_ai_agent", return_value=CapturingAgent), \
+             mock.patch.object(streaming, "resolve_model_provider", return_value=("gpt-5.4", "openai", None)), \
+             mock.patch("api.config.get_config", return_value=config or {}), \
+             mock.patch("api.config._resolve_cli_toolsets", return_value=[]), \
+             mock.patch("api.profiles.get_hermes_home_for_profile", return_value=profile_home), \
+             mock.patch("api.profiles.get_profile_runtime_env", return_value={}), \
+             mock.patch.dict(sys.modules, {
+                 "hermes_cli": fake_hermes_cli,
+                 "hermes_cli.runtime_provider": fake_rt_module,
+                 "hermes_state": fake_hermes_state,
+             }):
+            streaming.STREAMS[stream_id] = queue.Queue()
+            try:
+                streaming._run_agent_streaming(
+                    session_id=session_id,
+                    msg_text="hello",
+                    model="gpt-5.4",
+                    workspace="/tmp",
+                    stream_id=stream_id,
+                    ephemeral=True,
+                )
+            finally:
+                streaming.STREAMS.pop(stream_id, None)
+                streaming.AGENT_INSTANCES.pop(stream_id, None)
+
+        captured["profile_home"] = str(profile_home)
+        return captured
+
+    def test_streaming_combines_global_cron_prompt_with_personality_prompt(self):
+        captured = self._run_streaming_capture(
+            personality="ops",
+            config={
+                "agent": {
+                    "personalities": {
+                        "ops": {
+                            "system_prompt": "PERSONALITY PROMPT",
+                            "tone": "direct",
+                            "style": "brief",
+                        }
+                    }
+                }
+            },
+        )
+
+        prompt = captured["ephemeral_system_prompt"]
+        assert "WebUI 全局定时任务规则" in prompt
+        assert f'{captured["profile_home"]}/cron/jobs.json' in prompt
+        assert "不要写入 root/default 的 cron/jobs.json" in prompt
+        assert "PERSONALITY PROMPT" in prompt
+        assert "Tone: direct" in prompt
+        assert "Style: brief" in prompt
+
+        system_message = captured["run_kwargs"]["system_message"]
+        assert system_message.startswith("Active workspace at session start:")
+        assert "WebUI 全局定时任务规则" not in system_message
+
+    def test_streaming_sets_global_cron_prompt_without_personality_prompt(self):
+        captured = self._run_streaming_capture(personality=None, config={})
+
+        prompt = captured["ephemeral_system_prompt"]
+        assert "WebUI 全局定时任务规则" in prompt
+        assert f'{captured["profile_home"]}/cron/jobs.json' in prompt
+        assert "PERSONALITY PROMPT" not in prompt

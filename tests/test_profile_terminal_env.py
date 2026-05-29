@@ -91,3 +91,30 @@ def test_streaming_thread_env_allows_profile_terminal_cwd_override():
     assert env["HERMES_SESSION_KEY"] == "active-session"
     assert env["HERMES_HOME"] == "/active/profile/home"
     assert env["TERMINAL_ENV"] == "ssh"
+
+
+def test_webui_global_ephemeral_prompt_includes_profile_cron_path():
+    from api.streaming import _build_webui_global_ephemeral_prompt
+
+    profile_home = "/var/www/hermes-agent/.hermes/profiles/default_366843698282497"
+
+    prompt = _build_webui_global_ephemeral_prompt(
+        "default_366843698282497",
+        profile_home,
+    )
+
+    assert 'profile_name 是 "default_366843698282497"' in prompt
+    assert f'profile_home 是 "{profile_home}"' in prompt
+    assert f"{profile_home}/cron/jobs.json" in prompt
+    assert "不要写入 root/default 的 cron/jobs.json" in prompt
+
+
+def test_webui_global_ephemeral_prompt_defaults_empty_profile_name():
+    from api.streaming import _build_webui_global_ephemeral_prompt
+
+    profile_home = "/var/www/hermes-agent/.hermes"
+
+    prompt = _build_webui_global_ephemeral_prompt(None, profile_home)
+
+    assert 'profile_name 是 "default"' in prompt
+    assert f'{profile_home}/cron/jobs.json' in prompt

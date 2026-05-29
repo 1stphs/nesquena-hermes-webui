@@ -391,6 +391,25 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
     return env
 
 
+def _build_webui_global_ephemeral_prompt(profile_name, profile_home) -> str:
+    """构造 WebUI 每轮对话注入给 Hermes Agent 的全局临时提示词。"""
+    display_profile_name = str(profile_name or '').strip() or 'default'
+    profile_home_text = str(profile_home or '')
+    profile_cron_jobs_file = str(Path(profile_home_text) / 'cron' / 'jobs.json')
+    return (
+        'WebUI 全局定时任务规则：\n'
+        f'当前对话 profile_name 是 "{display_profile_name}"。\n'
+        f'当前对话 profile_home 是 "{profile_home_text}"。\n'
+        f'当前 profile 的 cron jobs 文件是 "{profile_cron_jobs_file}"。\n\n'
+        '当用户要求创建、查看、更新、删除定时任务、提醒、周期任务、cron 或 schedule 时：\n'
+        '1. 必须只操作当前 profile 的 cron jobs 文件。\n'
+        '2. 创建 cron 时必须确保任务写入当前 profile 的 cron jobs 文件，不要写入 root/default 的 cron/jobs.json。\n'
+        '3. 不要跨 profile 查看、修改或删除其他智能体的定时任务。\n'
+        '4. 创建成功后必须回复 job_id、任务名称、schedule、next_run_at，以及实际写入的 cron jobs 文件路径。\n'
+        '5. 如果工具调用无法确认实际写入路径，必须明确说明“未能确认写入当前 profile cron 文件”，不要声称前端一定可见。'
+    )
+
+
 def _attachment_name(att) -> str:
     if isinstance(att, dict):
         return str(att.get('name') or att.get('filename') or att.get('path') or '').strip()
@@ -1836,6 +1855,7 @@ def _run_agent_streaming(
     old_session_key = None
     old_hermes_home = None
     old_profile_env = {}
+    _ephemeral_system_prompt = None
 
     # ── MCP Server Discovery (lazy import, idempotent) ──
     # discover_mcp_tools() is called here (rather than at server startup) so that
@@ -2501,9 +2521,16 @@ def _run_agent_streaming(
                         _personality_prompt = '\n'.join(p for p in _parts if p)
                     else:
                         _personality_prompt = str(_pval)
-            # Pass personality via ephemeral_system_prompt (agent's own mechanism)
+            # 每轮都刷新全局 prompt，避免复用 cached agent 时沿用上一轮状态。
+            _global_prompt = _build_webui_global_ephemeral_prompt(
+                getattr(s, 'profile', None),
+                _profile_home,
+            )
+            _ephemeral_parts = [_global_prompt]
             if _personality_prompt:
-                agent.ephemeral_system_prompt = _personality_prompt
+                _ephemeral_parts.append(_personality_prompt)
+            _ephemeral_system_prompt = '\n\n'.join(p for p in _ephemeral_parts if p) or None
+            agent.ephemeral_system_prompt = _ephemeral_system_prompt
             _pending_started_at = getattr(s, 'pending_started_at', None)
             # Normal chat-start sets pending_started_at before spawning this thread;
             # fallback to now only for recovered/legacy flows where that marker is absent
@@ -2670,6 +2697,7 @@ def _run_agent_streaming(
                             if 'credential_pool' in _agent_params:
                                 _agent_kwargs['credential_pool'] = _heal_rt.get('credential_pool')
                             agent = _AIAgent(**_agent_kwargs)
+                            agent.ephemeral_system_prompt = _ephemeral_system_prompt
                             with STREAMS_LOCK:
                                 AGENT_INSTANCES[stream_id] = agent
                             from api.config import SESSION_AGENT_CACHE as _SAC, SESSION_AGENT_CACHE_LOCK as _SAC_L
@@ -3139,6 +3167,7 @@ def _run_agent_streaming(
                     if 'credential_pool' in _agent_params:
                         _heal_kwargs['credential_pool'] = _heal_rt.get('credential_pool')
                     _heal_agent = _AIAgent(**_heal_kwargs)
+                    _heal_agent.ephemeral_system_prompt = _ephemeral_system_prompt
                     with STREAMS_LOCK:
                         AGENT_INSTANCES[stream_id] = _heal_agent
                     from api.config import SESSION_AGENT_CACHE as _SAC2, SESSION_AGENT_CACHE_LOCK as _SAC2_L
