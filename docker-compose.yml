@@ -15,11 +15,7 @@ services:
       - /var/www/hermes-agent/.hermes:/home/hermeswebui/.hermes
       - /var/www/hermes-agent/.hermes:/.hermes
       - ./hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
-      - /var/www/hermes-community-skills:/var/www/hermes-community-skills:ro
-      - /var/www/hermes-built-in-skills:/var/www/hermes-built-in-skills:ro
-      - /var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
-      - /var/www/hermes-bioclaw-skills:/var/www/hermes-bioclaw-skills:ro
-      - /var/www/hermes_talent_market:/var/www/hermes_talent_market:ro 
+      - /var/www/hermes_skills_hub:/var/www/hermes_skills_hub:ro
 
     environment:
       # macOS bind mounts often use UID/GID 501+; run `id -u` and `id -g`
@@ -33,5 +29,11 @@ services:
       HERMES_WEBUI_DEFAULT_WORKSPACE: "/.hermes/profiles"
       HERMES_HOME: "/home/hermeswebui/.hermes"
       HERMES_WEBUI_AGENT_DIR: "/home/hermeswebui/.hermes/hermes-agent"
+      HERMES_SKILLS_HUB_DIR: "/var/www/hermes_skills_hub"
+      HERMES_COMMUNITY_SKILLS_DIR: "/var/www/hermes_skills_hub/hermes-community-skills"
+      HERMES_BUILT_IN_SKILLS_DIR: "/var/www/hermes_skills_hub/hermes-built-in-skills"
+      HERMES_OPTIONAL_SKILLS_DIR: "/var/www/hermes_skills_hub/hermes-optional-skills"
+      HERMES_BIOCLAW_SKILLS_DIR: "/var/www/hermes_skills_hub/hermes-bioclaw-skills"
+      HERMES_TALENT_MARKET_DIR: "/var/www/hermes_skills_hub/hermes_talent_market"
       HERMES_WEBUI_PASSWORD: "foxu_ai_is_best"
       HERMES_WEBUI_CORS_ALLOW_ALL: "1"

@@ -561,9 +561,15 @@ def _handle_profile_agents_list(handler):
     })
 
 def _talent_market_profiles_root() -> Path:
-    return Path(
-        os.getenv("HERMES_TALENT_MARKET_DIR", "/var/www/hermes_talent_market")
-    ).expanduser().resolve()
+    raw = os.getenv("HERMES_TALENT_MARKET_DIR", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+
+    hub_root = os.getenv("HERMES_SKILLS_HUB_DIR", "").strip()
+    if hub_root:
+        return (Path(hub_root).expanduser() / "hermes_talent_market").resolve()
+
+    return Path("/var/www/hermes_talent_market").expanduser().resolve()
 
 def _coerce_profile_install_path(raw_path: str) -> Path:
     value = str(raw_path or "").strip()

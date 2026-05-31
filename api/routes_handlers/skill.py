@@ -54,18 +54,61 @@ def _handle_skill_delete(handler, body):
     return _routes_binding("j")(handler, {"ok": True, "name": body["name"]})
 
 
+def _configured_skills_source_root(
+    env_names: tuple[str, ...],
+    legacy_default: str,
+    hub_child: str,
+) -> Path:
+    for env_name in env_names:
+        raw = os.getenv(env_name, "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+
+    hub_root = os.getenv("HERMES_SKILLS_HUB_DIR", "").strip()
+    if hub_root:
+        return (Path(hub_root).expanduser() / hub_child).resolve()
+
+    return Path(legacy_default).expanduser().resolve()
+
+
 def _community_skills_root() -> Path:
-    return Path(
-        os.getenv("HERMES_COMMUNITY_SKILLS_DIR", "/var/www/hermes-community-skills")
-    ).expanduser().resolve()
+    return _configured_skills_source_root(
+        ("HERMES_COMMUNITY_SKILLS_DIR",),
+        "/var/www/hermes-community-skills",
+        "hermes-community-skills",
+    )
+
+
+def _built_in_skills_root() -> Path:
+    return _configured_skills_source_root(
+        ("HERMES_BUILT_IN_SKILLS_DIR", "HERMES_BUILTIN_SKILLS_DIR"),
+        "/var/www/hermes-built-in-skills",
+        "hermes-built-in-skills",
+    )
+
+
+def _optional_skills_root() -> Path:
+    return _configured_skills_source_root(
+        ("HERMES_OPTIONAL_SKILLS_DIR",),
+        "/var/www/hermes-optional-skills",
+        "hermes-optional-skills",
+    )
+
+
+def _bioclaw_skills_root() -> Path:
+    return _configured_skills_source_root(
+        ("HERMES_BIOCLAW_SKILLS_DIR",),
+        "/var/www/hermes-bioclaw-skills",
+        "hermes-bioclaw-skills",
+    )
 
 
 def _community_skill_roots() -> tuple[Path, ...]:
     return (
         _community_skills_root(),
-        Path("/var/www/hermes-built-in-skills").resolve(),
-        Path("/var/www/hermes-optional-skills").resolve(),
-        Path("/var/www/hermes-bioclaw-skills").resolve(),
+        _built_in_skills_root(),
+        _optional_skills_root(),
+        _bioclaw_skills_root(),
     )
 
 
