@@ -28,6 +28,7 @@ copilot-instructions.md
 # Generated screenshots and transient artifacts
 screenshot-*.png
 full-UI.png
+hermes-agent-src/build/
 
 # Local test suite; keep on disk but do not upload to git.
 tests/
