@@ -5,27 +5,40 @@ LABEL description="Hermes Web UI — browser interface for Hermes Agent"
 
 # Install system packages
 ENV DEBIAN_FRONTEND=noninteractive
+ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
+ARG APT_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG UV_VERSION=0.11.16
 
 # Make use of apt-cacher-ng if available
-RUN if [ "A${BUILD_APT_PROXY:-}" != "A" ]; then \
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i \
+          -e "s|http://deb.debian.org/debian|${APT_MIRROR}|g" \
+          -e "s|http://security.debian.org/debian-security|${APT_SECURITY_MIRROR}|g" \
+          -e "s|http://deb.debian.org/debian-security|${APT_SECURITY_MIRROR}|g" \
+          /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+        sed -i \
+          -e "s|http://deb.debian.org/debian|${APT_MIRROR}|g" \
+          -e "s|http://security.debian.org/debian-security|${APT_SECURITY_MIRROR}|g" \
+          -e "s|http://deb.debian.org/debian-security|${APT_SECURITY_MIRROR}|g" \
+          /etc/apt/sources.list; \
+    fi; \
+    if [ "A${BUILD_APT_PROXY:-}" != "A" ]; then \
         echo "Using APT proxy: ${BUILD_APT_PROXY}"; \
         printf 'Acquire::http::Proxy "%s";\n' "$BUILD_APT_PROXY" > /etc/apt/apt.conf.d/01proxy; \
-    fi \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates wget gnupg \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
-RUN apt-get update -y --fix-missing --no-install-recommends \
+    fi; \
+    apt-get update -y --fix-missing \
     && apt-get install -y --no-install-recommends \
-    apt-utils \
-    locales \
-    ca-certificates \
-    sudo \
-    curl \
-    rsync \
-    openssh-client \
-    && apt-get upgrade -y \
+      ca-certificates \
+      curl \
+      gnupg \
+      locales \
+      openssh-client \
+      rsync \
+      sudo \
+      wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -71,9 +84,9 @@ RUN rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/01proxy \
 USER root
 
 # Pre-install uv system-wide so the container doesn't need internet access at runtime.
-# Installing as root places uv in /usr/local/bin, available to all users.
-# The init script will skip the download when uv is already on PATH.
-RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+# Install a fixed version from the configured PyPI mirror instead of fetching
+# the remote installer script from astral.sh during every uncached build.
+RUN python -m pip install --no-cache-dir -i "${PYPI_INDEX_URL}" "uv==${UV_VERSION}"
 
 USER hermeswebuitoo
 

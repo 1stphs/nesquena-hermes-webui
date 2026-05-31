@@ -338,13 +338,21 @@ else
     fi
   done
   if [ -n "$_agent_src" ]; then
-    if ! uv pip install "$_agent_src[all]" --trusted-host pypi.org --trusted-host files.pythonhosted.org; then
+    if ! uv pip install "$_agent_src" --trusted-host pypi.org --trusted-host files.pythonhosted.org; then
       echo ""
       echo "!! WARNING: Failed to install hermes-agent's requirements."
       echo "!! The WebUI will start with reduced functionality (no model auto-detection,"
       echo "!! no personality routing, no CLI session imports)."
       echo "!! Check the mounted hermes-agent dependencies or package index before relying"
       echo "!! on agent-backed features."
+      echo ""
+    elif ! uv pip install "$_agent_src[all]" --trusted-host pypi.org --trusted-host files.pythonhosted.org; then
+      echo ""
+      echo "!! WARNING: Failed to install hermes-agent optional [all] dependencies."
+      echo "!! Core agent-backed chat features should still work, but optional providers,"
+      echo "!! messaging integrations, voice, and other extras may be unavailable."
+      echo "!! Check the mounted hermes-agent dependencies or package index if you need"
+      echo "!! those optional features."
       echo ""
     fi
   else
