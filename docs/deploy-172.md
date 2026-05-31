@@ -54,7 +54,7 @@ source dir:         /var/www/nesquena-hermes-webui
 Hermes home:        /root/.hermes
 API service state:  /root/.hermes/webui-mvp
 workspace:          /root/.hermes/workspace
-agent src:          /var/www/hermes-agent-src
+agent src:          /var/www/nesquena-hermes-webui/hermes-agent-src
 ```
 
 The API service container sees those paths as:
@@ -70,7 +70,7 @@ Current important mounts:
 
 ```text
 /root/.hermes:/home/hermeswebui/.hermes
-/var/www/hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
+/var/www/nesquena-hermes-webui/hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
 /var/www/hermes-community-skills:/var/www/hermes-community-skills:ro
 /var/www/hermes-built-in-skills:/var/www/hermes-built-in-skills:ro
 /var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
