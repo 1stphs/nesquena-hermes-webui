@@ -390,7 +390,7 @@ def _handle_chat_sync(handler, body):
         )[:2]
         s.model = model
         s.model_provider = model_provider
-    from api.streaming import _ENV_LOCK
+    from api.streaming import _ENV_LOCK, _aiagent_import_error_detail, _get_ai_agent
 
     with _ENV_LOCK:
         old_cwd = os.environ.get("TERMINAL_CWD")
@@ -400,7 +400,9 @@ def _handle_chat_sync(handler, body):
         os.environ["HERMES_EXEC_ASK"] = "1"
         os.environ["HERMES_SESSION_KEY"] = s.session_id
     try:
-        from run_agent import AIAgent
+        AIAgent = _get_ai_agent()
+        if AIAgent is None:
+            raise ImportError(_aiagent_import_error_detail())
 
         with CHAT_LOCK:
             from api.config import resolve_model_provider

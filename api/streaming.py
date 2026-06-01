@@ -58,6 +58,13 @@ def _get_ai_agent():
             AIAgent = _cls
         except ImportError:
             pass
+    if AIAgent is not None:
+        try:
+            from api.services.cron_service import install_webui_cronjob_bridge
+
+            install_webui_cronjob_bridge()
+        except Exception:
+            logger.debug("Failed to install WebUI cronjob bridge", exc_info=True)
     return AIAgent
 
 
