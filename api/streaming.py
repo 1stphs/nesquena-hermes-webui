@@ -154,9 +154,20 @@ def _classify_provider_error(err_str: str, exc=None, *, silent_failure: bool = F
     return {'label': 'Error', 'type': 'error', 'hint': ''}
 
 
-def _provider_error_payload(message: str, err_type: str, hint: str = '') -> dict:
+def _force_redact_user_provider_secret(message: str, provider_api_key: str = '') -> str:
+    if not provider_api_key:
+        return str(message or '')
+    try:
+        from api.user_provider import force_redact_provider_secret
+
+        return force_redact_provider_secret(message, provider_api_key)
+    except Exception:
+        return str(message or '').replace(str(provider_api_key), '***')
+
+
+def _provider_error_payload(message: str, err_type: str, hint: str = '', *, provider_api_key: str = '') -> dict:
     """Build a bounded, redacted apperror payload with provider details."""
-    _message = str(message or '')
+    _message = _force_redact_user_provider_secret(str(message or ''), provider_api_key)
     _safe_message = _redact_text(_message).strip() if _message else ''
     payload: dict = {'message': _safe_message or _message, 'type': err_type}
     if hint:
@@ -1861,6 +1872,7 @@ def _run_agent_streaming(
     *,
     ephemeral=False,
     model_provider=None,
+    user_id=None,
 ):
     """Run agent in background thread, writing SSE events to STREAMS[stream_id].
 
@@ -1878,6 +1890,9 @@ def _run_agent_streaming(
     old_hermes_home = None
     old_profile_env = {}
     _ephemeral_system_prompt = None
+    _user_provider_resolution = None
+    _user_provider_active = False
+    _user_provider_api_key = ''
 
     # ── MCP Server Discovery (lazy import, idempotent) ──
     # discover_mcp_tools() is called here (rather than at server startup) so that
@@ -2260,27 +2275,60 @@ def _run_agent_streaming(
                 _session_db = SessionDB()
             except Exception as _db_err:
                 print(f"[webui] WARNING: SessionDB init failed — session_search will be unavailable: {_db_err}", flush=True)
-            resolved_model, resolved_provider, resolved_base_url = resolve_model_provider(
-                model_with_provider_context(model, provider_context)
-            )
-
-            # Resolve API key via Hermes runtime provider (matches gateway behaviour).
-            # Pass the resolved provider so non-default providers get their own credentials.
-            resolved_api_key = None
-            try:
-                from api.oauth import resolve_runtime_provider_with_anthropic_env_lock
-                from hermes_cli.runtime_provider import resolve_runtime_provider
-                _rt = resolve_runtime_provider_with_anthropic_env_lock(
-                    resolve_runtime_provider,
-                    requested=resolved_provider,
+            effective_user_id = user_id or getattr(s, "user_id", None)
+            if effective_user_id:
+                from api.user_provider import (
+                    is_user_provider_runtime_enabled,
+                    resolve_user_provider,
                 )
-                resolved_api_key = _rt.get("api_key")
-                if not resolved_provider:
-                    resolved_provider = _rt.get("provider")
-                if not resolved_base_url:
-                    resolved_base_url = _rt.get("base_url")
-            except Exception as _e:
-                print(f"[webui] WARNING: resolve_runtime_provider failed: {_e}", flush=True)
+
+                # Provider runtime is disabled unless trusted NoCoBase bearer
+                # binding is enabled. The unsafe X-User-Id branch remains
+                # diagnostic-only behind its own explicit switch.
+                if is_user_provider_runtime_enabled():
+                    _user_provider_resolution = resolve_user_provider(effective_user_id)
+                    _user_provider_active = bool(_user_provider_resolution and _user_provider_resolution.is_active)
+
+            if _user_provider_active:
+                from api.user_provider import CANONICAL_AGENT_PROVIDER, _validate_base_url
+
+                _provider = _user_provider_resolution.provider or {}
+                resolved_model = str(model or _provider.get("model_name") or "").strip()
+                resolved_provider = CANONICAL_AGENT_PROVIDER
+                resolved_base_url = _validate_base_url(str(_provider.get("base_url") or "").strip())
+                resolved_api_key = str(_provider.get("api_key") or "").strip()
+                _user_provider_api_key = resolved_api_key
+                _rt = {
+                    "provider": resolved_provider,
+                    "base_url": resolved_base_url,
+                    "api_key": resolved_api_key,
+                    "api_mode": str(_provider.get("api_mode") or "").strip(),
+                    "command": None,
+                    "args": None,
+                    "credential_pool": None,
+                }
+            else:
+                resolved_model, resolved_provider, resolved_base_url = resolve_model_provider(
+                    model_with_provider_context(model, provider_context)
+                )
+
+                # Resolve API key via Hermes runtime provider (matches gateway behaviour).
+                # Pass the resolved provider so non-default providers get their own credentials.
+                resolved_api_key = None
+                try:
+                    from api.oauth import resolve_runtime_provider_with_anthropic_env_lock
+                    from hermes_cli.runtime_provider import resolve_runtime_provider
+                    _rt = resolve_runtime_provider_with_anthropic_env_lock(
+                        resolve_runtime_provider,
+                        requested=resolved_provider,
+                    )
+                    resolved_api_key = _rt.get("api_key")
+                    if not resolved_provider:
+                        resolved_provider = _rt.get("provider")
+                    if not resolved_base_url:
+                        resolved_base_url = _rt.get("base_url")
+                except Exception as _e:
+                    print(f"[webui] WARNING: resolve_runtime_provider failed: {_e}", flush=True)
 
             # Read per-profile config at call time (not module-level snapshot)
             from api.config import get_config as _get_config
@@ -2368,6 +2416,16 @@ def _run_agent_streaming(
                 _reasoning_config = _parse_reff(_effort_raw)
             except Exception:
                 _reasoning_config = None
+            if _user_provider_active:
+                _thinking_level = str((_user_provider_resolution.provider or {}).get("thinking_level") or "").strip().lower()
+                if _thinking_level:
+                    try:
+                        from api.config import parse_reasoning_effort as _parse_reff
+                        _provider_reasoning = _parse_reff(_thinking_level)
+                    except Exception:
+                        _provider_reasoning = None
+                    if _provider_reasoning is not None:
+                        _reasoning_config = _provider_reasoning
 
             _agent_kwargs = dict(
                 model=resolved_model,
@@ -2425,11 +2483,13 @@ def _run_agent_streaming(
                 import hashlib as _hashlib
                 import json as _json
                 from api.config import SESSION_AGENT_CACHE, SESSION_AGENT_CACHE_LOCK
+                from api.user_provider import provider_runtime_signature
                 _sig_blob = _json.dumps([
                     resolved_model or '',
                     _hashlib.sha256((resolved_api_key or '').encode()).hexdigest()[:16],
                     resolved_base_url or '',
                     resolved_provider or '',
+                    provider_runtime_signature(_user_provider_resolution),
                     _max_tokens_cfg or '',
                     _fallback_resolved or {},
                     sorted(_toolsets) if _toolsets else [],
@@ -2695,7 +2755,7 @@ def _run_agent_streaming(
                         _err_label = _classification['label']
                         _err_type = _classification['type']
                         _err_hint = _classification['hint']
-                    elif _is_auth and not _self_healed:
+                    elif _is_auth and not _self_healed and not _user_provider_active:
                         # ── Credential self-heal on 401 (#1401) ──
                         # Before emitting the error, try re-reading credentials
                         # and retrying once with a fresh agent.
@@ -2789,11 +2849,18 @@ def _run_agent_streaming(
                     elif _is_auth:
                         _err_label = 'Authentication failed'
                         _err_type = 'auth_mismatch'
-                        _err_hint = (
-                            'The selected model may not be supported by your configured provider or '
-                            'your API key is invalid. Run `hermes model` in your terminal to '
-                            'update credentials, then restart the WebUI.'
-                        )
+                        if _user_provider_active:
+                            _err_hint = (
+                                'The selected model may not be supported by your custom provider '
+                                'or the provider API key is invalid. Test or update the provider '
+                                'in account settings.'
+                            )
+                        else:
+                            _err_hint = (
+                                'The selected model may not be supported by your configured provider or '
+                                'your API key is invalid. Run `hermes model` in your terminal to '
+                                'update credentials, then restart the WebUI.'
+                            )
                     else:
                         _err_label = _classification['label']
                         _err_type = _classification['type']
@@ -2809,6 +2876,7 @@ def _run_agent_streaming(
                             _err_str or f'{_err_label}.',
                             _err_type,
                             _err_hint,
+                            provider_api_key=_user_provider_api_key,
                         )
                         put('apperror', _error_payload)
                         # Clear stream/pending state so the session does not appear
@@ -3167,7 +3235,7 @@ def _run_agent_streaming(
                 _classification['label'], _classification['type'], _classification['hint'],
             )
         elif _exc_is_auth:
-            if not _self_healed:
+            if not _self_healed and not _user_provider_active:
                 # ── Credential self-heal on 401 (#1401) ──
                 _heal_rt = _attempt_credential_self_heal(
                     resolved_provider or '', session_id, _agent_lock,
@@ -3234,11 +3302,19 @@ def _run_agent_streaming(
                         logger.warning('[webui] self-heal (except path): retry failed: %s', _retry_exc2)
                         # Fall through to emit the original error
             # Self-heal didn't apply or retry failed — emit the auth error
-            _exc_label, _exc_type, _exc_hint = (
-                'Authentication error', 'auth_mismatch',
-                'The selected model may not be supported by your configured provider. '
-                'Run `hermes model` in your terminal to switch providers, then restart the WebUI.',
-            )
+            if _user_provider_active:
+                _exc_label, _exc_type, _exc_hint = (
+                    'Authentication error', 'auth_mismatch',
+                    'The selected model may not be supported by your custom provider, '
+                    'or the provider API key is invalid. Test or update the provider '
+                    'in account settings.',
+                )
+            else:
+                _exc_label, _exc_type, _exc_hint = (
+                    'Authentication error', 'auth_mismatch',
+                    'The selected model may not be supported by your configured provider. '
+                    'Run `hermes model` in your terminal to switch providers, then restart the WebUI.',
+                )
         elif _exc_is_not_found:
             _exc_label, _exc_type, _exc_hint = (
                 _classification['label'], _classification['type'], _classification['hint'],
@@ -3246,7 +3322,13 @@ def _run_agent_streaming(
         else:
             _exc_label, _exc_type, _exc_hint = 'Error', 'error', ''
 
-        _error_payload = _provider_error_payload(err_str, _exc_type, _exc_hint)
+        err_str = _force_redact_user_provider_secret(err_str, _user_provider_api_key)
+        _error_payload = _provider_error_payload(
+            err_str,
+            _exc_type,
+            _exc_hint,
+            provider_api_key=_user_provider_api_key,
+        )
         if s is not None:
             if _checkpoint_stop is not None:
                 _checkpoint_stop.set()

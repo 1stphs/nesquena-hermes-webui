@@ -124,7 +124,20 @@ self.addEventListener('fetch', () => {});
         return True
 
     if parsed.path == "/api/models":
-        return j(handler, get_available_models())
+        from api.user_provider import (
+            UserProviderAuthError,
+            build_user_provider_models_payload,
+            is_user_provider_nocobase_auth_enabled,
+            verified_user_id_from_handler,
+        )
+
+        user_id = None
+        try:
+            if is_user_provider_nocobase_auth_enabled():
+                user_id = verified_user_id_from_handler(handler)
+            return j(handler, build_user_provider_models_payload(user_id, get_available_models))
+        except UserProviderAuthError as exc:
+            return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
 
     if parsed.path == "/api/models/live":
         return _handle_live_models(handler, parsed)
@@ -1055,6 +1068,23 @@ def dispatch_post(handler, parsed) -> bool:
             workspace = str(resolve_trusted_workspace(body.get("workspace"))) if body.get("workspace") else None
         except ValueError as e:
             return bad(handler, str(e))
+        user_id = None
+        from api.user_provider import (
+            is_user_provider_nocobase_auth_enabled,
+        )
+
+        if is_user_provider_nocobase_auth_enabled():
+            try:
+                from api.user_provider import (
+                    UserProviderAuthError,
+                    verified_user_id_from_handler,
+                    verify_user_profile_access,
+                )
+
+                user_id = verified_user_id_from_handler(handler)
+                verify_user_profile_access(user_id, body.get("profile"))
+            except UserProviderAuthError as exc:
+                return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
         model, model_provider = _session_model_state_from_request(
             body.get("model"),
             body.get("model_provider"),
@@ -1068,6 +1098,8 @@ def dispatch_post(handler, parsed) -> bool:
             profile=body.get("profile") or None,
             project_id=body.get("project_id") or None,
         )
+        if user_id:
+            s.user_id = user_id
         return j(handler, {"session": s.compact() | {"messages": s.messages}})
 
     if parsed.path == "/api/session/duplicate":
@@ -1163,6 +1195,11 @@ def dispatch_post(handler, parsed) -> bool:
         if not result.get("ok"):
             return bad(handler, result.get("error", "Unknown error"))
         return j(handler, result)
+
+    if parsed.path in ("/api/user-ai-providers/test", "/api/user-provider/test"):
+        from api.user_provider import test_user_provider_connection
+
+        return j(handler, test_user_provider_connection(None, body))
 
     if parsed.path == "/api/reasoning":
         # CLI-parity /reasoning handler — writes to the same config.yaml keys

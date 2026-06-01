@@ -252,6 +252,24 @@ def _handle_chat_start(handler, body):
     msg = str(body.get("message", "")).strip()
     if not msg:
         return bad(handler, "message is required")
+    user_id = None
+    from api.user_provider import (
+        is_user_provider_nocobase_auth_enabled,
+    )
+
+    if is_user_provider_nocobase_auth_enabled():
+        try:
+            from api.user_provider import (
+                UserProviderAuthError,
+                verified_user_id_from_handler,
+                verify_user_profile_access,
+            )
+
+            user_id = verified_user_id_from_handler(handler)
+            verify_user_profile_access(user_id, requested_profile or getattr(s, "profile", None))
+            s.user_id = user_id
+        except UserProviderAuthError as exc:
+            return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
     attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
     try:
         workspace = str(resolve_trusted_workspace(body.get("workspace") or s.workspace))
@@ -300,10 +318,13 @@ def _handle_chat_start(handler, body):
     stream = create_stream_channel()
     with STREAMS_LOCK:
         STREAMS[stream_id] = stream
+    stream_kwargs = {"model_provider": model_provider}
+    if user_id:
+        stream_kwargs["user_id"] = user_id
     thr = threading.Thread(
         target=_run_agent_streaming,
         args=(s.session_id, msg, model, workspace, stream_id, attachments),
-        kwargs={"model_provider": model_provider},
+        kwargs=stream_kwargs,
         daemon=True,
     )
     thr.start()
