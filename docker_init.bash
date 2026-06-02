@@ -317,6 +317,54 @@ ensure_hindsight_client_docker_dependency() {
   fi
 }
 
+ensure_hermes_agent_source_dependency() {
+  # Keep the mounted agent source authoritative. A non-editable install copies
+  # run_agent.py into site-packages, so later bind-mount updates can leave WebUI
+  # importing a stale snapshot even after container restart.
+  _agent_paths=(
+    "/home/hermeswebui/.hermes/hermes-agent"
+    "/opt/hermes"
+  )
+  _agent_src=""
+  for _p in "${_agent_paths[@]}"; do
+    if [ -d "$_p" ] && [ -f "$_p/pyproject.toml" ]; then
+      _agent_src="$_p"
+      break
+    fi
+  done
+
+  if [ -z "$_agent_src" ]; then
+    echo ""
+    echo "!! WARNING: hermes-agent source not found."
+    echo "!!   Looked in: ${_agent_paths[0]}"
+    echo "!!              ${_agent_paths[1]}"
+    echo "!! The WebUI will start with reduced functionality (no model auto-detection,"
+    echo "!! no personality routing, no CLI session imports)."
+    echo "!! To fix: mount the agent source volume into the container:"
+    echo "!!   -v /path/to/hermes-agent:/home/hermeswebui/.hermes/hermes-agent"
+    echo "!! Or set HERMES_WEBUI_AGENT_DIR to the mounted agent source path."
+    echo ""
+    return 0
+  fi
+
+  echo ""; echo "== Checking hermes-agent source dependency"
+  _run_agent_origin=$(python - <<'PY'
+import importlib.util
+
+spec = importlib.util.find_spec("run_agent")
+print(spec.origin if spec and spec.origin else "")
+PY
+  )
+  if [ "$_run_agent_origin" = "$_agent_src/run_agent.py" ]; then
+    echo "-- hermes-agent already resolves from mounted source: $_run_agent_origin"
+    return 0
+  fi
+
+  echo "-- Installing hermes-agent from mounted source in editable mode"
+  echo "-- Current run_agent origin: ${_run_agent_origin:-not found}"
+  uv pip install -e "$_agent_src" --trusted-host pypi.org --trusted-host files.pythonhosted.org || error_exit "Failed to install hermes-agent source dependency"
+}
+
 if [ -f /app/venv/.deps_installed ]; then
   echo ""; echo "== Dependencies already installed — skipping (fast restart)"
 else
@@ -338,7 +386,7 @@ else
     fi
   done
   if [ -n "$_agent_src" ]; then
-    if ! uv pip install "$_agent_src" --trusted-host pypi.org --trusted-host files.pythonhosted.org; then
+    if ! uv pip install -e "$_agent_src" --trusted-host pypi.org --trusted-host files.pythonhosted.org; then
       echo ""
       echo "!! WARNING: Failed to install hermes-agent's requirements."
       echo "!! The WebUI will start with reduced functionality (no model auto-detection,"
@@ -346,7 +394,7 @@ else
       echo "!! Check the mounted hermes-agent dependencies or package index before relying"
       echo "!! on agent-backed features."
       echo ""
-    elif ! uv pip install "$_agent_src[all]" --trusted-host pypi.org --trusted-host files.pythonhosted.org; then
+    elif ! uv pip install -e "$_agent_src[all]" --trusted-host pypi.org --trusted-host files.pythonhosted.org; then
       echo ""
       echo "!! WARNING: Failed to install hermes-agent optional [all] dependencies."
       echo "!! Core agent-backed chat features should still work, but optional providers,"
@@ -370,6 +418,7 @@ else
   touch /app/venv/.deps_installed
 fi
 
+ensure_hermes_agent_source_dependency
 ensure_hindsight_client_docker_dependency
 
 echo ""; echo "== Running hermes-webui"
