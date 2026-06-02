@@ -8015,7 +8015,13 @@ class AIAgent:
             "zai", "bedrock",
         }:
             return True
-        base = (getattr(self, "base_url", "") or "").lower()
+        base = " ".join(
+            str(value).lower()
+            for value in (
+                getattr(self, "base_url", "") or "",
+                getattr(self, "_anthropic_base_url", "") or "",
+            )
+        )
         return (
             "dashscope" in base
             or "aliyuncs" in base
