@@ -12,6 +12,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import api.config as webui_config
+import api.user_provider as provider_runtime
 import api.user_provider_management as management
 import api.user_provider_config_sync as sync
 
@@ -218,7 +219,7 @@ def validate_management_enable_rolls_back_status_on_sync_failure() -> None:
             "user_id": "u1",
             "name": "Old",
             "provider_slug": "old",
-            "base_url": "https://old.example/v1",
+            "base_url": "https://example.com/v1",
             "model_name": "old-model",
             "api_mode": "anthropic_messages",
             "api_key": "fake-old-secret",
@@ -229,7 +230,7 @@ def validate_management_enable_rolls_back_status_on_sync_failure() -> None:
             "user_id": "u1",
             "name": "Target",
             "provider_slug": "target",
-            "base_url": "https://target.example/v1",
+            "base_url": "https://example.com/v1",
             "model_name": "target-model",
             "api_mode": "anthropic_messages",
             "api_key": "fake-target-secret",
@@ -238,8 +239,9 @@ def validate_management_enable_rolls_back_status_on_sync_failure() -> None:
     }
     original_list = management.list_user_ai_provider_records
     original_update = management.update_user_ai_provider_record
-    original_test = management._assert_provider_test_passes
+    original_test = management.test_user_provider_connection
     original_sync = management.sync_user_provider_model_config
+    original_host_validator = provider_runtime._validate_provider_host
     try:
         management.list_user_ai_provider_records = lambda user_id: [
             copy.deepcopy(records["old"]),
@@ -259,12 +261,17 @@ def validate_management_enable_rolls_back_status_on_sync_failure() -> None:
                 payload={"status": "sync_failed", "error": "redacted"},
             )
 
+        def fail_if_enable_requires_provider_test(user_id, provider):
+            return {"ok": False, "error": "test_blocked", "message": "test should not block enable"}
+
         management.update_user_ai_provider_record = update_record
-        management._assert_provider_test_passes = lambda user_id, provider: None
+        management.test_user_provider_connection = fail_if_enable_requires_provider_test
         management.sync_user_provider_model_config = sync_failure
+        provider_runtime._validate_provider_host = lambda hostname, port: None
         try:
             management.enable_user_ai_provider_payload("u1", "target")
-        except sync.UserProviderConfigSyncError:
+        except sync.UserProviderConfigSyncError as exc:
+            assert exc.code == "sync_failed"
             pass
         else:
             raise AssertionError("enable should fail when sync fails")
@@ -273,8 +280,9 @@ def validate_management_enable_rolls_back_status_on_sync_failure() -> None:
     finally:
         management.list_user_ai_provider_records = original_list
         management.update_user_ai_provider_record = original_update
-        management._assert_provider_test_passes = original_test
+        management.test_user_provider_connection = original_test
         management.sync_user_provider_model_config = original_sync
+        provider_runtime._validate_provider_host = original_host_validator
 
 
 def validate_single_profile_payload_uses_active_provider() -> None:

@@ -49,7 +49,6 @@ def save_user_ai_provider_payload(user_id: str, body: dict[str, Any]) -> dict[st
             candidate = _merged_provider_candidate(old_record, body)
             was_enabled = _is_enabled(old_record)
             if was_enabled:
-                _assert_provider_test_passes(user_id, candidate)
                 provider, _reason = _runtime_provider_or_raise(candidate, user_id)
                 sync_user_provider_model_config(
                     user_id=user_id,
@@ -95,7 +94,6 @@ def enable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str,
     with user_provider_sync_lock(user_id):
         records = list_user_ai_provider_records(user_id)
         target = _find_provider(records, provider_id)
-        _assert_provider_test_passes(user_id, target)
         provider, _reason = _runtime_provider_or_raise(target, user_id)
         sync_user_provider_model_config(
             user_id=user_id,
@@ -304,16 +302,6 @@ def error_payload(error: Exception) -> tuple[dict[str, Any], int]:
     if isinstance(error, UserProviderLookupError):
         return {"ok": False, "error": str(error), "code": "provider_lookup_failed"}, 503
     return {"ok": False, "error": str(error), "code": "provider_request_failed"}, 500
-
-
-def _assert_provider_test_passes(user_id: str, provider: dict[str, Any]) -> None:
-    result = test_user_provider_connection(user_id, provider)
-    if not result.get("ok"):
-        raise UserProviderConfigSyncError(
-            result.get("message") or result.get("error") or "Provider test failed",
-            code=str(result.get("error") or "provider_test_failed"),
-            status=400,
-        )
 
 
 def _runtime_provider_or_raise(record: dict[str, Any], user_id: str) -> tuple[dict[str, Any], str]:
