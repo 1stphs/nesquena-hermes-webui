@@ -239,8 +239,8 @@ class TestMinimaxMaxOutput:
         assert _get_anthropic_max_output("claude-sonnet-4-6") == 64_000
 
 
-class TestMinimaxPreserveDots:
-    """Verify that MiniMax model names preserve dots through the Anthropic adapter.
+class TestThirdPartyAnthropicPreserveDots:
+    """Verify third-party Anthropic endpoints preserve required model-name dots.
 
     MiniMax model IDs like 'MiniMax-M2.7' must NOT have dots converted to
     hyphens — the endpoint expects the exact name with dots.
@@ -300,9 +300,19 @@ class TestMinimaxPreserveDots:
         from run_agent import AIAgent
         assert AIAgent._anthropic_preserve_dots(agent) is True
 
+    def test_aihubmix_url_preserves_dots(self):
+        from types import SimpleNamespace
+        agent = SimpleNamespace(provider="custom", base_url="https://aihubmix.com")
+        from run_agent import AIAgent
+        assert AIAgent._anthropic_preserve_dots(agent) is True
+
     def test_normalize_preserves_m25_free_dot(self):
         from agent.anthropic_adapter import normalize_model_name
         assert normalize_model_name("minimax-m2.5-free", preserve_dots=True) == "minimax-m2.5-free"
+
+    def test_normalize_preserves_xiaomi_mimo_dot(self):
+        from agent.anthropic_adapter import normalize_model_name
+        assert normalize_model_name("xiaomi-mimo-v2.5", preserve_dots=True) == "xiaomi-mimo-v2.5"
 
     def test_normalize_preserves_m27_dot(self):
         from agent.anthropic_adapter import normalize_model_name

@@ -8001,6 +8001,7 @@ class AIAgent:
         MiniMax keeps dots (e.g. MiniMax-M2.7).
         OpenCode Go/Zen keeps dots for non-Claude models (e.g. minimax-m2.5-free).
         ZAI/Zhipu keeps dots (e.g. glm-4.7, glm-5.1).
+        AIHubMix keeps dots for aggregator model IDs (e.g. xiaomi-mimo-v2.5).
         AWS Bedrock uses dotted inference-profile IDs
         (e.g. ``global.anthropic.claude-opus-4-7``,
         ``us.anthropic.claude-sonnet-4-5-20250929-v1:0``) and rejects
@@ -8021,6 +8022,7 @@ class AIAgent:
             or "minimax" in base
             or "opencode.ai/zen/" in base
             or "bigmodel.cn" in base
+            or "aihubmix.com" in base
             # AWS Bedrock runtime endpoints — defense-in-depth when
             # ``provider`` is unset but ``base_url`` still names Bedrock.
             or "bedrock-runtime." in base
