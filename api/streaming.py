@@ -2282,18 +2282,14 @@ def _run_agent_streaming(
                 _session_db = SessionDB()
             except Exception as _db_err:
                 print(f"[webui] WARNING: SessionDB init failed — session_search will be unavailable: {_db_err}", flush=True)
-            effective_user_id = user_id or getattr(s, "user_id", None)
+            effective_user_id = str(user_id or "").strip()
             if effective_user_id:
                 from api.user_provider import (
-                    is_user_provider_runtime_enabled,
                     resolve_user_provider,
                 )
 
-                # Provider runtime is disabled unless the X-User-Id context
-                # switch is enabled.
-                if is_user_provider_runtime_enabled():
-                    _user_provider_resolution = resolve_user_provider(effective_user_id)
-                    _user_provider_active = bool(_user_provider_resolution and _user_provider_resolution.is_active)
+                _user_provider_resolution = resolve_user_provider(effective_user_id)
+                _user_provider_active = bool(_user_provider_resolution and _user_provider_resolution.is_active)
 
             if _user_provider_active:
                 from api.user_provider import CANONICAL_AGENT_PROVIDER, _validate_base_url

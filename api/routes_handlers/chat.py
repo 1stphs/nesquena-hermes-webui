@@ -252,24 +252,19 @@ def _handle_chat_start(handler, body):
     msg = str(body.get("message", "")).strip()
     if not msg:
         return bad(handler, "message is required")
-    user_id = None
-    from api.user_provider import (
-        is_user_provider_runtime_enabled,
-    )
+    try:
+        from api.user_provider import (
+            UserProviderAuthError,
+            optional_user_id_from_handler,
+            verify_user_profile_access,
+        )
 
-    if is_user_provider_runtime_enabled():
-        try:
-            from api.user_provider import (
-                UserProviderAuthError,
-                current_user_id_from_handler,
-                verify_user_profile_access,
-            )
-
-            user_id = current_user_id_from_handler(handler)
+        user_id = optional_user_id_from_handler(handler)
+        if user_id:
             verify_user_profile_access(user_id, requested_profile or getattr(s, "profile", None))
             s.user_id = user_id
-        except UserProviderAuthError as exc:
-            return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
+    except UserProviderAuthError as exc:
+        return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
     attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
     try:
         workspace = str(resolve_trusted_workspace(body.get("workspace") or s.workspace))

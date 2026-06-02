@@ -127,14 +127,11 @@ self.addEventListener('fetch', () => {});
         from api.user_provider import (
             UserProviderAuthError,
             build_user_provider_models_payload,
-            current_user_id_from_handler,
-            is_user_provider_runtime_enabled,
+            optional_user_id_from_handler,
         )
 
-        user_id = None
         try:
-            if is_user_provider_runtime_enabled():
-                user_id = current_user_id_from_handler(handler)
+            user_id = optional_user_id_from_handler(handler)
             return j(handler, build_user_provider_models_payload(user_id, get_available_models))
         except UserProviderAuthError as exc:
             return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
@@ -1079,23 +1076,18 @@ def dispatch_post(handler, parsed) -> bool:
             workspace = str(resolve_trusted_workspace(body.get("workspace"))) if body.get("workspace") else None
         except ValueError as e:
             return bad(handler, str(e))
-        user_id = None
-        from api.user_provider import (
-            is_user_provider_runtime_enabled,
-        )
+        try:
+            from api.user_provider import (
+                UserProviderAuthError,
+                optional_user_id_from_handler,
+                verify_user_profile_access,
+            )
 
-        if is_user_provider_runtime_enabled():
-            try:
-                from api.user_provider import (
-                    UserProviderAuthError,
-                    current_user_id_from_handler,
-                    verify_user_profile_access,
-                )
-
-                user_id = current_user_id_from_handler(handler)
+            user_id = optional_user_id_from_handler(handler)
+            if user_id:
                 verify_user_profile_access(user_id, body.get("profile"))
-            except UserProviderAuthError as exc:
-                return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
+        except UserProviderAuthError as exc:
+            return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
         model, model_provider = _session_model_state_from_request(
             body.get("model"),
             body.get("model_provider"),
@@ -1847,11 +1839,11 @@ def dispatch_post(handler, parsed) -> bool:
             )
             provider_sync = None
             try:
-                from api.user_provider import current_user_id_from_handler, is_user_provider_runtime_enabled
+                from api.user_provider import optional_user_id_from_handler
                 from api.user_provider_management import error_payload, sync_new_profile_if_enabled
 
-                if is_user_provider_runtime_enabled():
-                    user_id = current_user_id_from_handler(handler)
+                user_id = optional_user_id_from_handler(handler)
+                if user_id:
                     provider_sync = sync_new_profile_if_enabled(user_id, name)
             except Exception as exc:
                 sync_payload, _sync_status = error_payload(exc)

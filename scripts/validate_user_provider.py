@@ -58,7 +58,7 @@ def _active_resolution(user_id, provider_id, *, model, api_key):
     )
 
 
-def validate_default_disabled_models_payload_does_not_read_provider() -> None:
+def validate_missing_user_context_models_payload_does_not_read_provider() -> None:
     original_resolve = user_provider.resolve_user_provider
     original_fetch = user_provider.fetch_provider_models
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
@@ -67,10 +67,10 @@ def validate_default_disabled_models_payload_does_not_read_provider() -> None:
     user_provider.clear_user_provider_models_cache()
 
     def fail_lookup(_user_id):
-        raise AssertionError("resolve_user_provider must not run while disabled")
+        raise AssertionError("resolve_user_provider must not run without user context")
 
     def fail_fetch(_provider):
-        raise AssertionError("fetch_provider_models must not run while disabled")
+        raise AssertionError("fetch_provider_models must not run without user context")
 
     try:
         user_provider.resolve_user_provider = fail_lookup
@@ -92,16 +92,15 @@ def validate_default_disabled_models_payload_does_not_read_provider() -> None:
 
     assert payload["active_provider"] == "default"
     assert payload["provider_resolution"]["status"] == "disabled"
-    assert payload["provider_resolution"]["reason"] == "x_user_id_context_disabled"
+    assert payload["provider_resolution"]["reason"] == "missing_user_context"
     assert payload["provider_resolution"]["fallback"] is True
 
 
-def validate_x_user_id_context_enables_runtime_lookup() -> None:
+def validate_user_id_context_runs_runtime_lookup() -> None:
     original_resolve = user_provider.resolve_user_provider
-    previous_env = os.environ.get(X_USER_ID_ENV)
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
-    os.environ[X_USER_ID_ENV] = "1"
     user_provider.clear_user_provider_models_cache()
     captured = {}
 
@@ -134,12 +133,11 @@ def validate_x_user_id_context_enables_runtime_lookup() -> None:
     assert captured["user_id"] == "u1"
 
 
-def validate_lookup_fallback_and_redaction_when_x_user_id_enabled() -> None:
+def validate_lookup_fallback_and_redaction_with_user_context() -> None:
     original_resolve = user_provider.resolve_user_provider
-    previous_env = os.environ.get(X_USER_ID_ENV)
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
-    os.environ[X_USER_ID_ENV] = "1"
     user_provider.clear_user_provider_models_cache()
 
     def fail_lookup(user_id):
@@ -175,10 +173,9 @@ def validate_lookup_fallback_and_redaction_when_x_user_id_enabled() -> None:
 def validate_models_cache_isolated_by_user_and_provider() -> None:
     original_resolve = user_provider.resolve_user_provider
     original_fetch = user_provider.fetch_provider_models
-    previous_env = os.environ.get(X_USER_ID_ENV)
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
-    os.environ[X_USER_ID_ENV] = "1"
     user_provider.clear_user_provider_models_cache()
     resolutions = {
         "u1": _active_resolution("u1", "p1", model="model-a", api_key="sk-user-one-1234567890"),
@@ -279,12 +276,11 @@ def validate_enabled_status_selects_latest_provider_without_is_default() -> None
     assert "is_default" not in resolution.provider
 
 
-def validate_legacy_nocobase_auth_env_enables_x_user_id_runtime() -> None:
+def validate_user_id_runtime_lookup_does_not_need_legacy_env() -> None:
     original_resolve = user_provider.resolve_user_provider
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
-    previous_nocobase_auth_env = os.environ.get(LEGACY_NOCOBASE_AUTH_ENV)
-    os.environ[LEGACY_NOCOBASE_AUTH_ENV] = "1"
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
     user_provider.clear_user_provider_models_cache()
     captured = {}
 
@@ -387,7 +383,7 @@ def validate_route_models_does_not_require_user_context() -> None:
         return True
 
     def fail_lookup(_user_id):
-        raise AssertionError("route must not resolve user provider while disabled")
+        raise AssertionError("route must not resolve user provider without user context")
 
     try:
         routes.j = capture_j
@@ -410,6 +406,134 @@ def validate_route_models_does_not_require_user_context() -> None:
     payload = captured["payload"]
     assert payload["active_provider"] == "default"
     assert payload["provider_resolution"]["status"] == "disabled"
+    assert payload["provider_resolution"]["reason"] == "missing_user_context"
+
+
+def validate_route_models_uses_user_context_when_present() -> None:
+    import urllib.parse
+    import api.routes as routes
+    import api.routes_dispatcher as dispatcher
+
+    original_j = routes.j
+    original_models = routes.get_available_models
+    original_resolve = user_provider.resolve_user_provider
+    original_fetch = user_provider.fetch_provider_models
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
+    captured = {}
+
+    def capture_j(_handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+        return True
+
+    def resolve_active(user_id):
+        captured["user_id"] = user_id
+        return _active_resolution(user_id, "route-provider", model="route-model", api_key="sk-route-secret")
+
+    try:
+        routes.j = capture_j
+        routes.get_available_models = lambda: {
+            "active_provider": "default",
+            "default_model": "default-model",
+            "groups": [{"provider": "Default", "provider_id": "default", "models": []}],
+        }
+        user_provider.resolve_user_provider = resolve_active
+        user_provider.fetch_provider_models = lambda provider: (
+            [{"id": provider["model_name"], "label": provider["model_name"]}],
+            "",
+        )
+        assert dispatcher.dispatch_get(
+            Handler({"X-User-Id": "route-user"}),
+            urllib.parse.urlparse("/api/models"),
+        ) is True
+    finally:
+        routes.j = original_j
+        routes.get_available_models = original_models
+        user_provider.resolve_user_provider = original_resolve
+        user_provider.fetch_provider_models = original_fetch
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
+
+    assert captured["status"] == 200
+    assert captured["user_id"] == "route-user"
+    payload = captured["payload"]
+    assert payload["active_provider"] == "user-provider-route-provider"
+    assert payload["default_model"] == "route-model"
+    assert payload["provider_resolution"]["status"] == "active"
+
+
+def validate_route_session_new_uses_optional_user_context() -> None:
+    import urllib.parse
+    import api.models as models
+    import api.routes as routes
+    import api.routes_dispatcher as dispatcher
+
+    original_j = routes.j
+    original_read_body = routes.read_body
+    original_check_csrf = routes._check_csrf
+    original_verify_profile = user_provider.verify_user_profile_access
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
+    existing_sessions = set(models.SESSIONS.keys())
+    captured = {}
+
+    def capture_j(_handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+        return True
+
+    def fail_verify(_user_id, _profile):
+        raise AssertionError("profile access must not be checked without user context")
+
+    try:
+        routes.j = capture_j
+        routes._check_csrf = lambda _handler: True
+        routes.read_body = lambda _handler: {
+            "profile": "default_route_session",
+            "model": "default-model",
+        }
+        user_provider.verify_user_profile_access = fail_verify
+        assert dispatcher.dispatch_post(
+            Handler(),
+            urllib.parse.urlparse("/api/session/new"),
+        ) is True
+        assert captured["status"] == 200
+        session_id = captured["payload"]["session"]["session_id"]
+        assert not getattr(models.SESSIONS[session_id], "user_id", None)
+
+        verified = {}
+
+        def capture_verify(user_id, profile):
+            verified["user_id"] = user_id
+            verified["profile"] = profile
+
+        captured.clear()
+        user_provider.verify_user_profile_access = capture_verify
+        assert dispatcher.dispatch_post(
+            Handler({"X-User-Id": "route-session-user"}),
+            urllib.parse.urlparse("/api/session/new"),
+        ) is True
+        assert captured["status"] == 200
+        session_id = captured["payload"]["session"]["session_id"]
+        assert getattr(models.SESSIONS[session_id], "user_id", None) == "route-session-user"
+        assert verified == {
+            "user_id": "route-session-user",
+            "profile": "default_route_session",
+        }
+    finally:
+        routes.j = original_j
+        routes.read_body = original_read_body
+        routes._check_csrf = original_check_csrf
+        user_provider.verify_user_profile_access = original_verify_profile
+        for session_id in set(models.SESSIONS.keys()) - existing_sessions:
+            models.SESSIONS.pop(session_id, None)
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
 
 
 def validate_x_user_id_header_sets_current_user() -> None:
@@ -629,7 +753,7 @@ def validate_real_agent_local_provider_e2e() -> None:
             os.environ["HERMES_WEBUI_AGENT_DIR"] = str(AGENT_SRC)
             os.environ["HERMES_WEBUI_STATE_DIR"] = str(state_path)
             os.environ["HERMES_HOME"] = str(home_path)
-            os.environ[X_USER_ID_ENV] = "1"
+            os.environ.pop(X_USER_ID_ENV, None)
             os.environ.pop(LEGACY_X_USER_ID_ENV, None)
             os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
             if str(AGENT_SRC) not in sys.path:
@@ -722,18 +846,20 @@ def validate_real_agent_local_provider_e2e() -> None:
 
 
 def main() -> None:
-    validate_default_disabled_models_payload_does_not_read_provider()
-    validate_x_user_id_context_enables_runtime_lookup()
-    validate_lookup_fallback_and_redaction_when_x_user_id_enabled()
+    validate_missing_user_context_models_payload_does_not_read_provider()
+    validate_user_id_context_runs_runtime_lookup()
+    validate_lookup_fallback_and_redaction_with_user_context()
     validate_models_cache_isolated_by_user_and_provider()
     validate_runtime_signature_omits_api_key()
     validate_enabled_status_selects_latest_provider_without_is_default()
-    validate_legacy_nocobase_auth_env_enables_x_user_id_runtime()
+    validate_user_id_runtime_lookup_does_not_need_legacy_env()
     validate_private_and_local_base_urls_are_rejected()
     validate_dns_resolution_to_private_ip_is_rejected()
     validate_provider_key_redaction_is_forced_when_global_redaction_disabled()
     validate_real_agent_local_provider_e2e()
     validate_route_models_does_not_require_user_context()
+    validate_route_models_uses_user_context_when_present()
+    validate_route_session_new_uses_optional_user_context()
     validate_x_user_id_header_sets_current_user()
     validate_x_user_id_cookie_sets_current_user()
     validate_x_user_id_header_cookie_mismatch_rejected()

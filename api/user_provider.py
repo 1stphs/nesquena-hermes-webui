@@ -1,9 +1,10 @@
 """User-scoped AI provider resolver for the external Hermes frontend.
 
 This module treats NoCoBase providers as optional runtime overlays. The stored
-provider resolver is disabled by default until the frontend-supplied
-X-User-Id context switch is enabled. The server-side NoCoBase token is used
-only for table access; Hermes WebUI determines the current user from X-User-Id.
+provider resolver is used only when a request carries frontend-supplied
+X-User-Id context. Requests without user context keep the normal Hermes model
+fallback. The server-side NoCoBase token is used only for table access; Hermes
+WebUI determines the current user from X-User-Id.
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 USER_PROVIDER_COLLECTION = "hermes_user_ai_providers"
 PROFILE_COLLECTION = "hermes_profiles"
+# Legacy env names are kept as public constants for compatibility, but runtime
+# provider lookup no longer depends on these switches.
 X_USER_ID_CONTEXT_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_X_USER_ID_CONTEXT"
 UNTRUSTED_CONTEXT_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_UNTRUSTED_CONTEXT"
 LEGACY_NOCOBASE_AUTH_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_NOCOBASE_AUTH"
@@ -145,13 +148,19 @@ def _user_context_ids_from_handler(handler) -> tuple[str, str]:
     return header_user_id, cookie_user_id
 
 
-def current_user_id_from_handler(handler) -> str:
-    """Read the frontend-supplied X-User-Id user context."""
+def optional_user_id_from_handler(handler) -> str | None:
+    """Read optional frontend-supplied X-User-Id user context."""
 
     header_user_id, cookie_user_id = _user_context_ids_from_handler(handler)
     if header_user_id and cookie_user_id and header_user_id != cookie_user_id:
         raise UserProviderAuthError("User context mismatch", status=400, code="user_context_mismatch")
-    user_id = header_user_id or cookie_user_id
+    return header_user_id or cookie_user_id or None
+
+
+def current_user_id_from_handler(handler) -> str:
+    """Read the required frontend-supplied X-User-Id user context."""
+
+    user_id = optional_user_id_from_handler(handler)
     if not user_id:
         raise UserProviderAuthError("Missing user context", status=400, code="missing_user_context")
     return user_id
@@ -427,17 +436,15 @@ def _provider_write_body(body: dict[str, Any], *, user_id: str, partial: bool) -
 
 
 def is_user_provider_untrusted_context_enabled() -> bool:
-    """Switch for the frontend-supplied X-User-Id context path.
+    """Return True when the X-User-Id context path is available.
 
-    Legacy env names are kept as enable aliases, but incoming NoCoBase bearer
-    is not used to determine the request user.
+    User AI Provider runtime is a product feature now, not an opt-in deployment
+    switch. Runtime callers decide whether to use it based on whether a request
+    actually carries X-User-Id context; requests without that context keep the
+    normal Hermes fallback path.
     """
 
-    return (
-        os.getenv(X_USER_ID_CONTEXT_ENABLE_ENV, "").strip() == "1"
-        or os.getenv(UNTRUSTED_CONTEXT_ENABLE_ENV, "").strip() == "1"
-        or os.getenv(LEGACY_NOCOBASE_AUTH_ENABLE_ENV, "").strip() == "1"
-    )
+    return True
 
 
 def is_user_provider_runtime_enabled() -> bool:
@@ -445,9 +452,11 @@ def is_user_provider_runtime_enabled() -> bool:
 
 
 def disabled_user_provider_resolution(user_id: str | None = None) -> UserProviderResolution:
+    """Legacy helper for callers that still model an unavailable runtime."""
+
     return UserProviderResolution(
         status="disabled",
-        reason="x_user_id_context_disabled",
+        reason="runtime_unavailable",
         user_id=str(user_id or "").strip(),
     )
 
@@ -960,12 +969,6 @@ def build_user_provider_models_payload(
     user_id: str | None,
     fallback_factory: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
-    if not is_user_provider_runtime_enabled():
-        resolution = disabled_user_provider_resolution(user_id)
-        payload = copy.deepcopy(fallback_factory())
-        payload["provider_resolution"] = public_provider_resolution(resolution)
-        return payload
-
     if not user_id:
         resolution = UserProviderResolution(
             status="disabled",
