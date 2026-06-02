@@ -17,8 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import api.user_provider as user_provider
 
 
-UNSAFE_ENV = user_provider.UNTRUSTED_CONTEXT_ENABLE_ENV
-TRUSTED_ENV = user_provider.NOCOBASE_AUTH_ENABLE_ENV
+X_USER_ID_ENV = user_provider.X_USER_ID_CONTEXT_ENABLE_ENV
+LEGACY_X_USER_ID_ENV = user_provider.UNTRUSTED_CONTEXT_ENABLE_ENV
+LEGACY_NOCOBASE_AUTH_ENV = user_provider.LEGACY_NOCOBASE_AUTH_ENABLE_ENV
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGENT_SRC = REPO_ROOT / "hermes-agent-src"
 FAKE_PROVIDER_KEY = "sk-user-provider-local-e2e-secret"
@@ -52,7 +53,6 @@ def _active_resolution(user_id, provider_id, *, model, api_key):
             "thinking_level": "low",
             "api_key": api_key,
             "status": "enabled",
-            "is_default": True,
             "updatedAt": "2026-06-01T00:00:00Z",
         },
     )
@@ -61,8 +61,9 @@ def _active_resolution(user_id, provider_id, *, model, api_key):
 def validate_default_disabled_models_payload_does_not_read_provider() -> None:
     original_resolve = user_provider.resolve_user_provider
     original_fetch = user_provider.fetch_provider_models
-    previous_env = os.environ.pop(UNSAFE_ENV, None)
-    previous_trusted_env = os.environ.pop(TRUSTED_ENV, None)
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
     user_provider.clear_user_provider_models_cache()
 
     def fail_lookup(_user_id):
@@ -85,27 +86,35 @@ def validate_default_disabled_models_payload_does_not_read_provider() -> None:
     finally:
         user_provider.resolve_user_provider = original_resolve
         user_provider.fetch_provider_models = original_fetch
-        _restore_env(UNSAFE_ENV, previous_env)
-        _restore_env(TRUSTED_ENV, previous_trusted_env)
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
 
     assert payload["active_provider"] == "default"
     assert payload["provider_resolution"]["status"] == "disabled"
-    assert payload["provider_resolution"]["reason"] == "untrusted_context_disabled"
+    assert payload["provider_resolution"]["reason"] == "x_user_id_context_disabled"
     assert payload["provider_resolution"]["fallback"] is True
 
 
-def validate_untrusted_context_does_not_enable_runtime_lookup() -> None:
+def validate_x_user_id_context_enables_runtime_lookup() -> None:
     original_resolve = user_provider.resolve_user_provider
-    previous_env = os.environ.get(UNSAFE_ENV)
-    previous_trusted_env = os.environ.pop(TRUSTED_ENV, None)
-    os.environ[UNSAFE_ENV] = "1"
+    previous_env = os.environ.get(X_USER_ID_ENV)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
+    os.environ[X_USER_ID_ENV] = "1"
     user_provider.clear_user_provider_models_cache()
+    captured = {}
 
-    def fail_lookup(_user_id):
-        raise AssertionError("unsafe X-User-Id must not enable runtime provider lookup")
+    def resolve_none(user_id):
+        captured["user_id"] = user_id
+        return user_provider.UserProviderResolution(
+            status="none",
+            reason="no_provider",
+            user_id=user_id,
+        )
 
     try:
-        user_provider.resolve_user_provider = fail_lookup
+        user_provider.resolve_user_provider = resolve_none
         payload = user_provider.build_user_provider_models_payload(
             "u1",
             lambda: {
@@ -116,18 +125,21 @@ def validate_untrusted_context_does_not_enable_runtime_lookup() -> None:
         )
     finally:
         user_provider.resolve_user_provider = original_resolve
-        _restore_env(UNSAFE_ENV, previous_env)
-        _restore_env(TRUSTED_ENV, previous_trusted_env)
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
 
     assert payload["active_provider"] == "default"
-    assert payload["provider_resolution"]["status"] == "disabled"
+    assert payload["provider_resolution"]["status"] == "none"
+    assert captured["user_id"] == "u1"
 
 
-def validate_lookup_fallback_and_redaction_when_trusted_enabled() -> None:
+def validate_lookup_fallback_and_redaction_when_x_user_id_enabled() -> None:
     original_resolve = user_provider.resolve_user_provider
-    previous_env = os.environ.pop(UNSAFE_ENV, None)
-    previous_trusted_env = os.environ.get(TRUSTED_ENV)
-    os.environ[TRUSTED_ENV] = "1"
+    previous_env = os.environ.get(X_USER_ID_ENV)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
+    os.environ[X_USER_ID_ENV] = "1"
     user_provider.clear_user_provider_models_cache()
 
     def fail_lookup(user_id):
@@ -150,8 +162,9 @@ def validate_lookup_fallback_and_redaction_when_trusted_enabled() -> None:
         )
     finally:
         user_provider.resolve_user_provider = original_resolve
-        _restore_env(UNSAFE_ENV, previous_env)
-        _restore_env(TRUSTED_ENV, previous_trusted_env)
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
 
     assert payload["active_provider"] == "default"
     assert payload["provider_resolution"]["status"] == "lookup_failed"
@@ -162,9 +175,10 @@ def validate_lookup_fallback_and_redaction_when_trusted_enabled() -> None:
 def validate_models_cache_isolated_by_user_and_provider() -> None:
     original_resolve = user_provider.resolve_user_provider
     original_fetch = user_provider.fetch_provider_models
-    previous_env = os.environ.pop(UNSAFE_ENV, None)
-    previous_trusted_env = os.environ.get(TRUSTED_ENV)
-    os.environ[TRUSTED_ENV] = "1"
+    previous_env = os.environ.get(X_USER_ID_ENV)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
+    os.environ[X_USER_ID_ENV] = "1"
     user_provider.clear_user_provider_models_cache()
     resolutions = {
         "u1": _active_resolution("u1", "p1", model="model-a", api_key="sk-user-one-1234567890"),
@@ -182,8 +196,9 @@ def validate_models_cache_isolated_by_user_and_provider() -> None:
     finally:
         user_provider.resolve_user_provider = original_resolve
         user_provider.fetch_provider_models = original_fetch
-        _restore_env(UNSAFE_ENV, previous_env)
-        _restore_env(TRUSTED_ENV, previous_trusted_env)
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
 
     assert payload_one["active_provider"] == "user-provider-p1"
     assert payload_one["default_model"] == "model-a"
@@ -203,6 +218,102 @@ def validate_runtime_signature_omits_api_key() -> None:
     assert signature["provider_id"] == "p1"
     assert "api_key" not in signature
     assert "sk-user-one-1234567890" not in str(signature)
+
+
+def validate_enabled_status_selects_latest_provider_without_is_default() -> None:
+    original_candidates = user_provider._provider_candidates_for_user
+    original_validate_base_url = user_provider._validate_base_url
+    records = [
+        {
+            "id": "old-enabled",
+            "user_id": "u1",
+            "name": "Old Enabled",
+            "provider_slug": "old-enabled",
+            "base_url": "https://old.example.invalid/v1",
+            "model_name": "old-model",
+            "api_mode": "codex_responses",
+            "thinking_level": "low",
+            "api_key": "sk-old-provider-1234567890",
+            "status": "enabled",
+            "updatedAt": "2026-06-01T00:00:00Z",
+        },
+        {
+            "id": "new-enabled",
+            "user_id": "u1",
+            "name": "New Enabled",
+            "provider_slug": "new-enabled",
+            "base_url": "https://new.example.invalid/v1",
+            "model_name": "new-model",
+            "api_mode": "codex_responses",
+            "thinking_level": "low",
+            "api_key": "sk-new-provider-1234567890",
+            "status": "enabled",
+            "updatedAt": "2026-06-02T00:00:00Z",
+        },
+        {
+            "id": "latest-disabled",
+            "user_id": "u1",
+            "name": "Latest Disabled",
+            "provider_slug": "latest-disabled",
+            "base_url": "https://disabled.example.invalid/v1",
+            "model_name": "disabled-model",
+            "api_mode": "codex_responses",
+            "thinking_level": "low",
+            "api_key": "sk-disabled-provider-1234567890",
+            "status": "disabled",
+            "updatedAt": "2026-06-03T00:00:00Z",
+        },
+    ]
+
+    try:
+        user_provider._provider_candidates_for_user = lambda user_id: records
+        user_provider._validate_base_url = lambda base_url: str(base_url or "").strip().rstrip("/")
+        resolution = user_provider.resolve_user_provider("u1")
+    finally:
+        user_provider._provider_candidates_for_user = original_candidates
+        user_provider._validate_base_url = original_validate_base_url
+
+    assert resolution.status == "active"
+    assert resolution.reason == "active_provider"
+    assert resolution.provider["id"] == "new-enabled"
+    assert "is_default" not in resolution.provider
+
+
+def validate_legacy_nocobase_auth_env_enables_x_user_id_runtime() -> None:
+    original_resolve = user_provider.resolve_user_provider
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.get(LEGACY_NOCOBASE_AUTH_ENV)
+    os.environ[LEGACY_NOCOBASE_AUTH_ENV] = "1"
+    user_provider.clear_user_provider_models_cache()
+    captured = {}
+
+    def resolve_none(user_id):
+        captured["user_id"] = user_id
+        return user_provider.UserProviderResolution(
+            status="none",
+            reason="no_provider",
+            user_id=user_id,
+        )
+
+    try:
+        user_provider.resolve_user_provider = resolve_none
+        payload = user_provider.build_user_provider_models_payload(
+            "legacy-user",
+            lambda: {
+                "active_provider": "default",
+                "default_model": "default-model",
+                "groups": [{"provider": "Default", "provider_id": "default", "models": []}],
+            },
+        )
+    finally:
+        user_provider.resolve_user_provider = original_resolve
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
+
+    assert payload["provider_resolution"]["status"] == "none"
+    assert captured["user_id"] == "legacy-user"
 
 
 def validate_private_and_local_base_urls_are_rejected() -> None:
@@ -265,8 +376,9 @@ def validate_route_models_does_not_require_user_context() -> None:
     original_j = routes.j
     original_models = routes.get_available_models
     original_resolve = user_provider.resolve_user_provider
-    previous_env = os.environ.pop(UNSAFE_ENV, None)
-    previous_trusted_env = os.environ.pop(TRUSTED_ENV, None)
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
     captured = {}
 
     def capture_j(_handler, payload, status=200, extra_headers=None):
@@ -290,8 +402,9 @@ def validate_route_models_does_not_require_user_context() -> None:
         routes.j = original_j
         routes.get_available_models = original_models
         user_provider.resolve_user_provider = original_resolve
-        _restore_env(UNSAFE_ENV, previous_env)
-        _restore_env(TRUSTED_ENV, previous_trusted_env)
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
 
     assert captured["status"] == 200
     payload = captured["payload"]
@@ -299,90 +412,38 @@ def validate_route_models_does_not_require_user_context() -> None:
     assert payload["provider_resolution"]["status"] == "disabled"
 
 
-def validate_fake_x_user_id_does_not_pass_without_nocobase_auth() -> None:
+def validate_x_user_id_header_sets_current_user() -> None:
+    user_id = user_provider.current_user_id_from_handler(Handler({"X-User-Id": "user-a"}))
+    assert user_id == "user-a"
+
+
+def validate_x_user_id_cookie_sets_current_user() -> None:
+    user_id = user_provider.current_user_id_from_handler(
+        Handler({"Cookie": "theme=light; X-User-Id=user-cookie"})
+    )
+    assert user_id == "user-cookie"
+
+
+def validate_x_user_id_header_cookie_mismatch_rejected() -> None:
     try:
-        user_provider.verified_user_id_from_handler(Handler({"X-User-Id": "fake-user"}))
-    except user_provider.UserProviderAuthError as exc:
-        assert exc.status == 401
-        assert exc.code == "missing_nocobase_auth"
-    else:
-        raise AssertionError("fake X-User-Id must not verify without NoCoBase bearer")
-
-
-def validate_auth_check_returns_verified_user_id() -> None:
-    original_request = user_provider._request_json
-    captured = {}
-
-    def fake_request(url, *, headers=None, **_kwargs):
-        captured["url"] = url
-        captured["authorization"] = (headers or {}).get("Authorization")
-        return {"data": {"id": "user-a"}}
-
-    try:
-        user_provider._request_json = fake_request
-        verified_id = user_provider.verified_user_id_from_handler(
-            Handler({"X-NocoBase-Authorization": "Bearer test-token"})
+        user_provider.current_user_id_from_handler(
+            Handler({"X-User-Id": "user-a", "Cookie": "X-User-Id=user-b"})
         )
-    finally:
-        user_provider._request_json = original_request
+    except user_provider.UserProviderAuthError as exc:
+        assert exc.status == 400
+        assert exc.code == "user_context_mismatch"
+    else:
+        raise AssertionError("mismatched X-User-Id header/cookie must be rejected")
 
-    assert verified_id == "user-a"
-    assert captured["url"].endswith("/api/auth:check")
-    assert captured["authorization"] == "Bearer test-token"
 
-
-def validate_x_user_id_mismatch_rejected() -> None:
-    original_request = user_provider._request_json
-
-    def fake_request(_url, *, headers=None, **_kwargs):
-        assert (headers or {}).get("Authorization") == "Bearer test-token"
-        return {"data": {"id": "user-a"}}
-
+def validate_x_user_id_missing_rejected() -> None:
     try:
-        user_provider._request_json = fake_request
-        try:
-            user_provider.verified_user_id_from_handler(
-                Handler(
-                    {
-                        "X-NocoBase-Authorization": "Bearer test-token",
-                        "X-User-Id": "user-b",
-                    }
-                )
-            )
-        except user_provider.UserProviderAuthError as exc:
-            assert exc.status == 403
-            assert exc.code == "user_context_mismatch"
-        else:
-            raise AssertionError("mismatched X-User-Id must be rejected")
-    finally:
-        user_provider._request_json = original_request
-
-
-def validate_nocobase_auth_failure_does_not_fallback_to_x_user_id() -> None:
-    original_request = user_provider._request_json
-
-    def fail_request(_url, *, headers=None, **_kwargs):
-        assert (headers or {}).get("Authorization") == "Bearer bad-token"
-        raise RuntimeError("401 unauthorized")
-
-    try:
-        user_provider._request_json = fail_request
-        try:
-            user_provider.verified_user_id_from_handler(
-                Handler(
-                    {
-                        "X-NocoBase-Authorization": "Bearer bad-token",
-                        "X-User-Id": "fallback-user",
-                    }
-                )
-            )
-        except user_provider.UserProviderAuthError as exc:
-            assert exc.status == 401
-            assert exc.code == "nocobase_auth_failed"
-        else:
-            raise AssertionError("NoCoBase auth failure must not fall back to X-User-Id")
-    finally:
-        user_provider._request_json = original_request
+        user_provider.current_user_id_from_handler(Handler())
+    except user_provider.UserProviderAuthError as exc:
+        assert exc.status == 400
+        assert exc.code == "missing_user_context"
+    else:
+        raise AssertionError("missing X-User-Id context must be rejected")
 
 
 def _assert_agent_src_available() -> None:
@@ -548,8 +609,9 @@ def validate_real_agent_local_provider_e2e() -> None:
         "HERMES_WEBUI_AGENT_DIR",
         "HERMES_WEBUI_STATE_DIR",
         "HERMES_HOME",
-        TRUSTED_ENV,
-        UNSAFE_ENV,
+        X_USER_ID_ENV,
+        LEGACY_X_USER_ID_ENV,
+        LEGACY_NOCOBASE_AUTH_ENV,
     )}
     server = _start_mock_responses_server()
     original_resolve = user_provider.resolve_user_provider
@@ -567,8 +629,9 @@ def validate_real_agent_local_provider_e2e() -> None:
             os.environ["HERMES_WEBUI_AGENT_DIR"] = str(AGENT_SRC)
             os.environ["HERMES_WEBUI_STATE_DIR"] = str(state_path)
             os.environ["HERMES_HOME"] = str(home_path)
-            os.environ[TRUSTED_ENV] = "1"
-            os.environ.pop(UNSAFE_ENV, None)
+            os.environ[X_USER_ID_ENV] = "1"
+            os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+            os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
             if str(AGENT_SRC) not in sys.path:
                 sys.path.append(str(AGENT_SRC))
             try:
@@ -600,7 +663,6 @@ def validate_real_agent_local_provider_e2e() -> None:
                 "thinking_level": "low",
                 "api_key": FAKE_PROVIDER_KEY,
                 "status": "enabled",
-                "is_default": True,
                 "updatedAt": "2026-06-02T00:00:00Z",
             }
             user_provider.resolve_user_provider = lambda user_id: user_provider.UserProviderResolution(
@@ -661,19 +723,21 @@ def validate_real_agent_local_provider_e2e() -> None:
 
 def main() -> None:
     validate_default_disabled_models_payload_does_not_read_provider()
-    validate_untrusted_context_does_not_enable_runtime_lookup()
-    validate_lookup_fallback_and_redaction_when_trusted_enabled()
+    validate_x_user_id_context_enables_runtime_lookup()
+    validate_lookup_fallback_and_redaction_when_x_user_id_enabled()
     validate_models_cache_isolated_by_user_and_provider()
     validate_runtime_signature_omits_api_key()
+    validate_enabled_status_selects_latest_provider_without_is_default()
+    validate_legacy_nocobase_auth_env_enables_x_user_id_runtime()
     validate_private_and_local_base_urls_are_rejected()
     validate_dns_resolution_to_private_ip_is_rejected()
     validate_provider_key_redaction_is_forced_when_global_redaction_disabled()
     validate_real_agent_local_provider_e2e()
     validate_route_models_does_not_require_user_context()
-    validate_fake_x_user_id_does_not_pass_without_nocobase_auth()
-    validate_auth_check_returns_verified_user_id()
-    validate_x_user_id_mismatch_rejected()
-    validate_nocobase_auth_failure_does_not_fallback_to_x_user_id()
+    validate_x_user_id_header_sets_current_user()
+    validate_x_user_id_cookie_sets_current_user()
+    validate_x_user_id_header_cookie_mismatch_rejected()
+    validate_x_user_id_missing_rejected()
     print("user provider validation passed")
 
 

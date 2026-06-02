@@ -127,14 +127,14 @@ self.addEventListener('fetch', () => {});
         from api.user_provider import (
             UserProviderAuthError,
             build_user_provider_models_payload,
-            is_user_provider_nocobase_auth_enabled,
-            verified_user_id_from_handler,
+            current_user_id_from_handler,
+            is_user_provider_runtime_enabled,
         )
 
         user_id = None
         try:
-            if is_user_provider_nocobase_auth_enabled():
-                user_id = verified_user_id_from_handler(handler)
+            if is_user_provider_runtime_enabled():
+                user_id = current_user_id_from_handler(handler)
             return j(handler, build_user_provider_models_payload(user_id, get_available_models))
         except UserProviderAuthError as exc:
             return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
@@ -1070,18 +1070,18 @@ def dispatch_post(handler, parsed) -> bool:
             return bad(handler, str(e))
         user_id = None
         from api.user_provider import (
-            is_user_provider_nocobase_auth_enabled,
+            is_user_provider_runtime_enabled,
         )
 
-        if is_user_provider_nocobase_auth_enabled():
+        if is_user_provider_runtime_enabled():
             try:
                 from api.user_provider import (
                     UserProviderAuthError,
-                    verified_user_id_from_handler,
+                    current_user_id_from_handler,
                     verify_user_profile_access,
                 )
 
-                user_id = verified_user_id_from_handler(handler)
+                user_id = current_user_id_from_handler(handler)
                 verify_user_profile_access(user_id, body.get("profile"))
             except UserProviderAuthError as exc:
                 return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)

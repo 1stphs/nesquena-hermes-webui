@@ -1,9 +1,9 @@
 """User-scoped AI provider resolver for the external Hermes frontend.
 
 This module treats NoCoBase providers as optional runtime overlays. The stored
-provider resolver is disabled by default until NoCoBase bearer verification and
-the backing schema / ACLs are verified. The temporary X-User-Id branch is kept
-only for local diagnostics and must not be treated as a permission boundary.
+provider resolver is disabled by default until the frontend-supplied
+X-User-Id context switch is enabled. The server-side NoCoBase token is used
+only for table access; Hermes WebUI determines the current user from X-User-Id.
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 USER_PROVIDER_COLLECTION = "hermes_user_ai_providers"
 PROFILE_COLLECTION = "hermes_profiles"
+X_USER_ID_CONTEXT_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_X_USER_ID_CONTEXT"
 UNTRUSTED_CONTEXT_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_UNTRUSTED_CONTEXT"
-NOCOBASE_AUTH_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_NOCOBASE_AUTH"
-NOCOBASE_AUTH_HEADER = "X-NocoBase-Authorization"
+LEGACY_NOCOBASE_AUTH_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_NOCOBASE_AUTH"
 SUPPORTED_API_MODES = {"anthropic_messages", "codex_responses"}
 VALID_THINKING_LEVELS = {"minimal", "low", "medium", "high", "xhigh"}
 CANONICAL_AGENT_PROVIDER = "custom"
@@ -41,7 +41,6 @@ PROVIDER_TEST_TIMEOUT_SECONDS = 8.0
 PROVIDER_MODELS_TIMEOUT_SECONDS = 6.0
 PROVIDER_RESPONSE_MAX_BYTES = 512 * 1024
 USER_MODELS_CACHE_TTL_SECONDS = 60.0
-MAX_AUTHORIZATION_HEADER_LENGTH = 8192
 BLOCKED_PROVIDER_HOSTNAMES = {
     "localhost",
     "localhost.localdomain",
@@ -137,11 +136,7 @@ def _user_context_ids_from_handler(handler) -> tuple[str, str]:
 
 
 def current_user_id_from_handler(handler) -> str:
-    """Read the temporary frontend-supplied user context.
-
-    This is intentionally unsafe and only allowed behind
-    HERMES_USER_PROVIDER_ENABLE_UNTRUSTED_CONTEXT=1.
-    """
+    """Read the frontend-supplied X-User-Id user context."""
 
     header_user_id, cookie_user_id = _user_context_ids_from_handler(handler)
     if header_user_id and cookie_user_id and header_user_id != cookie_user_id:
@@ -150,81 +145,6 @@ def current_user_id_from_handler(handler) -> str:
     if not user_id:
         raise UserProviderAuthError("Missing user context", status=400, code="missing_user_context")
     return user_id
-
-
-def _normalize_bearer_authorization(value: str) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        raise UserProviderAuthError(
-            "Missing NoCoBase authorization",
-            status=401,
-            code="missing_nocobase_auth",
-        )
-    if len(raw) > MAX_AUTHORIZATION_HEADER_LENGTH or any(ch in raw for ch in "\r\n\t"):
-        raise UserProviderAuthError(
-            "Invalid NoCoBase authorization",
-            status=400,
-            code="invalid_nocobase_auth",
-        )
-    if not raw.lower().startswith("bearer ") or not raw[7:].strip():
-        raise UserProviderAuthError(
-            "Invalid NoCoBase authorization",
-            status=400,
-            code="invalid_nocobase_auth",
-        )
-    return raw
-
-
-def _user_id_from_auth_check_payload(payload: Any) -> str:
-    if isinstance(payload, dict):
-        data = payload.get("data")
-        if isinstance(data, dict):
-            user_id = _normalize_id(data.get("id"))
-            if user_id:
-                return user_id
-        user_id = _normalize_id(payload.get("id"))
-        if user_id:
-            return user_id
-    return ""
-
-
-def verify_nocobase_authorization(authorization: str) -> str:
-    bearer = _normalize_bearer_authorization(authorization)
-    url = f"{_nocobase_base_url()}/api/auth:check"
-    try:
-        payload = _request_json(
-            url,
-            headers={"Authorization": bearer},
-            timeout=NOCOBASE_TIMEOUT_SECONDS,
-        )
-    except Exception as exc:
-        raise UserProviderAuthError(
-            "NoCoBase authorization verification failed",
-            status=401,
-            code="nocobase_auth_failed",
-        ) from exc
-    user_id = _user_id_from_auth_check_payload(payload)
-    if not user_id:
-        raise UserProviderAuthError(
-            "NoCoBase authorization did not return a user",
-            status=401,
-            code="invalid_nocobase_auth",
-        )
-    return user_id
-
-
-def verified_user_id_from_handler(handler) -> str:
-    headers = getattr(handler, "headers", None)
-    verified_user_id = verify_nocobase_authorization(_header_value(headers, NOCOBASE_AUTH_HEADER))
-    header_user_id, cookie_user_id = _user_context_ids_from_handler(handler)
-    for candidate in (header_user_id, cookie_user_id):
-        if candidate and candidate != verified_user_id:
-            raise UserProviderAuthError(
-                "User context mismatch",
-                status=403,
-                code="user_context_mismatch",
-            )
-    return verified_user_id
 
 
 def _nocobase_base_url() -> str:
@@ -342,34 +262,28 @@ def _nocobase_list(collection: str, user_id: str, params: dict[str, Any] | None 
     return [item for item in data if isinstance(item, dict)]
 
 
-def _is_truthy(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled"}
-
-
 def is_user_provider_untrusted_context_enabled() -> bool:
-    """Temporary unsafe switch for the frontend-supplied user context path."""
+    """Switch for the frontend-supplied X-User-Id context path.
 
-    return os.getenv(UNTRUSTED_CONTEXT_ENABLE_ENV, "").strip() == "1"
+    Legacy env names are kept as enable aliases, but incoming NoCoBase bearer
+    is not used to determine the request user.
+    """
 
-
-def is_user_provider_nocobase_auth_enabled() -> bool:
-    """Trusted switch for NoCoBase bearer-bound user context."""
-
-    return os.getenv(NOCOBASE_AUTH_ENABLE_ENV, "").strip() == "1"
+    return (
+        os.getenv(X_USER_ID_CONTEXT_ENABLE_ENV, "").strip() == "1"
+        or os.getenv(UNTRUSTED_CONTEXT_ENABLE_ENV, "").strip() == "1"
+        or os.getenv(LEGACY_NOCOBASE_AUTH_ENABLE_ENV, "").strip() == "1"
+    )
 
 
 def is_user_provider_runtime_enabled() -> bool:
-    return is_user_provider_nocobase_auth_enabled()
+    return is_user_provider_untrusted_context_enabled()
 
 
 def disabled_user_provider_resolution(user_id: str | None = None) -> UserProviderResolution:
     return UserProviderResolution(
         status="disabled",
-        reason="untrusted_context_disabled",
+        reason="x_user_id_context_disabled",
         user_id=str(user_id or "").strip(),
     )
 
@@ -440,7 +354,6 @@ def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[di
         "thinking_level": thinking_level,
         "api_key": api_key,
         "status": str(record.get("status") or "").strip().lower(),
-        "is_default": _is_truthy(record.get("is_default")),
         "updatedAt": str(record.get("updatedAt") or record.get("updated_at") or ""),
     }, ""
 
@@ -464,13 +377,18 @@ def resolve_user_provider(user_id: str) -> UserProviderResolution:
     active_records = [
         record
         for record in records
-        if _is_truthy(record.get("is_default"))
-        and str(record.get("status") or "").strip().lower() == "enabled"
+        if str(record.get("status") or "").strip().lower() == "enabled"
     ]
     if not active_records:
-        return UserProviderResolution(status="disabled", reason="no_enabled_default_provider", user_id=user_id)
+        return UserProviderResolution(status="disabled", reason="no_enabled_provider", user_id=user_id)
 
-    active_records.sort(key=lambda item: str(item.get("updatedAt") or item.get("updated_at") or ""), reverse=True)
+    active_records.sort(
+        key=lambda item: (
+            str(item.get("updatedAt") or item.get("updated_at") or ""),
+            str(item.get("id") or ""),
+        ),
+        reverse=True,
+    )
     provider, reason = _normalize_provider_record(active_records[0], user_id)
     if not provider:
         return UserProviderResolution(status="incomplete", reason=reason or "incomplete_provider", user_id=user_id)
@@ -744,7 +662,6 @@ def _provider_from_test_body(body: dict[str, Any], user_id: str | None = None) -
         "api_mode": body.get("api_mode"),
         "thinking_level": body.get("thinking_level"),
         "status": "enabled",
-        "is_default": True,
         "updatedAt": "",
     }
     return _normalize_provider_record(record, normalized_user_id)

@@ -2289,9 +2289,8 @@ def _run_agent_streaming(
                     resolve_user_provider,
                 )
 
-                # Provider runtime is disabled unless trusted NoCoBase bearer
-                # binding is enabled. The unsafe X-User-Id branch remains
-                # diagnostic-only behind its own explicit switch.
+                # Provider runtime is disabled unless the X-User-Id context
+                # switch is enabled.
                 if is_user_provider_runtime_enabled():
                     _user_provider_resolution = resolve_user_provider(effective_user_id)
                     _user_provider_active = bool(_user_provider_resolution and _user_provider_resolution.is_active)

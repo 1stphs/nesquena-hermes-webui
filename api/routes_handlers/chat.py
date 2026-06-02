@@ -254,18 +254,18 @@ def _handle_chat_start(handler, body):
         return bad(handler, "message is required")
     user_id = None
     from api.user_provider import (
-        is_user_provider_nocobase_auth_enabled,
+        is_user_provider_runtime_enabled,
     )
 
-    if is_user_provider_nocobase_auth_enabled():
+    if is_user_provider_runtime_enabled():
         try:
             from api.user_provider import (
                 UserProviderAuthError,
-                verified_user_id_from_handler,
+                current_user_id_from_handler,
                 verify_user_profile_access,
             )
 
-            user_id = verified_user_id_from_handler(handler)
+            user_id = current_user_id_from_handler(handler)
             verify_user_profile_access(user_id, requested_profile or getattr(s, "profile", None))
             s.user_id = user_id
         except UserProviderAuthError as exc:
