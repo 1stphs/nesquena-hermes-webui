@@ -149,12 +149,12 @@ def _slugify_profile_agent_id(display_name: str, explicit_id: str = "") -> str:
     raw = re.sub(r"-{2,}", "-", raw).strip("-_")
     if not raw:
         raw = f"agent-{uuid.uuid4().hex[:8]}"
-    if len(raw) > 64:
-        raw = raw[:64].strip("-_")
-    if raw == "default" or not re.fullmatch(r"^[a-z0-9][a-z0-9_-]{0,63}$", raw):
+    if len(raw) > 150:
+        raw = raw[:150].strip("-_")
+    if raw == "default" or not re.fullmatch(r"^[a-z0-9][a-z0-9_-]{0,149}$", raw):
         raise ValueError(
             "profile_id must use lowercase letters, numbers, hyphens, underscores, "
-            "start with a letter or number, and be at most 64 characters"
+            "start with a letter or number, and be at most 150 characters"
         )
     return raw
 
@@ -275,7 +275,7 @@ def _profile_agent_create_options(body: dict) -> dict:
     clone_from = body.get("clone_from", _PROFILE_AGENT_DEFAULT_CLONE_FROM)
     if clone_from is not None:
         clone_from = str(clone_from).strip() or None
-        if clone_from and not re.fullmatch(r"^[a-z0-9][a-z0-9_-]{0,63}$", clone_from):
+        if clone_from and not re.fullmatch(r"^[a-z0-9][a-z0-9_-]{0,149}$", clone_from):
             raise ValueError("Invalid clone_from name")
 
     base_url = body.get("base_url", "")

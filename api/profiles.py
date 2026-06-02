@@ -29,7 +29,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ── Constants (match hermes_cli.profiles upstream) ─────────────────────────
-_PROFILE_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
+_PROFILE_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,149}$')
 _PROFILE_DIRS = [
     'memories', 'sessions', 'skills', 'skins',
     'logs', 'plans', 'workspace', 'cron',
@@ -884,7 +884,7 @@ def _validate_profile_name(name: str):
     if not _PROFILE_ID_RE.fullmatch(name):
         raise ValueError(
             f"Invalid profile name {name!r}. "
-            "Must match [a-z0-9][a-z0-9_-]{0,63}"
+            "Must match [a-z0-9][a-z0-9_-]{0,149}"
         )
 
 

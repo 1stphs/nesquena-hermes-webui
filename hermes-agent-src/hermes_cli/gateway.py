@@ -758,7 +758,7 @@ def _profile_suffix() -> str:
     try:
         rel = home.relative_to(profiles_root)
         parts = rel.parts
-        if len(parts) == 1 and re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", parts[0]):
+        if len(parts) == 1 and re.match(r"^[a-z0-9][a-z0-9_-]{0,149}$", parts[0]):
             return parts[0]
     except ValueError:
         pass
@@ -787,7 +787,7 @@ def _profile_arg(hermes_home: str | None = None) -> str:
     try:
         rel = home.relative_to(profiles_root)
         parts = rel.parts
-        if len(parts) == 1 and re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", parts[0]):
+        if len(parts) == 1 and re.match(r"^[a-z0-9][a-z0-9_-]{0,149}$", parts[0]):
             return f"--profile {parts[0]}"
     except ValueError:
         pass

@@ -72,13 +72,13 @@ class TestValidateProfileName:
             validate_profile_name(name)
 
     def test_too_long_rejected(self):
-        long_name = "a" * 65
+        long_name = "a" * 151
         with pytest.raises(ValueError):
             validate_profile_name(long_name)
 
     def test_max_length_accepted(self):
-        # 64 chars total: 1 leading + 63 remaining = 64, within [0,63] range
-        name = "a" * 64
+        # 150 chars total: 1 leading + 149 remaining = 150, within [0,149] range
+        name = "a" * 150
         validate_profile_name(name)
 
     def test_default_accepted(self):
@@ -900,6 +900,16 @@ class TestInternalHelpers:
 
         names = [path.name for path in iter_named_profile_dirs()]
         assert names == ["valid123"]
+
+    def test_iter_named_profile_dirs_accepts_150_character_name(self, profile_env):
+        profiles_root = _get_profiles_root()
+        long_name = "a" * 150
+        (profiles_root / long_name).mkdir(parents=True)
+
+        from hermes_cli.profiles import iter_named_profile_dirs
+
+        names = [path.name for path in iter_named_profile_dirs()]
+        assert names == [long_name]
 
 
 # ===================================================================

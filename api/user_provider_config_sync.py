@@ -32,7 +32,7 @@ from api.user_provider import (
 MODEL_V1_KEYS = ("default", "provider", "base_url", "api_key", "api_mode")
 SYNC_MODE_ACTIVE_PROVIDER = "active_provider"
 SYNC_MODE_ROOT_DEFAULT = "root_default"
-_PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,149}$")
 _USER_SYNC_LOCKS: dict[str, threading.RLock] = {}
 _USER_SYNC_LOCKS_LOCK = threading.Lock()
 _LAST_SYNC_STATUS: dict[tuple[str, str], dict[str, Any]] = {}

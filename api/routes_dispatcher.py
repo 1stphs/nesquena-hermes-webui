@@ -1821,7 +1821,7 @@ def dispatch_post(handler, parsed) -> bool:
             return bad(handler, "name is required")
         import re as _re
 
-        if not _re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", name):
+        if not _re.match(r"^[a-z0-9][a-z0-9_-]{0,149}$", name):
             return bad(
                 handler,
                 "Invalid profile name: lowercase letters, numbers, hyphens, underscores only",
@@ -1829,7 +1829,7 @@ def dispatch_post(handler, parsed) -> bool:
         clone_from = body.get("clone_from")
         if clone_from is not None:
             clone_from = str(clone_from).strip()
-            if not _re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", clone_from):
+            if not _re.match(r"^[a-z0-9][a-z0-9_-]{0,149}$", clone_from):
                 return bad(handler, "Invalid clone_from name")
         base_url = body.get("base_url", "").strip() if body.get("base_url") else None
         api_key = body.get("api_key", "").strip() if body.get("api_key") else None
