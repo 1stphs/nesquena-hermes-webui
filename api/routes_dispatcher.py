@@ -139,6 +139,17 @@ self.addEventListener('fetch', () => {});
         except UserProviderAuthError as exc:
             return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
 
+    if parsed.path == "/api/user-ai-providers":
+        from api.user_provider import current_user_id_from_handler
+        from api.user_provider_management import error_payload, list_user_ai_providers_payload
+
+        try:
+            user_id = current_user_id_from_handler(handler)
+            return j(handler, list_user_ai_providers_payload(user_id))
+        except Exception as exc:
+            payload, status = error_payload(exc)
+            return j(handler, payload, status=status)
+
     if parsed.path == "/api/models/live":
         return _handle_live_models(handler, parsed)
 
@@ -1196,10 +1207,41 @@ def dispatch_post(handler, parsed) -> bool:
             return bad(handler, result.get("error", "Unknown error"))
         return j(handler, result)
 
-    if parsed.path in ("/api/user-ai-providers/test", "/api/user-provider/test"):
-        from api.user_provider import test_user_provider_connection
+    if parsed.path.startswith("/api/user-ai-providers/") or parsed.path == "/api/user-provider/test":
+        from api.user_provider import current_user_id_from_handler
+        from api.user_provider_management import (
+            delete_user_ai_provider_payload,
+            disable_user_ai_provider_payload,
+            enable_user_ai_provider_payload,
+            error_payload,
+            save_user_ai_provider_payload,
+            sync_user_ai_provider_payload,
+            sync_user_ai_provider_profile_payload,
+            test_user_ai_provider_payload,
+        )
 
-        return j(handler, test_user_provider_connection(None, body))
+        try:
+            user_id = current_user_id_from_handler(handler)
+            if parsed.path in ("/api/user-ai-providers/test", "/api/user-provider/test"):
+                return j(handler, test_user_ai_provider_payload(user_id, body))
+            if parsed.path == "/api/user-ai-providers/save":
+                return j(handler, save_user_ai_provider_payload(user_id, body))
+            if parsed.path == "/api/user-ai-providers/enable":
+                provider_id = body.get("id") or body.get("provider_id") or body.get("providerId")
+                return j(handler, enable_user_ai_provider_payload(user_id, provider_id))
+            if parsed.path == "/api/user-ai-providers/disable":
+                provider_id = body.get("id") or body.get("provider_id") or body.get("providerId")
+                return j(handler, disable_user_ai_provider_payload(user_id, provider_id))
+            if parsed.path == "/api/user-ai-providers/delete":
+                provider_id = body.get("id") or body.get("provider_id") or body.get("providerId")
+                return j(handler, delete_user_ai_provider_payload(user_id, provider_id))
+            if parsed.path == "/api/user-ai-providers/sync-profile":
+                return j(handler, sync_user_ai_provider_profile_payload(user_id, body))
+            if parsed.path == "/api/user-ai-providers/sync":
+                return j(handler, sync_user_ai_provider_payload(user_id, body))
+        except Exception as exc:
+            payload, status = error_payload(exc)
+            return j(handler, payload, status=status)
 
     if parsed.path == "/api/reasoning":
         # CLI-parity /reasoning handler — writes to the same config.yaml keys
@@ -1803,7 +1845,22 @@ def dispatch_post(handler, parsed) -> bool:
                 base_url=base_url,
                 api_key=api_key,
             )
-            return j(handler, {"ok": True, "profile": result})
+            provider_sync = None
+            try:
+                from api.user_provider import current_user_id_from_handler, is_user_provider_runtime_enabled
+                from api.user_provider_management import error_payload, sync_new_profile_if_enabled
+
+                if is_user_provider_runtime_enabled():
+                    user_id = current_user_id_from_handler(handler)
+                    provider_sync = sync_new_profile_if_enabled(user_id, name)
+            except Exception as exc:
+                sync_payload, _sync_status = error_payload(exc)
+                provider_sync = {
+                    "status": "sync_failed",
+                    "error": sync_payload.get("error") or "Provider config sync failed",
+                    "code": sync_payload.get("code") or "sync_failed",
+                }
+            return j(handler, {"ok": True, "profile": result, "provider_sync": provider_sync})
         except (ValueError, FileExistsError, RuntimeError) as e:
             return bad(handler, str(e))
 

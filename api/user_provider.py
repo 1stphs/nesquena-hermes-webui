@@ -41,6 +41,16 @@ PROVIDER_TEST_TIMEOUT_SECONDS = 8.0
 PROVIDER_MODELS_TIMEOUT_SECONDS = 6.0
 PROVIDER_RESPONSE_MAX_BYTES = 512 * 1024
 USER_MODELS_CACHE_TTL_SECONDS = 60.0
+PROVIDER_WRITE_FIELDS = {
+    "name",
+    "provider_slug",
+    "base_url",
+    "model_name",
+    "api_mode",
+    "thinking_level",
+    "api_key",
+    "status",
+}
 BLOCKED_PROVIDER_HOSTNAMES = {
     "localhost",
     "localhost.localdomain",
@@ -262,6 +272,160 @@ def _nocobase_list(collection: str, user_id: str, params: dict[str, Any] | None 
     return [item for item in data if isinstance(item, dict)]
 
 
+def _nocobase_mutation(
+    collection: str,
+    action: str,
+    user_id: str,
+    *,
+    params: dict[str, Any] | None = None,
+    body: dict[str, Any] | None = None,
+) -> Any:
+    base_url = _nocobase_base_url()
+    query = ""
+    if params:
+        query = "?" + urllib.parse.urlencode(params, doseq=True)
+    url = f"{base_url}/api/{collection}:{action}{query}"
+    try:
+        return _request_json(
+            url,
+            method="POST",
+            headers=_nocobase_headers(user_id),
+            body=body,
+            timeout=NOCOBASE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        raise UserProviderLookupError(_redact_error(exc, body.get("api_key") if isinstance(body, dict) else None)) from exc
+
+
+def _nocobase_response_record(payload: Any) -> dict[str, Any]:
+    data = payload.get("data") if isinstance(payload, dict) else payload
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
+def list_user_profile_records(user_id: str) -> list[dict[str, Any]]:
+    user_id = _normalize_id(user_id)
+    return _nocobase_list(
+        PROFILE_COLLECTION,
+        user_id,
+        {
+            "filter[user_id]": user_id,
+        },
+    )
+
+
+def list_user_ai_provider_records(user_id: str) -> list[dict[str, Any]]:
+    user_id = _normalize_id(user_id)
+    return _provider_candidates_for_user(user_id)
+
+
+def get_user_ai_provider_record(user_id: str, provider_id: str) -> dict[str, Any]:
+    provider_id = _normalize_id(provider_id)
+    for record in list_user_ai_provider_records(user_id):
+        if str(record.get("id") or "").strip() == provider_id:
+            return record
+    raise UserProviderLookupError("provider not found")
+
+
+def create_user_ai_provider_record(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    user_id = _normalize_id(user_id)
+    payload = _provider_write_body(body, user_id=user_id, partial=False)
+    payload["user_id"] = user_id
+    payload["status"] = "disabled"
+    if not payload.get("provider_slug"):
+        payload["provider_slug"] = f"user-provider-{user_id[:12]}-{int(time.time() * 1000)}"
+    response = _nocobase_mutation(USER_PROVIDER_COLLECTION, "create", user_id, body=payload)
+    return _nocobase_response_record(response)
+
+
+def update_user_ai_provider_record(
+    user_id: str,
+    provider_id: str,
+    body: dict[str, Any],
+    *,
+    partial: bool = True,
+) -> dict[str, Any]:
+    user_id = _normalize_id(user_id)
+    provider_id = _normalize_id(provider_id)
+    payload = _provider_write_body(body, user_id=user_id, partial=partial)
+    response = _nocobase_mutation(
+        USER_PROVIDER_COLLECTION,
+        "update",
+        user_id,
+        params={"filterByTk": provider_id},
+        body=payload,
+    )
+    return _nocobase_response_record(response)
+
+
+def delete_user_ai_provider_record(user_id: str, provider_id: str) -> None:
+    user_id = _normalize_id(user_id)
+    provider_id = _normalize_id(provider_id)
+    _nocobase_mutation(
+        USER_PROVIDER_COLLECTION,
+        "destroy",
+        user_id,
+        params={"filterByTk": provider_id},
+        body={},
+    )
+
+
+def _provider_write_body(body: dict[str, Any], *, user_id: str, partial: bool) -> dict[str, Any]:
+    source = body if isinstance(body, dict) else {}
+    payload: dict[str, Any] = {}
+
+    def has_any(*names: str) -> bool:
+        return any(name in source for name in names)
+
+    def text(*names: str) -> str:
+        for name in names:
+            if name in source:
+                return str(source.get(name) or "").strip()
+        return ""
+
+    field_map = {
+        "name": ("name",),
+        "provider_slug": ("provider_slug", "providerSlug"),
+        "base_url": ("base_url", "baseUrl"),
+        "model_name": ("model_name", "modelName"),
+        "api_mode": ("api_mode", "apiMode"),
+        "thinking_level": ("thinking_level", "thinkingLevel"),
+        "api_key": ("api_key", "apiKey"),
+        "status": ("status",),
+    }
+    for target, names in field_map.items():
+        if not partial or has_any(*names):
+            value = text(*names)
+            if target == "api_key":
+                value = str(source.get("api_key") if "api_key" in source else source.get("apiKey", ""))
+            if target == "api_mode" and value and value not in SUPPORTED_API_MODES:
+                raise UserProviderLookupError("unsupported api_mode")
+            if target == "thinking_level" and value and value not in VALID_THINKING_LEVELS:
+                raise UserProviderLookupError("unsupported thinking_level")
+            if target == "status" and value and value not in {"enabled", "disabled"}:
+                raise UserProviderLookupError("unsupported provider status")
+            if value or (partial and target in {"thinking_level"}):
+                payload[target] = value
+
+    if not partial:
+        missing = [
+            field
+            for field in ("name", "base_url", "model_name", "api_mode", "api_key")
+            if not str(payload.get(field) or "").strip()
+        ]
+        if missing:
+            raise UserProviderLookupError("missing_" + "_".join(missing))
+    if payload.get("base_url"):
+        payload["base_url"] = _validate_base_url(payload["base_url"])
+    if payload.get("api_mode") != "codex_responses":
+        payload["thinking_level"] = ""
+    payload = {key: value for key, value in payload.items() if key in PROVIDER_WRITE_FIELDS}
+    if user_id and not partial:
+        payload["user_id"] = user_id
+    return payload
+
+
 def is_user_provider_untrusted_context_enabled() -> bool:
     """Switch for the frontend-supplied X-User-Id context path.
 
@@ -417,6 +581,42 @@ def public_provider_metadata(provider: dict[str, Any]) -> dict[str, Any]:
         "thinking_level": str(provider.get("thinking_level") or ""),
         "updatedAt": str(provider.get("updatedAt") or ""),
     }
+
+
+def masked_provider_key(api_key: Any) -> str:
+    key = str(api_key or "").strip()
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:3]}****{key[-4:]}"
+
+
+def public_user_ai_provider_record(record: dict[str, Any], sync_status: dict[str, Any] | None = None) -> dict[str, Any]:
+    provider_id = str(record.get("id") or "").strip()
+    status = str(record.get("status") or "disabled").strip().lower() or "disabled"
+    api_mode = str(record.get("api_mode") or "").strip()
+    payload = {
+        "id": provider_id,
+        "user_id": _record_user_id(record),
+        "name": str(record.get("name") or "").strip(),
+        "provider_slug": str(record.get("provider_slug") or provider_id).strip(),
+        "base_url": str(record.get("base_url") or "").strip(),
+        "model_name": str(record.get("model_name") or "").strip(),
+        "api_mode": api_mode,
+        "thinking_level": str(record.get("thinking_level") or "").strip(),
+        "status": status,
+        "enabled": status == "enabled",
+        "active": status == "enabled",
+        "api_key": "",
+        "api_key_masked": masked_provider_key(record.get("api_key")),
+        "has_api_key": bool(str(record.get("api_key") or "").strip()),
+        "createdAt": str(record.get("createdAt") or record.get("created_at") or ""),
+        "updatedAt": str(record.get("updatedAt") or record.get("updated_at") or ""),
+    }
+    if sync_status:
+        payload["sync"] = sync_status
+    return payload
 
 
 def provider_runtime_signature(resolution: UserProviderResolution | None) -> dict[str, Any]:
