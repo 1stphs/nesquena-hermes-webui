@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
@@ -1888,3 +1889,111 @@ class TestSendMediaTimeoutCancelsFuture:
         # 2. Second file still got dispatched — one timeout doesn't abort the batch
         adapter.send_video.assert_called_once()
         assert adapter.send_video.call_args[1]["video_path"] == "/tmp/fast.mp4"
+
+
+def test_profile_cron_home_context_patches_and_restores(monkeypatch, tmp_path):
+    root = tmp_path / "hermes"
+    profile = root / "profiles" / "alpha"
+    (profile / "cron" / "output").mkdir(parents=True)
+    (root / "cron" / "output").mkdir(parents=True)
+
+    monkeypatch.setenv("HERMES_HOME", str(root))
+
+    import cron.jobs as jobs_mod
+    import cron.scheduler as sched_mod
+    from cron.profile_context import profile_cron_home_context
+
+    before = (
+        jobs_mod.JOBS_FILE,
+        sched_mod._LOCK_FILE,
+        os.environ.get("HERMES_HOME"),
+    )
+
+    with profile_cron_home_context(profile):
+        assert jobs_mod.JOBS_FILE == profile / "cron" / "jobs.json"
+        assert sched_mod._LOCK_FILE == profile / "cron" / ".tick.lock"
+        assert os.environ["HERMES_HOME"] == str(profile)
+
+    after = (
+        jobs_mod.JOBS_FILE,
+        sched_mod._LOCK_FILE,
+        os.environ.get("HERMES_HOME"),
+    )
+    assert after == before
+
+
+def test_tick_named_profiles_once_calls_cron_tick_for_each_named_profile(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / "hermes"
+    for name in ("alpha", "beta"):
+        (root / "profiles" / name / "cron" / "output").mkdir(parents=True)
+    (root / "cron" / "output").mkdir(parents=True)
+
+    monkeypatch.setenv("HERMES_HOME", str(root))
+
+    calls = []
+
+    def fake_tick(verbose=False, adapters=None, loop=None):
+        calls.append(os.environ["HERMES_HOME"])
+        return 0
+
+    monkeypatch.setattr("cron.scheduler.tick", fake_tick)
+
+    from gateway.run import _tick_named_profiles_once
+
+    _tick_named_profiles_once(adapters=None, loop=None)
+
+    assert calls == [
+        str(root / "profiles" / "alpha"),
+        str(root / "profiles" / "beta"),
+    ]
+
+
+def test_tick_named_profiles_once_skips_root_cron_store(monkeypatch, tmp_path):
+    root = tmp_path / "hermes"
+    (root / "cron" / "output").mkdir(parents=True)
+    (root / "profiles" / "alpha" / "cron" / "output").mkdir(parents=True)
+
+    monkeypatch.setenv("HERMES_HOME", str(root))
+
+    calls = []
+
+    def fake_tick(verbose=False, adapters=None, loop=None):
+        calls.append(Path(os.environ["HERMES_HOME"]))
+        return 0
+
+    monkeypatch.setattr("cron.scheduler.tick", fake_tick)
+
+    from gateway.run import _tick_named_profiles_once
+
+    _tick_named_profiles_once(adapters=None, loop=None)
+
+    assert root not in calls
+    assert root / "profiles" / "alpha" in calls
+
+
+def test_profile_only_ticker_ignores_root_due_job(monkeypatch, tmp_path):
+    root = tmp_path / "hermes"
+    profile = root / "profiles" / "alpha"
+    (root / "cron" / "output").mkdir(parents=True)
+    (profile / "cron" / "output").mkdir(parents=True)
+
+    monkeypatch.setenv("HERMES_HOME", str(root))
+
+    seen = []
+
+    def fake_tick(verbose=False, adapters=None, loop=None):
+        import cron.jobs as jobs_mod
+
+        seen.append(jobs_mod.JOBS_FILE)
+        return 0
+
+    monkeypatch.setattr("cron.scheduler.tick", fake_tick)
+
+    from gateway.run import _tick_named_profiles_once
+
+    _tick_named_profiles_once()
+
+    assert root / "cron" / "jobs.json" not in seen
+    assert profile / "cron" / "jobs.json" in seen

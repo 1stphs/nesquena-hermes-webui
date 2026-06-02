@@ -11681,6 +11681,19 @@ class GatewayRunner:
         return response
 
 
+def _tick_named_profiles_once(adapters=None, loop=None) -> int:
+    """Run one cron tick for each named profile under the root Hermes home."""
+    from cron.profile_context import profile_cron_home_context
+    from cron.scheduler import tick as cron_tick
+    from hermes_cli.profiles import iter_named_profile_dirs
+
+    executed = 0
+    for profile_home in iter_named_profile_dirs():
+        with profile_cron_home_context(profile_home):
+            executed += cron_tick(verbose=False, adapters=adapters, loop=loop)
+    return executed
+
+
 def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, interval: int = 60):
     """
     Background thread that ticks the cron scheduler at a regular interval.
@@ -11695,7 +11708,6 @@ def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, in
     image/audio/document cache + expired ``hermes debug share`` pastes
     once per hour.
     """
-    from cron.scheduler import tick as cron_tick
     from gateway.platforms.base import cleanup_image_cache, cleanup_document_cache
     from hermes_cli.debug import _sweep_expired_pastes
 
@@ -11707,7 +11719,7 @@ def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, in
     tick_count = 0
     while not stop_event.is_set():
         try:
-            cron_tick(verbose=False, adapters=adapters, loop=loop)
+            _tick_named_profiles_once(adapters=adapters, loop=loop)
         except Exception as e:
             logger.debug("Cron tick error: %s", e)
 

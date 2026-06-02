@@ -283,6 +283,11 @@ def _cron_calendar_days_for_job(job: dict, year: int, month: int, last_day: int)
     next_run_days = _days_from_next_run(job, year, month)
     if isinstance(schedule, dict):
         kind = str(schedule.get("kind") or "").strip().lower()
+        if kind == "cron":
+            expr = schedule.get("expr") or schedule.get("cron")
+            if expr:
+                return _cron_expr_days(str(expr), year, month, last_day) or next_run_days
+            return next_run_days
         if kind == "interval":
             minutes = schedule.get("minutes") or schedule.get("every_minutes")
             hours = schedule.get("hours") or schedule.get("every_hours")

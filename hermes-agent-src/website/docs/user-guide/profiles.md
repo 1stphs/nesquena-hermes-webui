@@ -164,6 +164,17 @@ assistant gateway install     # creates hermes-gateway-assistant service
 
 Each profile gets its own service name. They run independently.
 
+## Automatic cron execution
+
+Automatic cron execution is profile-scoped. The shared gateway ticker scans
+named profiles under `profiles/*/cron/jobs.json`, so each named profile gets
+its own cron store, output directory, and job metadata updates.
+
+Jobs left in the root `~/.hermes/cron/jobs.json` store are not auto-fired by
+this deployment model. If you have older root-level cron jobs, move them into a
+named profile before switching to profile-only ticking or they will stop
+running automatically.
+
 ## Configuring profiles
 
 Each profile has its own:

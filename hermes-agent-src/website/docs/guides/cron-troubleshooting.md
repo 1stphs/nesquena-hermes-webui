@@ -171,11 +171,20 @@ ps aux | grep hermes
 
 ### Check 4: Permissions on jobs.json
 
-Jobs are stored in `~/.hermes/cron/jobs.json`. If this file is not readable/writable by your user, the scheduler will fail silently:
+Auto cron execution is profile-scoped. The shared gateway ticker scans named
+profiles under `profiles/*/cron/jobs.json`. Jobs left in the root
+`~/.hermes/cron/jobs.json` are not auto-fired by this deployment model.
+
+If you previously created cron jobs in the root store, move them into a named
+profile before enabling profile-only ticking, or they will stop running
+automatically.
+
+For named profiles, the scheduler still needs read/write access to that
+profile's own `cron/jobs.json` file:
 
 ```bash
-ls -la ~/.hermes/cron/jobs.json
-chmod 600 ~/.hermes/cron/jobs.json   # Your user should own it
+ls -la ~/.hermes/profiles/<name>/cron/jobs.json
+chmod 600 ~/.hermes/profiles/<name>/cron/jobs.json   # Your user should own it
 ```
 
 ---

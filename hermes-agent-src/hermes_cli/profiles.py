@@ -181,6 +181,22 @@ def profile_exists(name: str) -> bool:
     return get_profile_dir(name).is_dir()
 
 
+def iter_named_profile_dirs() -> List[Path]:
+    """Return valid named profile directories under the default profiles root."""
+    profiles_root = _get_profiles_root()
+    if not profiles_root.is_dir():
+        return []
+
+    result: List[Path] = []
+    for entry in sorted(profiles_root.iterdir()):
+        if not entry.is_dir():
+            continue
+        if not _PROFILE_ID_RE.match(entry.name):
+            continue
+        result.append(entry)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Alias / wrapper script management
 # ---------------------------------------------------------------------------
@@ -344,27 +360,21 @@ def list_profiles() -> List[ProfileInfo]:
         ))
 
     # Named profiles
-    profiles_root = _get_profiles_root()
-    if profiles_root.is_dir():
-        for entry in sorted(profiles_root.iterdir()):
-            if not entry.is_dir():
-                continue
-            name = entry.name
-            if not _PROFILE_ID_RE.match(name):
-                continue
-            model, provider = _read_config_model(entry)
-            alias_path = wrapper_dir / name
-            profiles.append(ProfileInfo(
-                name=name,
-                path=entry,
-                is_default=False,
-                gateway_running=_check_gateway_running(entry),
-                model=model,
-                provider=provider,
-                has_env=(entry / ".env").exists(),
-                skill_count=_count_skills(entry),
-                alias_path=alias_path if alias_path.exists() else None,
-            ))
+    for entry in iter_named_profile_dirs():
+        name = entry.name
+        model, provider = _read_config_model(entry)
+        alias_path = wrapper_dir / name
+        profiles.append(ProfileInfo(
+            name=name,
+            path=entry,
+            is_default=False,
+            gateway_running=_check_gateway_running(entry),
+            model=model,
+            provider=provider,
+            has_env=(entry / ".env").exists(),
+            skill_count=_count_skills(entry),
+            alias_path=alias_path if alias_path.exists() else None,
+        ))
 
     return profiles
 

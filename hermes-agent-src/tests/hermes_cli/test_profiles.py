@@ -881,6 +881,26 @@ class TestInternalHelpers:
         monkeypatch.setenv("HERMES_HOME", str(profile))
         assert get_active_profile_name() == "orchestrator"
 
+    def test_iter_named_profile_dirs_skips_default_root(self, profile_env):
+        create_profile("alpha", no_alias=True)
+        create_profile("beta", no_alias=True)
+
+        from hermes_cli.profiles import iter_named_profile_dirs
+
+        names = [path.name for path in iter_named_profile_dirs()]
+        assert names == ["alpha", "beta"]
+
+    def test_iter_named_profile_dirs_ignores_invalid_directories(self, profile_env):
+        profiles_root = _get_profiles_root()
+        (profiles_root / "valid123").mkdir(parents=True)
+        (profiles_root / "bad.name").mkdir(parents=True)
+        (profiles_root / "_bad").mkdir(parents=True)
+
+        from hermes_cli.profiles import iter_named_profile_dirs
+
+        names = [path.name for path in iter_named_profile_dirs()]
+        assert names == ["valid123"]
+
 
 # ===================================================================
 # Edge cases and additional coverage

@@ -177,3 +177,39 @@ def test_install_webui_cronjob_bridge_is_idempotent(monkeypatch):
     assert cron_service.install_webui_cronjob_bridge() is True
     assert cron_service.install_webui_cronjob_bridge() is True
     assert len(fake_registry.register_calls) == 1
+
+
+def test_cron_calendar_days_for_job_uses_schedule_expr_for_cron_dict():
+    from api.routes_helpers.cron import _cron_calendar_days_for_job
+
+    job = {
+        "enabled": True,
+        "schedule": {
+            "kind": "cron",
+            "expr": "0 19 * * *",
+            "display": "0 19 * * *",
+        },
+        "next_run_at": "2026-06-01T19:00:00+00:00",
+    }
+
+    days = _cron_calendar_days_for_job(job, 2026, 6, 30)
+
+    assert days == set(range(1, 31))
+
+
+def test_cron_calendar_days_for_job_keeps_legacy_schedule_cron_key():
+    from api.routes_helpers.cron import _cron_calendar_days_for_job
+
+    job = {
+        "enabled": True,
+        "schedule": {
+            "kind": "cron",
+            "cron": "0 19 * * *",
+            "display": "0 19 * * *",
+        },
+        "next_run_at": "2026-06-01T19:00:00+00:00",
+    }
+
+    days = _cron_calendar_days_for_job(job, 2026, 6, 30)
+
+    assert days == set(range(1, 31))
