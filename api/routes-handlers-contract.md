@@ -6,168 +6,11 @@
 
 ```json
 {
-  "contracts": [
-    {
-      "file": "tests/test_cron_run_job_import.py",
-      "kind": "ast_extracted_function",
-      "line": 1,
-      "value": "_cron_job_subprocess_main"
-    },
-    {
-      "file": "tests/test_cron_run_job_import.py",
-      "kind": "ast_extracted_function",
-      "line": 1,
-      "value": "_handle_cron_run"
-    },
-    {
-      "file": "tests/test_cron_run_job_import.py",
-      "kind": "ast_extracted_function",
-      "line": 1,
-      "value": "_run_cron_tracked"
-    },
-    {
-      "file": "tests/test_cron_run_job_import.py",
-      "kind": "function_source_extract",
-      "line": 29,
-      "value": "_cron_job_subprocess_main"
-    },
-    {
-      "file": "tests/test_cron_run_job_import.py",
-      "kind": "function_source_extract",
-      "line": 73,
-      "value": "_handle_cron_run"
-    },
-    {
-      "file": "tests/test_cron_run_job_import.py",
-      "kind": "function_source_extract",
-      "line": 87,
-      "value": "_run_cron_tracked"
-    },
-    {
-      "file": "tests/test_cron_run_job_import.py",
-      "kind": "function_source_extract",
-      "line": 92,
-      "value": "_cron_job_subprocess_main"
-    },
-    {
-      "file": "tests/test_issue1164_env_file_corruption.py",
-      "kind": "inspect_getsource_function",
-      "line": 1,
-      "value": "_write_env_file"
-    },
-    {
-      "file": "tests/test_issue1164_env_file_corruption.py",
-      "kind": "inspect_getsource",
-      "line": 150,
-      "value": "_write_env_file"
-    },
-    {
-      "file": "tests/test_issue1164_env_file_corruption.py",
-      "kind": "inspect_getsource",
-      "line": 162,
-      "value": "_write_env_file"
-    },
-    {
-      "file": "tests/test_issue1511_dedup_shared_reference.py",
-      "kind": "inspect_getsource_function",
-      "line": 1,
-      "value": "cfg_mod"
-    },
-    {
-      "file": "tests/test_issue1511_dedup_shared_reference.py",
-      "kind": "inspect_getsource_function",
-      "line": 1,
-      "value": "get_models_grouped"
-    },
-    {
-      "file": "tests/test_issue1511_dedup_shared_reference.py",
-      "kind": "inspect_getsource",
-      "line": 197,
-      "value": "get_models_grouped"
-    },
-    {
-      "file": "tests/test_issue1511_dedup_shared_reference.py",
-      "kind": "inspect_getsource",
-      "line": 197,
-      "value": "cfg_mod"
-    },
-    {
-      "file": "tests/test_minimax_provider.py",
-      "kind": "inspect_getsource_function",
-      "line": 1,
-      "value": "get_available_models"
-    },
-    {
-      "file": "tests/test_minimax_provider.py",
-      "kind": "inspect_getsource",
-      "line": 156,
-      "value": "get_available_models"
-    },
-    {
-      "file": "tests/test_minimax_provider.py",
-      "kind": "inspect_getsource",
-      "line": 166,
-      "value": "get_available_models"
-    },
-    {
-      "file": "tests/test_security_redaction.py",
-      "kind": "inspect_getsource_function",
-      "line": 1,
-      "value": "_handle_session_export"
-    },
-    {
-      "file": "tests/test_security_redaction.py",
-      "kind": "inspect_getsource",
-      "line": 309,
-      "value": "_handle_session_export"
-    },
-    {
-      "file": "tests/test_session_import_cli_fallback_model.py",
-      "kind": "ast_extracted_function",
-      "line": 1,
-      "value": "_handle_session_import_cli"
-    },
-    {
-      "file": "tests/test_session_import_cli_fallback_model.py",
-      "kind": "function_source_extract",
-      "line": 33,
-      "value": "_handle_session_import_cli"
-    },
-    {
-      "file": "tests/test_session_import_cli_fallback_model.py",
-      "kind": "function_source_extract",
-      "line": 57,
-      "value": "_handle_session_import_cli"
-    },
-    {
-      "file": "tests/test_session_sidecar_repair.py",
-      "kind": "inspect_getsource_function",
-      "line": 1,
-      "value": "_run_agent_streaming"
-    },
-    {
-      "file": "tests/test_session_sidecar_repair.py",
-      "kind": "inspect_getsource",
-      "line": 667,
-      "value": "_run_agent_streaming"
-    },
-    {
-      "file": "tests/test_sprint29.py",
-      "kind": "inspect_getsource_function",
-      "line": 1,
-      "value": "_hash_password"
-    },
-    {
-      "file": "tests/test_sprint29.py",
-      "kind": "inspect_getsource",
-      "line": 643,
-      "value": "_hash_password"
-    }
-  ],
+  "contracts": [],
   "counts": {
-    "green": 80,
+    "green": 84,
     "red": 0,
-    "yellow": 3
+    "yellow": 0
   },
   "errors": [],
   "ratings": [
@@ -318,10 +161,8 @@
     {
       "function": "_handle_cron_run",
       "location": "api/routes_handlers/cron_write.py",
-      "reasons": [
-        "repo-wide source tests reference the function definition"
-      ],
-      "status": "yellow"
+      "reasons": [],
+      "status": "green"
     },
     {
       "function": "_handle_cron_run_detail",
@@ -516,6 +357,12 @@
       "status": "green"
     },
     {
+      "function": "_handle_profile_install_profiles",
+      "location": "api/routes_handlers/profile.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
       "function": "_handle_profile_memory_read",
       "location": "api/routes_handlers/profile.py",
       "reasons": [],
@@ -554,10 +401,8 @@
     {
       "function": "_handle_session_export",
       "location": "api/routes_handlers/session_extra.py",
-      "reasons": [
-        "inspect.getsource(routes._handle_session_export) is used by tests"
-      ],
-      "status": "yellow"
+      "reasons": [],
+      "status": "green"
     },
     {
       "function": "_handle_session_import",
@@ -568,10 +413,8 @@
     {
       "function": "_handle_session_import_cli",
       "location": "api/routes_handlers/session_extra.py",
-      "reasons": [
-        "repo-wide source tests reference the function definition"
-      ],
-      "status": "yellow"
+      "reasons": [],
+      "status": "green"
     },
     {
       "function": "_handle_sessions_cleanup",
@@ -681,8 +524,8 @@
 
 ## Summary
 
-- green: 80
-- yellow: 3
+- green: 84
+- yellow: 0
 - red: 0
 
 ## Ratings
@@ -713,7 +556,7 @@
 | green | `_handle_cron_pause` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
 | green | `_handle_cron_recent` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
 | green | `_handle_cron_resume` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
-| yellow | `_handle_cron_run` | `api/routes_handlers/cron_write.py` | repo-wide source tests reference the function definition |
+| green | `_handle_cron_run` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
 | green | `_handle_cron_run_detail` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
 | green | `_handle_cron_status` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
 | green | `_handle_cron_update` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
@@ -746,15 +589,16 @@
 | green | `_handle_profile_agent_update` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_agents_list` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_change_soul` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_install_profiles` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_memory_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_memory_write` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_soul_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_user_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_user_write` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_session_compress` | `api/routes_handlers/chat.py` | no source-level contract detected |
-| yellow | `_handle_session_export` | `api/routes_handlers/session_extra.py` | inspect.getsource(routes._handle_session_export) is used by tests |
+| green | `_handle_session_export` | `api/routes_handlers/session_extra.py` | no source-level contract detected |
 | green | `_handle_session_import` | `api/routes_handlers/session_io.py` | no source-level contract detected |
-| yellow | `_handle_session_import_cli` | `api/routes_handlers/session_extra.py` | repo-wide source tests reference the function definition |
+| green | `_handle_session_import_cli` | `api/routes_handlers/session_extra.py` | no source-level contract detected |
 | green | `_handle_sessions_cleanup` | `api/routes_handlers/session_extra.py` | no source-level contract detected |
 | green | `_handle_sessions_search` | `api/routes_handlers/session_io.py` | no source-level contract detected |
 | green | `_handle_skill_delete` | `api/routes_handlers/skill.py` | no source-level contract detected |
