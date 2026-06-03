@@ -47,9 +47,9 @@ python3 bootstrap.py
 
 ## 3. Docker 与部署
 
-当前生产部署以仓库内 `docker-compose.yml` 为准。部署细节、服务器路径、容器关系和 smoke test 步骤见:
+当前生产部署以仓库内 `docker-compose.yml` 为准。172 服务器部署 runbook 位置:
 
-- `docs/deploy-172.md`
+- `docs/deploy-172.md`: 从本地电脑提交/push、SSH 到服务器拉取代码、`docker compose` 重建、服务器路径、容器关系和 smoke test 步骤。
 
 其他保留文档:
 

@@ -1,16 +1,21 @@
 # Deploy 172.234.237.195
 
-This runbook is for deploying this Hermes API service to the existing server:
+This runbook deploys the Hermes API service from a local development machine to
+the existing production server.
 
 ```text
 host: 172.234.237.195
 ssh user: root
 public API URL: http://172.234.237.195:8787
+active server repo: /var/www/nesquena-hermes-webui
+active compose file: /var/www/nesquena-hermes-webui/docker-compose.yml
 ```
 
-Do not write the SSH password, service password, `hermes_session`, long-lived API token, or provider API keys into this repository. Enter secrets interactively or load them from a local password manager.
+Do not write SSH passwords, service passwords, `hermes_session` cookies,
+long-lived API tokens, or provider API keys into this repository. Enter secrets
+interactively or load them from a local password manager.
 
-If you make a private local deployment script, keep the host fixed and leave the password blank in committed files:
+If you keep a private local deployment helper, commit only blank secret fields:
 
 ```bash
 SSH_HOST="172.234.237.195"
@@ -18,85 +23,96 @@ SSH_USER="root"
 SSH_PASSWORD=""
 ```
 
-Fill `SSH_PASSWORD` only in a local uncommitted copy, or pass it through your shell/password manager at runtime.
-
-## Service Map
+## Current Services
 
 Current production relationship on `172.234.237.195`:
 
 | Port | Container | Image | Purpose |
 |---:|---|---|---|
-| `8787` | `hermes-webui` | `hermes-webui-token-login:latest` | Hermes API service. The Vue frontend should call this layer through `/api/*`. |
-| `8642` | `hermes` | `nousresearch/hermes-agent:latest` | Hermes OpenAI-compatible `/v1` API Server. Publicly reachable, requires API key. |
-| `8643` | `hermes-foxu` | `nousresearch/hermes-agent:latest` | Another Hermes OpenAI-compatible `/v1` API Server. Publicly reachable, requires API key. |
+| `8787` | `hermes-webui` | `hermes-webui-token-login:latest` | Hermes API service. External frontends call this layer through `/api/*`. |
+| `8642` | `hermes` | `hermes-agent-profile-foxu:latest` | Separate Hermes OpenAI-compatible `/v1` API Server. Publicly reachable, requires API key. |
 
-The `8787` API chat flow is not a direct proxy to `8642` or `8643`. It uses this service's own profile/session/chat/stream API and the mounted Hermes home plus Hermes agent source:
-
-```text
-Browser or Vue -> http://172.234.237.195:8787/api/* -> Hermes API service -> shared Hermes home / agent runtime
-```
-
-The API Server ports are separate:
+`8787` is not a proxy to `8642`. It runs this repository's profile, session,
+chat, stream, auth, memory, workspace, and skill APIs against the mounted Hermes
+home and agent source.
 
 ```text
+Vue / browser -> http://172.234.237.195:8787/api/* -> Hermes API service
 OpenAI-compatible client -> http://172.234.237.195:8642/v1/*
-OpenAI-compatible client -> http://172.234.237.195:8643/v1/*
 ```
 
-## Server Paths
+Do not rebuild or restart the `hermes` container when deploying this WebUI API
+service unless you are intentionally deploying the separate OpenAI-compatible
+API server.
 
-Current server layout:
+## Current Server State
+
+The `hermes-webui` container is owned by this compose project:
 
 ```text
-active compose dir: /var/www/nesquena-hermes-webui
-active compose file: /var/www/nesquena-hermes-webui/docker-compose.yml
-source dir:         /var/www/nesquena-hermes-webui
-Hermes home:        /root/.hermes
-API service state:  /root/.hermes/webui-mvp
-workspace:          /root/.hermes/workspace
-agent src:          /var/www/nesquena-hermes-webui/hermes-agent-src
+project=nesquena-hermes-webui
+service=hermes-webui
+config_files=/var/www/nesquena-hermes-webui/docker-compose.yml
+working_dir=/var/www/nesquena-hermes-webui
 ```
 
-The API service container sees those paths as:
+Important host paths:
+
+```text
+repo / compose dir: /var/www/nesquena-hermes-webui
+Hermes home:        /var/www/hermes-agent/.hermes
+API service state:  /var/www/hermes-agent/.hermes/webui-mvp
+default workspace:  /var/www/hermes-agent/.hermes/profiles
+agent source:       /var/www/nesquena-hermes-webui/hermes-agent-src
+skills hub:         /var/www/hermes_skills_hub
+```
+
+Important container paths:
 
 ```text
 /home/hermeswebui/.hermes
+/.hermes
 /home/hermeswebui/.hermes/webui-mvp
-/home/hermeswebui/.hermes/workspace
+/.hermes/profiles
 /home/hermeswebui/.hermes/hermes-agent
+/var/www/hermes_skills_hub
 ```
 
 Current important mounts:
 
 ```text
-/root/.hermes:/home/hermeswebui/.hermes
+/var/www/hermes-agent/.hermes:/home/hermeswebui/.hermes
+/var/www/hermes-agent/.hermes:/.hermes
 /var/www/nesquena-hermes-webui/hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
-/var/www/hermes-community-skills:/var/www/hermes-community-skills:ro
-/var/www/hermes-built-in-skills:/var/www/hermes-built-in-skills:ro
-/var/www/hermes-optional-skills:/var/www/hermes-optional-skills:ro
-/var/www/hermes-bioclaw-skills:/var/www/hermes-bioclaw-skills:ro
+/var/www/hermes_skills_hub:/var/www/hermes_skills_hub:ro
 ```
 
-Current important service environment:
+Current important environment:
 
 ```text
 HERMES_WEBUI_HOST=0.0.0.0
 HERMES_WEBUI_PORT=8787
 HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui-mvp
-HERMES_WEBUI_DEFAULT_WORKSPACE=/home/hermeswebui/.hermes/workspace
+HERMES_WEBUI_API_TOKENS_FILE=/home/hermeswebui/.hermes/webui-mvp/api_tokens.json
+HERMES_WEBUI_DEFAULT_WORKSPACE=/.hermes/profiles
 HERMES_HOME=/home/hermeswebui/.hermes
+HERMES_WEBUI_AGENT_DIR=/home/hermeswebui/.hermes/hermes-agent
+HERMES_SKILLS_HUB_DIR=/var/www/hermes_skills_hub
+HERMES_COMMUNITY_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-community-skills
+HERMES_BUILT_IN_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-built-in-skills
+HERMES_OPTIONAL_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-optional-skills
+HERMES_BIOCLAW_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-bioclaw-skills
+HERMES_TALENT_MARKET_DIR=/var/www/hermes_skills_hub/hermes_talent_market
 HERMES_WEBUI_CORS_ALLOW_ALL=1
 ```
 
-The older `/var/www/hermes-agent-webui` directory may still exist on the server,
-but it is not the current compose owner of the running `hermes-webui` container.
-Before rebuilding, always trust the compose labels from `docker inspect`; using a
-different compose directory can create a separate compose project and hit a
-`container name "/hermes-webui" is already in use` conflict.
+The old `/root/.hermes` layout may appear in historical notes, but it is not the
+current WebUI API service state path. Do not use `/root/.hermes` as the source of
+truth for this compose deployment.
 
 ## Token Login State
 
-The deployed API service includes the long-lived token login patch:
+The API service supports long-lived token login:
 
 ```http
 POST /api/auth/token-login
@@ -105,7 +121,7 @@ POST /api/auth/token-login
 Token config is stored on the server at:
 
 ```text
-/root/.hermes/webui-mvp/api_tokens.json
+/var/www/hermes-agent/.hermes/webui-mvp/api_tokens.json
 ```
 
 The current test token id is:
@@ -117,14 +133,15 @@ digital-employee-local-test
 The plaintext test token is stored only on the server in a root-only file:
 
 ```text
-/root/.hermes/webui-mvp/api_token.digital-employee-local-test.secret
+/var/www/hermes-agent/.hermes/webui-mvp/api_token.digital-employee-local-test.secret
 ```
 
-Do not print that token in logs or paste it into docs. The JSON config stores only `sha256:<hex>` token hashes.
+Do not print that token in logs or paste it into docs. The JSON config stores
+only `sha256:<hex>` token hashes.
 
-## Deploy From Local Changes
+## Deploy From Local Machine
 
-From the local development machine, first commit and push the API service changes:
+On the local development machine, commit and push the API service changes:
 
 ```bash
 cd '/Users/mac/Documents/ljl-project/nesquena:hermes-webui'
@@ -132,21 +149,22 @@ git status --short
 git push origin master
 ```
 
-Then SSH directly into the server:
+Then SSH into the server:
 
 ```bash
 ssh root@172.234.237.195
 ```
 
-After login, run a read-only status check before changing anything:
+All remaining commands in this section run on the server.
+
+First confirm the active container and compose ownership:
 
 ```bash
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}'
-docker inspect hermes-webui --format '{{json .Mounts}}'
 docker inspect hermes-webui --format 'project={{ index .Config.Labels "com.docker.compose.project" }} service={{ index .Config.Labels "com.docker.compose.service" }} config_files={{ index .Config.Labels "com.docker.compose.project.config_files" }} working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
+docker inspect hermes-webui --format '{{range .Mounts}}{{println .Source "=>" .Destination "(" .Mode ")"}}{{end}}'
 ```
 
-Do not copy secrets from `docker inspect` into tickets, commits, docs, or chat logs.
 Avoid dumping `.Config.Env` unless you are specifically debugging environment
 inheritance; it may contain deployment secrets.
 
@@ -161,34 +179,31 @@ git log --oneline -1 origin/master
 git pull --ff-only origin master
 ```
 
-Build and recreate only the WebUI service, preserving existing volumes and port mappings:
+Build and recreate only the WebUI API service:
 
 ```bash
 cd /var/www/nesquena-hermes-webui
 docker compose up -d --build hermes-webui
 ```
 
-Expected compose owner after the rebuild:
+This preserves the existing service name, container name, port mapping, and
+mounted state volumes.
+
+Confirm the compose owner after deploy:
 
 ```bash
 docker inspect hermes-webui --format 'project={{ index .Config.Labels "com.docker.compose.project" }} service={{ index .Config.Labels "com.docker.compose.service" }} config_files={{ index .Config.Labels "com.docker.compose.project.config_files" }} working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
 ```
 
-Expected label values:
+Expected:
 
 ```text
-project=nesquena-hermes-webui
-service=hermes-webui
-config_files=/var/www/nesquena-hermes-webui/docker-compose.yml
-working_dir=/var/www/nesquena-hermes-webui
+project=nesquena-hermes-webui service=hermes-webui config_files=/var/www/nesquena-hermes-webui/docker-compose.yml working_dir=/var/www/nesquena-hermes-webui
 ```
 
-Keep the existing service name, container name, volumes, state directory, and
-`8787:8787` port mapping. Do not rebuild or restart `hermes` or `hermes-foxu`
-unless you are intentionally deploying the separate `8642` / `8643` API Server
-containers.
+## Conflict Handling
 
-If `docker compose up` prints a conflict like:
+If `docker compose up` prints:
 
 ```text
 container name "/hermes-webui" is already in use
@@ -206,8 +221,8 @@ Then `cd` to the printed `working_dir` and rerun:
 docker compose up -d --build --force-recreate hermes-webui
 ```
 
-Do not manually remove the existing `hermes-webui` container as the first fix;
-the usual cause is deploying from the wrong compose project.
+Do not manually remove `hermes-webui` as the first fix. A name conflict usually
+means the command was run from the wrong compose project.
 
 ## Smoke Test
 
@@ -237,7 +252,7 @@ print(hasattr(routes, "_requested_sessions_profile"))
 PY
 ```
 
-For the profile-scoped sessions deployment, expected output includes:
+Expected output includes:
 
 ```text
 /apptoo/api/routes.py
@@ -256,7 +271,6 @@ Expected:
 
 ```text
 HTTP/1.0 204 No Content
-Access-Control-Allow-Origin: http://localhost:5173
 Access-Control-Allow-Credentials: true
 Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS
 Access-Control-Allow-Headers: Content-Type, Authorization
@@ -266,7 +280,7 @@ Vary: Origin
 Token login without printing the token:
 
 ```bash
-TOKEN="$(cat /root/.hermes/webui-mvp/api_token.digital-employee-local-test.secret)"
+TOKEN="$(cat /var/www/hermes-agent/.hermes/webui-mvp/api_token.digital-employee-local-test.secret)"
 curl -sS -D /tmp/hermes-token-login.headers \
   -c /tmp/hermes-cookie.jar \
   -o /tmp/hermes-token-login.json \
@@ -276,6 +290,7 @@ curl -sS -D /tmp/hermes-token-login.headers \
   -d "{\"token\":\"${TOKEN}\"}"
 python3 -m json.tool /tmp/hermes-token-login.json
 grep -qi 'Set-Cookie: hermes_session=' /tmp/hermes-token-login.headers && echo 'set-cookie: ok'
+unset TOKEN
 ```
 
 Expected JSON:
@@ -303,7 +318,7 @@ Expected:
 profiles_http=200
 ```
 
-Public smoke test from local machine:
+Public smoke test from the local development machine:
 
 ```bash
 curl -i --max-time 8 http://172.234.237.195:8787/health
@@ -317,7 +332,6 @@ Expected:
 ```text
 HTTP/1.0 200 OK
 HTTP/1.0 204 No Content
-Access-Control-Allow-Origin: http://localhost:5173
 Access-Control-Allow-Credentials: true
 ```
 
@@ -367,20 +381,23 @@ new EventSource('/hermes/api/chat/stream?stream_id=...', {
 
 ## Rollback
 
-To roll back only API service code, use the previous image or previous git commit while preserving all volumes:
+To roll back only the WebUI API service code, choose a previous known-good
+commit in `/var/www/nesquena-hermes-webui`:
 
 ```bash
 cd /var/www/nesquena-hermes-webui
 git log --oneline -5
-```
-
-Pick the previous known-good commit in `/var/www/nesquena-hermes-webui`, then
-rebuild the active compose project:
-
-```bash
-cd /var/www/nesquena-hermes-webui
+git checkout <known-good-commit>
 docker compose up -d --build --force-recreate hermes-webui
 ```
 
-Do not delete `/root/.hermes`, `/root/.hermes/webui-mvp`, or
-`/root/.hermes/workspace` during rollback.
+After the rollback, run the smoke tests above.
+
+Do not delete these host paths during rollback:
+
+```text
+/var/www/hermes-agent/.hermes
+/var/www/hermes-agent/.hermes/webui-mvp
+/var/www/hermes-agent/.hermes/profiles
+/var/www/hermes_skills_hub
+```
