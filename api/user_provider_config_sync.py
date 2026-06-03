@@ -136,6 +136,78 @@ def sync_single_profile_model_config(
     )
 
 
+def sync_user_provider_model_config_targets(
+    *,
+    user_id: str,
+    mode: str,
+    provider: dict[str, Any] | None = None,
+    targets: Iterable[dict[str, Any]] | None = None,
+    dry_run: bool = False,
+    request_id: str | None = None,
+    use_lock: bool = True,
+) -> dict[str, Any]:
+    """把 model_v1 同步到内部显式 config.yaml 目标。
+
+    调用方必须先从服务端可信来源构建并校验目标路径；这里不接收
+    客户端路径或 profile 名称。
+    """
+    if use_lock:
+        with user_provider_sync_lock(user_id):
+            return _sync_user_provider_model_config_targets(
+                user_id=user_id,
+                mode=mode,
+                provider=provider,
+                targets=targets,
+                dry_run=dry_run,
+                request_id=request_id,
+            )
+    return _sync_user_provider_model_config_targets(
+        user_id=user_id,
+        mode=mode,
+        provider=provider,
+        targets=targets,
+        dry_run=dry_run,
+        request_id=request_id,
+    )
+
+
+def sync_user_provider_model_config_groups(
+    *,
+    user_id: str,
+    mode: str,
+    provider: dict[str, Any] | None = None,
+    profile_names: Iterable[str] | None = None,
+    profile_records: list[dict[str, Any]] | None = None,
+    targets: Iterable[dict[str, Any]] | None = None,
+    dry_run: bool = False,
+    request_id: str | None = None,
+    use_lock: bool = True,
+) -> dict[str, Any]:
+    """把运行态 profile 和显式 config 目标合并成一次受控同步。"""
+    if use_lock:
+        with user_provider_sync_lock(user_id):
+            return _sync_user_provider_model_config_groups(
+                user_id=user_id,
+                mode=mode,
+                provider=provider,
+                profile_names=profile_names,
+                profile_records=profile_records,
+                targets=targets,
+                dry_run=dry_run,
+                request_id=request_id,
+            )
+    return _sync_user_provider_model_config_groups(
+        user_id=user_id,
+        mode=mode,
+        provider=provider,
+        profile_names=profile_names,
+        profile_records=profile_records,
+        targets=targets,
+        dry_run=dry_run,
+        request_id=request_id,
+    )
+
+
 def _sync_user_provider_model_config(
     *,
     user_id: str,
@@ -154,50 +226,175 @@ def _sync_user_provider_model_config(
         source = _source_model_v1(mode, provider)
         targets = _target_profiles(user_id, profile_names=profile_names, profile_records=profile_records)
         plan = _build_plan(user_id=user_id, mode=mode, source=source, targets=targets, request_id=request_id)
-        if dry_run:
-            return {
-                "ok": True,
-                "status": "dry_run",
-                "request_id": request_id,
-                "mode": mode,
-                "profiles": [_public_profile_plan(item) for item in plan],
-            }
-        written: list[dict[str, Any]] = []
+        return _execute_model_config_plan(
+            mode=mode,
+            request_id=request_id,
+            source=source,
+            plan=plan,
+            dry_run=dry_run,
+            items_key="profiles",
+        )
+
+
+def _sync_user_provider_model_config_groups(
+    *,
+    user_id: str,
+    mode: str,
+    provider: dict[str, Any] | None,
+    profile_names: Iterable[str] | None,
+    profile_records: list[dict[str, Any]] | None,
+    targets: Iterable[dict[str, Any]] | None,
+    dry_run: bool,
+    request_id: str | None,
+) -> dict[str, Any]:
+    with _PROFILE_CONFIG_SYNC_LOCK:
+        request_id = _safe_text(request_id) or uuid.uuid4().hex
+        user_id = _safe_text(user_id)
+        if not user_id:
+            raise UserProviderConfigSyncError("Missing user context", code="missing_user_context", status=400)
+        source = _source_model_v1(mode, provider)
         try:
-            for item in plan:
-                failed_item = item
-                result = _write_profile_plan(item)
-                written.append(result)
-                failed_item = None
-        except Exception as exc:
-            rollback_results = _rollback_written_profiles(written)
-            profiles = [_public_write_result(item) for item in written]
-            if failed_item is not None:
-                profiles.append(_public_failed_write_result(failed_item, exc, _source_secret(source)))
-            payload = {
-                "ok": False,
-                "status": "sync_failed",
-                "request_id": request_id,
-                "mode": mode,
-                "profiles": profiles,
-                "rollback": rollback_results,
-                "error": _safe_error(exc, _source_secret(source)),
-            }
+            profile_targets = _target_profiles(user_id, profile_names=profile_names, profile_records=profile_records)
+            profile_plan = _build_plan(
+                user_id=user_id,
+                mode=mode,
+                source=source,
+                targets=profile_targets,
+                request_id=request_id,
+            )
+            config_target_plan = _build_config_path_plan(
+                user_id=user_id,
+                mode=mode,
+                source=source,
+                targets=list(targets or []),
+                request_id=request_id,
+            )
+            plan = profile_plan + config_target_plan
+            result = _execute_model_config_plan(
+                mode=mode,
+                request_id=request_id,
+                source=source,
+                plan=plan,
+                dry_run=dry_run,
+                items_key="items",
+            )
+        except UserProviderConfigSyncError as exc:
+            payload = dict(exc.payload or {})
+            payload.setdefault("ok", False)
+            payload.setdefault("status", "sync_failed")
+            payload.setdefault("request_id", request_id)
+            payload.setdefault("mode", mode)
+            payload = _group_items_payload(payload)
             raise UserProviderConfigSyncError(
-                "Provider config sync failed",
-                code="sync_failed",
-                status=500,
+                str(exc),
+                code=exc.code,
+                status=exc.status,
                 payload=payload,
             ) from exc
+        return _group_items_payload(result)
 
-        _invalidate_agent_caches()
+
+def _sync_user_provider_model_config_targets(
+    *,
+    user_id: str,
+    mode: str,
+    provider: dict[str, Any] | None,
+    targets: Iterable[dict[str, Any]] | None,
+    dry_run: bool,
+    request_id: str | None,
+) -> dict[str, Any]:
+    with _PROFILE_CONFIG_SYNC_LOCK:
+        request_id = _safe_text(request_id) or uuid.uuid4().hex
+        user_id = _safe_text(user_id)
+        if not user_id:
+            raise UserProviderConfigSyncError("Missing user context", code="missing_user_context", status=400)
+        source = _source_model_v1(mode, provider)
+        plan = _build_config_path_plan(
+            user_id=user_id,
+            mode=mode,
+            source=source,
+            targets=list(targets or []),
+            request_id=request_id,
+        )
+        return _execute_model_config_plan(
+            mode=mode,
+            request_id=request_id,
+            source=source,
+            plan=plan,
+            dry_run=dry_run,
+            items_key="targets",
+        )
+
+
+def _execute_model_config_plan(
+    *,
+    mode: str,
+    request_id: str,
+    source: dict[str, Any],
+    plan: list[dict[str, Any]],
+    dry_run: bool,
+    items_key: str,
+) -> dict[str, Any]:
+    if dry_run:
         return {
             "ok": True,
-            "status": "synced",
+            "status": "dry_run",
             "request_id": request_id,
             "mode": mode,
-            "profiles": [_public_write_result(item) for item in written],
+            items_key: [_public_profile_plan(item) for item in plan],
         }
+    written: list[dict[str, Any]] = []
+    failed_item: dict[str, Any] | None = None
+    try:
+        for item in plan:
+            failed_item = item
+            result = _write_profile_plan(item)
+            written.append(result)
+            failed_item = None
+    except Exception as exc:
+        rollback_results = _rollback_written_profiles(written)
+        results = [_public_write_result(item) for item in written]
+        if failed_item is not None:
+            results.append(_public_failed_write_result(failed_item, exc, _source_secret(source)))
+        payload = {
+            "ok": False,
+            "status": "sync_failed",
+            "request_id": request_id,
+            "mode": mode,
+            items_key: results,
+            "rollback": rollback_results,
+            "error": _safe_error(exc, _source_secret(source)),
+        }
+        raise UserProviderConfigSyncError(
+            "Provider config sync failed",
+            code="sync_failed",
+            status=500,
+            payload=payload,
+        ) from exc
+
+    _invalidate_agent_caches()
+    return {
+        "ok": True,
+        "status": "synced",
+        "request_id": request_id,
+        "mode": mode,
+        items_key: [_public_write_result(item) for item in written],
+    }
+
+
+def _group_items_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = dict(payload or {})
+    items = list(next_payload.pop("items", []) or [])
+    grouped_profiles: list[dict[str, Any]] = []
+    grouped_targets: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict) and "target" in item:
+            grouped_targets.append(item)
+        else:
+            grouped_profiles.append(item)
+    next_payload["profiles"] = grouped_profiles
+    next_payload["targets"] = grouped_targets
+    return next_payload
 
 
 def _source_model_v1(mode: str, provider: dict[str, Any] | None) -> dict[str, Any]:
@@ -321,6 +518,60 @@ def _build_plan(
     return plan
 
 
+def _build_config_path_plan(
+    *,
+    user_id: str,
+    mode: str,
+    source: dict[str, Any],
+    targets: list[dict[str, Any]],
+    request_id: str,
+) -> list[dict[str, Any]]:
+    plan: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    for target in targets:
+        label = _safe_text(target.get("label")) or "target"
+        raw_path = target.get("config_path")
+        if raw_path is None:
+            raise UserProviderConfigSyncError(
+                "Missing target config path",
+                code="missing_target_config_path",
+                status=400,
+                payload={"target": _safe_target_label(label)},
+            )
+        root_path = target.get("root_path")
+        normalized_root_path = None
+        if root_path is not None:
+            normalized_root_path = Path(root_path).expanduser().resolve()
+        config_path = _resolve_target_config_path(
+            raw_path,
+            label=label,
+            root_path=normalized_root_path,
+            strict=True,
+        )
+        if config_path in seen_paths:
+            continue
+        seen_paths.add(config_path)
+        current = _read_yaml_config_path(config_path)
+        next_config, diff = _apply_model_v1_patch(current["config"], source)
+        plan.append(
+            {
+                "user_id": user_id,
+                "request_id": request_id,
+                "mode": mode,
+                "profile": label,
+                "label_key": "target",
+                "config_path": current["path"],
+                "root_path": normalized_root_path,
+                "original_config": current["config"],
+                "original_text": current["text"],
+                "next_config": next_config,
+                "diff": diff,
+                "source_secret": _source_secret(source),
+            }
+        )
+    return plan
+
+
 def _apply_model_v1_patch(config: dict[str, Any], source: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     next_config = copy.deepcopy(config if isinstance(config, dict) else {})
     model = next_config.get("model")
@@ -349,7 +600,7 @@ def _apply_model_v1_patch(config: dict[str, Any], source: dict[str, Any]) -> tup
 
 
 def _write_profile_plan(item: dict[str, Any]) -> dict[str, Any]:
-    config_path = Path(item["config_path"])
+    config_path = _validated_plan_config_path(item)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     backup_path = None
     if item["original_text"] is not None:
@@ -367,23 +618,31 @@ def _write_profile_plan(item: dict[str, Any]) -> dict[str, Any]:
 def _rollback_written_profiles(written: list[dict[str, Any]]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for item in reversed(written):
-        profile = _safe_profile_label(item.get("profile"))
+        label_key = _public_label_key(item)
+        label = _public_item_label(item)
         try:
             original_text = item.get("original_text")
-            config_path = Path(item["config_path"])
+            config_path = _validated_plan_config_path(item)
             if original_text is None:
                 if config_path.exists():
                     config_path.unlink()
             else:
                 _atomic_write_text(config_path, original_text)
-            results.append({"profile": profile, "status": "rolled_back"})
+            results.append({label_key: label, "status": "rolled_back"})
         except Exception as exc:
-            results.append({"profile": profile, "status": "rollback_failed", "error": _safe_error(exc)})
+            results.append({label_key: label, "status": "rollback_failed", "error": _safe_error(exc)})
     return results
 
 
 def _read_yaml_config(home: Path) -> dict[str, Any]:
     config_path = Path(home).expanduser() / "config.yaml"
+    return _read_yaml_config_path(config_path, resolve_path=False)
+
+
+def _read_yaml_config_path(config_path: Path, *, resolve_path: bool = True) -> dict[str, Any]:
+    config_path = Path(config_path).expanduser()
+    if resolve_path:
+        config_path = config_path.resolve()
     text = None
     if config_path.exists():
         text = config_path.read_text(encoding="utf-8")
@@ -397,6 +656,47 @@ def _read_yaml_config(home: Path) -> dict[str, Any]:
             status=400,
         )
     return {"path": config_path, "text": text, "config": loaded}
+
+
+def _validated_plan_config_path(item: dict[str, Any]) -> Path:
+    label = _public_item_label(item)
+    return _resolve_target_config_path(
+        item.get("config_path"),
+        label=label,
+        root_path=item.get("root_path"),
+        strict=False,
+    )
+
+
+def _resolve_target_config_path(
+    raw_path: Any,
+    *,
+    label: str,
+    root_path: Any = None,
+    strict: bool,
+) -> Path:
+    try:
+        config_path = Path(raw_path).expanduser().resolve(strict=strict)
+    except OSError as exc:
+        raise UserProviderConfigSyncError(
+            "Target config path is unavailable",
+            code="target_config_path_unavailable",
+            status=500,
+            payload={"target": _safe_target_label(label), "error": _safe_error(exc)},
+        ) from exc
+    if root_path is None:
+        return config_path
+    normalized_root_path = Path(root_path).expanduser().resolve()
+    try:
+        config_path.relative_to(normalized_root_path)
+    except ValueError as exc:
+        raise UserProviderConfigSyncError(
+            "Target config path escaped root",
+            code="target_path_escape",
+            status=500,
+            payload={"target": _safe_target_label(label)},
+        ) from exc
+    return config_path
 
 
 def _atomic_write_yaml(path: Path, config: dict[str, Any]) -> None:
@@ -448,7 +748,7 @@ def _profile_name_from_record(record: dict[str, Any]) -> str:
 
 def _public_profile_plan(item: dict[str, Any]) -> dict[str, Any]:
     return {
-        "profile": _safe_profile_label(item.get("profile")),
+        _public_label_key(item): _public_item_label(item),
         "status": "planned",
         "changed": bool(item.get("diff")),
         "diff": item.get("diff") or [],
@@ -457,7 +757,7 @@ def _public_profile_plan(item: dict[str, Any]) -> dict[str, Any]:
 
 def _public_write_result(item: dict[str, Any]) -> dict[str, Any]:
     return {
-        "profile": _safe_profile_label(item.get("profile")),
+        _public_label_key(item): _public_item_label(item),
         "status": item.get("status") or ("synced" if item.get("ok") else "failed"),
         "changed": bool(item.get("diff")),
         "diff": item.get("diff") or [],
@@ -491,6 +791,25 @@ def _safe_error(error: Any, secret: str | None = None) -> str:
 def _safe_profile_label(value: Any) -> str:
     text = _safe_text(value)
     return text if _PROFILE_NAME_RE.match(text) or text == "default" else "invalid-profile"
+
+
+def _public_label_key(item: dict[str, Any]) -> str:
+    return "target" if _safe_text(item.get("label_key")) == "target" else "profile"
+
+
+def _public_item_label(item: dict[str, Any]) -> str:
+    value = item.get("profile")
+    if _public_label_key(item) == "target":
+        return _safe_target_label(value)
+    return _safe_profile_label(value)
+
+
+def _safe_target_label(value: Any) -> str:
+    text = _safe_text(value).replace("\\", "/").strip()
+    text = re.sub(r"/+", "/", text)
+    text = re.sub(r"[^A-Za-z0-9._:@/+~-]+", "_", text)
+    text = text.strip("_/")
+    return (text[:200] if text else "target") or "target"
 
 
 def _safe_text(value: Any) -> str:
