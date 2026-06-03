@@ -1235,6 +1235,20 @@ def dispatch_post(handler, parsed) -> bool:
             payload, status = error_payload(exc)
             return j(handler, payload, status=status)
 
+    if parsed.path == "/api/internal/provider-sync/root-profiles":
+        from api.internal_provider_sync import (
+            error_payload,
+            sync_internal_provider_root_profiles_payload,
+            verify_internal_provider_sync_token,
+        )
+
+        try:
+            verify_internal_provider_sync_token(handler)
+            return j(handler, sync_internal_provider_root_profiles_payload(body))
+        except Exception as exc:
+            payload, status = error_payload(exc)
+            return j(handler, payload, status=status)
+
     if parsed.path == "/api/reasoning":
         # CLI-parity /reasoning handler — writes to the same config.yaml keys
         # the CLI uses (display.show_reasoning, agent.reasoning_effort) so a

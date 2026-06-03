@@ -299,6 +299,26 @@ def _nocobase_headers(user_id: str) -> dict[str, str]:
     return headers
 
 
+def _nocobase_service_headers() -> dict[str, str]:
+    headers = {
+        "X-Hostname": os.getenv("NOCOBASE_HOSTNAME", "www.foxuai.com"),
+        "X-Authenticator": os.getenv("NOCOBASE_AUTHENTICATOR", "basic"),
+    }
+    authorization = _nocobase_authorization()
+    if authorization:
+        headers["Authorization"] = authorization
+    return headers
+
+
+def _nocobase_list_records_from_payload(payload: Any) -> list[dict[str, Any]]:
+    data = payload.get("data") if isinstance(payload, dict) else payload
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        data = data["data"]
+    if not isinstance(data, list):
+        raise UserProviderLookupError("NoCoBase response data is not a list")
+    return [item for item in data if isinstance(item, dict)]
+
+
 def _nocobase_list(collection: str, user_id: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     base_url = _nocobase_base_url()
     query = {"paginate": "false"}
@@ -314,12 +334,7 @@ def _nocobase_list(collection: str, user_id: str, params: dict[str, Any] | None 
         )
     except Exception as exc:
         raise UserProviderLookupError(_redact_error(exc)) from exc
-    data = payload.get("data") if isinstance(payload, dict) else payload
-    if isinstance(data, dict) and isinstance(data.get("data"), list):
-        data = data["data"]
-    if not isinstance(data, list):
-        raise UserProviderLookupError("NoCoBase response data is not a list")
-    return [item for item in data if isinstance(item, dict)]
+    return _nocobase_list_records_from_payload(payload)
 
 
 def _nocobase_mutation(
@@ -371,6 +386,26 @@ def list_global_user_ai_provider_records(user_id: str) -> list[dict[str, Any]]:
         records = _nocobase_list(GLOBAL_PROVIDER_COLLECTION, user_id)
     except UserProviderLookupError:
         raise
+    enabled_records: list[dict[str, Any]] = []
+    for record in records:
+        if _is_nocobase_false(record.get("is_enable")):
+            continue
+        enabled_records.append(record)
+    return enabled_records
+
+
+def list_global_ai_provider_records_for_service() -> list[dict[str, Any]]:
+    base_url = _nocobase_base_url()
+    url = f"{base_url}/api/{GLOBAL_PROVIDER_COLLECTION}:list?paginate=false"
+    try:
+        payload = _request_json(
+            url,
+            headers=_nocobase_service_headers(),
+            timeout=NOCOBASE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        raise UserProviderLookupError(_redact_error(exc)) from exc
+    records = _nocobase_list_records_from_payload(payload)
     enabled_records: list[dict[str, Any]] = []
     for record in records:
         if _is_nocobase_false(record.get("is_enable")):

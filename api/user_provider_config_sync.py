@@ -36,6 +36,7 @@ _PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,149}$")
 _USER_SYNC_LOCKS: dict[str, threading.RLock] = {}
 _USER_SYNC_LOCKS_LOCK = threading.Lock()
 _LAST_SYNC_STATUS: dict[tuple[str, str], dict[str, Any]] = {}
+_PROFILE_CONFIG_SYNC_LOCK = threading.RLock()
 
 
 class UserProviderConfigSyncError(RuntimeError):
@@ -145,57 +146,58 @@ def _sync_user_provider_model_config(
     dry_run: bool,
     request_id: str | None,
 ) -> dict[str, Any]:
-    request_id = _safe_text(request_id) or uuid.uuid4().hex
-    user_id = _safe_text(user_id)
-    if not user_id:
-        raise UserProviderConfigSyncError("Missing user context", code="missing_user_context", status=400)
-    source = _source_model_v1(mode, provider)
-    targets = _target_profiles(user_id, profile_names=profile_names, profile_records=profile_records)
-    plan = _build_plan(user_id=user_id, mode=mode, source=source, targets=targets, request_id=request_id)
-    if dry_run:
+    with _PROFILE_CONFIG_SYNC_LOCK:
+        request_id = _safe_text(request_id) or uuid.uuid4().hex
+        user_id = _safe_text(user_id)
+        if not user_id:
+            raise UserProviderConfigSyncError("Missing user context", code="missing_user_context", status=400)
+        source = _source_model_v1(mode, provider)
+        targets = _target_profiles(user_id, profile_names=profile_names, profile_records=profile_records)
+        plan = _build_plan(user_id=user_id, mode=mode, source=source, targets=targets, request_id=request_id)
+        if dry_run:
+            return {
+                "ok": True,
+                "status": "dry_run",
+                "request_id": request_id,
+                "mode": mode,
+                "profiles": [_public_profile_plan(item) for item in plan],
+            }
+        written: list[dict[str, Any]] = []
+        try:
+            for item in plan:
+                failed_item = item
+                result = _write_profile_plan(item)
+                written.append(result)
+                failed_item = None
+        except Exception as exc:
+            rollback_results = _rollback_written_profiles(written)
+            profiles = [_public_write_result(item) for item in written]
+            if failed_item is not None:
+                profiles.append(_public_failed_write_result(failed_item, exc, _source_secret(source)))
+            payload = {
+                "ok": False,
+                "status": "sync_failed",
+                "request_id": request_id,
+                "mode": mode,
+                "profiles": profiles,
+                "rollback": rollback_results,
+                "error": _safe_error(exc, _source_secret(source)),
+            }
+            raise UserProviderConfigSyncError(
+                "Provider config sync failed",
+                code="sync_failed",
+                status=500,
+                payload=payload,
+            ) from exc
+
+        _invalidate_agent_caches()
         return {
             "ok": True,
-            "status": "dry_run",
+            "status": "synced",
             "request_id": request_id,
             "mode": mode,
-            "profiles": [_public_profile_plan(item) for item in plan],
+            "profiles": [_public_write_result(item) for item in written],
         }
-    written: list[dict[str, Any]] = []
-    try:
-        for item in plan:
-            failed_item = item
-            result = _write_profile_plan(item)
-            written.append(result)
-            failed_item = None
-    except Exception as exc:
-        rollback_results = _rollback_written_profiles(written)
-        profiles = [_public_write_result(item) for item in written]
-        if failed_item is not None:
-            profiles.append(_public_failed_write_result(failed_item, exc, _source_secret(source)))
-        payload = {
-            "ok": False,
-            "status": "sync_failed",
-            "request_id": request_id,
-            "mode": mode,
-            "profiles": profiles,
-            "rollback": rollback_results,
-            "error": _safe_error(exc, _source_secret(source)),
-        }
-        raise UserProviderConfigSyncError(
-            "Provider config sync failed",
-            code="sync_failed",
-            status=500,
-            payload=payload,
-        ) from exc
-
-    _invalidate_agent_caches()
-    return {
-        "ok": True,
-        "status": "synced",
-        "request_id": request_id,
-        "mode": mode,
-        "profiles": [_public_write_result(item) for item in written],
-    }
 
 
 def _source_model_v1(mode: str, provider: dict[str, Any] | None) -> dict[str, Any]:

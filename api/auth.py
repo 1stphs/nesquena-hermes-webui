@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 PUBLIC_PATHS = frozenset({
     '/', '/login', '/health', '/favicon.ico',
     '/api/auth/login', '/api/auth/status', '/api/auth/token-login',
+    '/api/internal/provider-sync/root-profiles',
     '/manifest.json', '/manifest.webmanifest',
 })
 
