@@ -238,19 +238,16 @@ def validate_management_enable_rolls_back_status_on_sync_failure() -> None:
         },
     }
     original_list = management.list_user_ai_provider_records
-    original_update = management.update_user_ai_provider_record
-    original_test = management.test_user_provider_connection
+    original_get_selection = management.get_user_provider_selection_id
+    original_set_selection = management.set_user_provider_selection_id
     original_sync = management.sync_user_provider_model_config
     original_host_validator = provider_runtime._validate_provider_host
+    current_selection = {"value": "old"}
     try:
         management.list_user_ai_provider_records = lambda user_id: [
             copy.deepcopy(records["old"]),
             copy.deepcopy(records["target"]),
         ]
-
-        def update_record(user_id, provider_id, body, *, partial=True):
-            records[provider_id].update(body)
-            return copy.deepcopy(records[provider_id])
 
         def sync_failure(**kwargs):
             if kwargs.get("dry_run"):
@@ -261,11 +258,11 @@ def validate_management_enable_rolls_back_status_on_sync_failure() -> None:
                 payload={"status": "sync_failed", "error": "redacted"},
             )
 
-        def fail_if_enable_requires_provider_test(user_id, provider):
-            return {"ok": False, "error": "test_blocked", "message": "test should not block enable"}
-
-        management.update_user_ai_provider_record = update_record
-        management.test_user_provider_connection = fail_if_enable_requires_provider_test
+        management.get_user_provider_selection_id = lambda user_id: current_selection["value"]
+        management.set_user_provider_selection_id = (
+            lambda user_id, provider_id: current_selection.__setitem__("value", provider_id or "")
+            or {"id": user_id, "hermes_providers_id": provider_id}
+        )
         management.sync_user_provider_model_config = sync_failure
         provider_runtime._validate_provider_host = lambda hostname, port: None
         try:
@@ -275,12 +272,11 @@ def validate_management_enable_rolls_back_status_on_sync_failure() -> None:
             pass
         else:
             raise AssertionError("enable should fail when sync fails")
-        assert records["old"]["status"] == "enabled"
-        assert records["target"]["status"] == "disabled"
+        assert current_selection["value"] == "old"
     finally:
         management.list_user_ai_provider_records = original_list
-        management.update_user_ai_provider_record = original_update
-        management.test_user_provider_connection = original_test
+        management.get_user_provider_selection_id = original_get_selection
+        management.set_user_provider_selection_id = original_set_selection
         management.sync_user_provider_model_config = original_sync
         provider_runtime._validate_provider_host = original_host_validator
 
@@ -405,7 +401,7 @@ def validate_single_profile_no_active_provider_skips_without_write() -> None:
     class Resolution:
         is_active = False
         status = "disabled"
-        reason = "no_enabled_provider"
+        reason = "no_provider"
         provider = None
 
     try:
@@ -415,7 +411,7 @@ def validate_single_profile_no_active_provider_skips_without_write() -> None:
         result = management.sync_user_ai_provider_profile_payload("u1", {"profile_name": "p1"})
         assert result["ok"] is True
         assert result["sync"]["status"] == "skipped"
-        assert result["sync"]["reason"] == "no_enabled_provider"
+        assert result["sync"]["reason"] == "no_provider"
         assert sync_calls == []
     finally:
         management.resolve_user_provider = original_resolver

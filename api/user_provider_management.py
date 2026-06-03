@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import copy
-import time
 from typing import Any
 
 from api.user_provider import (
     UserProviderAuthError,
     UserProviderLookupError,
-    create_user_ai_provider_record,
-    delete_user_ai_provider_record,
     get_user_ai_provider_record,
+    get_user_provider_selection_id,
     list_user_ai_provider_records,
     public_user_ai_provider_record,
     resolve_user_provider,
-    test_user_provider_connection,
-    update_user_ai_provider_record,
+    set_user_provider_selection_id,
     verify_user_profile_access,
     _normalize_provider_record,
 )
@@ -42,51 +38,11 @@ def list_user_ai_providers_payload(user_id: str) -> dict[str, Any]:
 
 
 def save_user_ai_provider_payload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    provider_id = _provider_id_from_body(body)
-    with user_provider_sync_lock(user_id):
-        if provider_id:
-            old_record = get_user_ai_provider_record(user_id, provider_id)
-            candidate = _merged_provider_candidate(old_record, body)
-            was_enabled = _is_enabled(old_record)
-            if was_enabled:
-                provider, _reason = _runtime_provider_or_raise(candidate, user_id)
-                sync_user_provider_model_config(
-                    user_id=user_id,
-                    mode=SYNC_MODE_ACTIVE_PROVIDER,
-                    provider=provider,
-                    dry_run=True,
-                    use_lock=False,
-                )
-            updated = update_user_ai_provider_record(user_id, provider_id, body, partial=True)
-            provider_record = {**old_record, **updated, **_provider_public_fields_from_body(body)}
-            if was_enabled:
-                provider, _reason = _runtime_provider_or_raise(provider_record, user_id)
-                try:
-                    sync = sync_user_provider_model_config(
-                        user_id=user_id,
-                        mode=SYNC_MODE_ACTIVE_PROVIDER,
-                        provider=provider,
-                        use_lock=False,
-                    )
-                except UserProviderConfigSyncError:
-                    update_user_ai_provider_record(user_id, provider_id, _rollback_body(old_record), partial=True)
-                    raise
-                _remember_sync(user_id, provider_id, sync)
-            else:
-                sync = None
-            return {
-                "ok": True,
-                "provider": public_user_ai_provider_record(provider_record, get_last_sync_status(user_id, provider_id)),
-                "sync": sync,
-            }
-
-        created = create_user_ai_provider_record(user_id, body)
-        created_id = str(created.get("id") or "")
-        return {
-            "ok": True,
-            "provider": public_user_ai_provider_record(created, get_last_sync_status(user_id, created_id)),
-            "sync": None,
-        }
+    raise UserProviderConfigSyncError(
+        "User custom Provider upload is disabled",
+        code="provider_write_disabled",
+        status=405,
+    )
 
 
 def enable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str, Any]:
@@ -95,6 +51,7 @@ def enable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str,
         records = list_user_ai_provider_records(user_id)
         target = _find_provider(records, provider_id)
         provider, _reason = _runtime_provider_or_raise(target, user_id)
+        previous_provider_id = get_user_provider_selection_id(user_id)
         sync_user_provider_model_config(
             user_id=user_id,
             mode=SYNC_MODE_ACTIVE_PROVIDER,
@@ -102,13 +59,8 @@ def enable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str,
             dry_run=True,
             use_lock=False,
         )
-        previous_enabled_ids = [str(item.get("id") or "") for item in records if _is_enabled(item)]
         try:
-            for record in records:
-                record_id = str(record.get("id") or "")
-                next_status = "enabled" if record_id == provider_id else "disabled"
-                if str(record.get("status") or "").lower() != next_status:
-                    update_user_ai_provider_record(user_id, record_id, {"status": next_status}, partial=True)
+            set_user_provider_selection_id(user_id, provider_id)
             sync = sync_user_provider_model_config(
                 user_id=user_id,
                 mode=SYNC_MODE_ACTIVE_PROVIDER,
@@ -116,10 +68,16 @@ def enable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str,
                 use_lock=False,
             )
         except Exception:
-            _restore_enabled_statuses(user_id, records, previous_enabled_ids)
+            set_user_provider_selection_id(user_id, previous_provider_id or None)
             raise
         _remember_sync(user_id, provider_id, sync)
-        updated = get_user_ai_provider_record(user_id, provider_id)
+        updated = {
+            **target,
+            "status": "enabled",
+            "selected": True,
+            "active": True,
+            "enabled": True,
+        }
         return {
             "ok": True,
             "provider": public_user_ai_provider_record(updated, get_last_sync_status(user_id, provider_id)),
@@ -131,9 +89,23 @@ def disable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str
     provider_id = _required_provider_id(provider_id)
     with user_provider_sync_lock(user_id):
         target = get_user_ai_provider_record(user_id, provider_id)
-        if not _is_enabled(target):
-            updated = update_user_ai_provider_record(user_id, provider_id, {"status": "disabled"}, partial=True)
-            return {"ok": True, "provider": public_user_ai_provider_record(updated), "sync": None}
+        selected_provider_id = get_user_provider_selection_id(user_id)
+        if selected_provider_id != provider_id:
+            disabled_payload = {
+                **target,
+                "status": "disabled",
+                "selected": False,
+                "active": False,
+                "enabled": False,
+            }
+            return {
+                "ok": True,
+                "provider": public_user_ai_provider_record(
+                    disabled_payload,
+                    get_last_sync_status(user_id, provider_id),
+                ),
+                "sync": None,
+            }
         sync_user_provider_model_config(
             user_id=user_id,
             mode=SYNC_MODE_ROOT_DEFAULT,
@@ -141,16 +113,23 @@ def disable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str
             use_lock=False,
         )
         try:
-            updated = update_user_ai_provider_record(user_id, provider_id, {"status": "disabled"}, partial=True)
+            set_user_provider_selection_id(user_id, None)
             sync = sync_user_provider_model_config(
                 user_id=user_id,
                 mode=SYNC_MODE_ROOT_DEFAULT,
                 use_lock=False,
             )
         except Exception:
-            update_user_ai_provider_record(user_id, provider_id, {"status": "enabled"}, partial=True)
+            set_user_provider_selection_id(user_id, provider_id)
             raise
         _remember_sync(user_id, provider_id, sync)
+        updated = {
+            **target,
+            "status": "disabled",
+            "selected": False,
+            "active": False,
+            "enabled": False,
+        }
         return {
             "ok": True,
             "provider": public_user_ai_provider_record(updated, get_last_sync_status(user_id, provider_id)),
@@ -159,32 +138,11 @@ def disable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str
 
 
 def delete_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str, Any]:
-    provider_id = _required_provider_id(provider_id)
-    with user_provider_sync_lock(user_id):
-        target = get_user_ai_provider_record(user_id, provider_id)
-        was_enabled = _is_enabled(target)
-        sync = None
-        if was_enabled:
-            sync_user_provider_model_config(
-                user_id=user_id,
-                mode=SYNC_MODE_ROOT_DEFAULT,
-                dry_run=True,
-                use_lock=False,
-            )
-            try:
-                update_user_ai_provider_record(user_id, provider_id, {"status": "disabled"}, partial=True)
-                sync = sync_user_provider_model_config(
-                    user_id=user_id,
-                    mode=SYNC_MODE_ROOT_DEFAULT,
-                    use_lock=False,
-                )
-            except Exception:
-                update_user_ai_provider_record(user_id, provider_id, {"status": "enabled"}, partial=True)
-                raise
-        delete_user_ai_provider_record(user_id, provider_id)
-        if sync:
-            _remember_sync(user_id, provider_id, sync)
-        return {"ok": True, "provider_id": provider_id, "sync": sync}
+    raise UserProviderConfigSyncError(
+        "User custom Provider upload is disabled",
+        code="provider_write_disabled",
+        status=405,
+    )
 
 
 def sync_user_ai_provider_payload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -277,19 +235,11 @@ def sync_new_profile_if_enabled(user_id: str, profile_name: str) -> dict[str, An
 
 
 def test_user_ai_provider_payload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    provider_id = _provider_id_from_body(body)
-    if provider_id and not (body.get("api_key") or body.get("apiKey")):
-        record = get_user_ai_provider_record(user_id, provider_id)
-        test_body = {
-            "name": record.get("name"),
-            "base_url": record.get("base_url"),
-            "model_name": record.get("model_name"),
-            "api_mode": record.get("api_mode"),
-            "thinking_level": record.get("thinking_level"),
-            "api_key": record.get("api_key"),
-        }
-        return test_user_provider_connection(user_id, test_body)
-    return test_user_provider_connection(user_id, body)
+    raise UserProviderConfigSyncError(
+        "User custom Provider upload is disabled",
+        code="provider_write_disabled",
+        status=405,
+    )
 
 
 def error_payload(error: Exception) -> tuple[dict[str, Any], int]:
@@ -305,7 +255,16 @@ def error_payload(error: Exception) -> tuple[dict[str, Any], int]:
 
 
 def _runtime_provider_or_raise(record: dict[str, Any], user_id: str) -> tuple[dict[str, Any], str]:
-    provider, reason = _normalize_provider_record({**record, "status": "enabled"}, user_id)
+    provider, reason = _normalize_provider_record(
+        {
+            **record,
+            "status": "enabled",
+            "selected": True,
+            "active": True,
+            "enabled": True,
+        },
+        user_id,
+    )
     if not provider:
         raise UserProviderConfigSyncError(
             "Provider configuration is incomplete or unsupported",
@@ -313,65 +272,6 @@ def _runtime_provider_or_raise(record: dict[str, Any], user_id: str) -> tuple[di
             status=400,
         )
     return provider, reason
-
-
-def _merged_provider_candidate(old_record: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-    candidate = copy.deepcopy(old_record)
-    candidate.update(_provider_public_fields_from_body(body))
-    if "api_key" not in body and "apiKey" not in body:
-        candidate["api_key"] = old_record.get("api_key")
-    return candidate
-
-
-def _provider_public_fields_from_body(body: dict[str, Any]) -> dict[str, Any]:
-    source = body if isinstance(body, dict) else {}
-    mapping = {
-        "name": ("name",),
-        "provider_slug": ("provider_slug", "providerSlug"),
-        "base_url": ("base_url", "baseUrl"),
-        "model_name": ("model_name", "modelName"),
-        "api_mode": ("api_mode", "apiMode"),
-        "thinking_level": ("thinking_level", "thinkingLevel"),
-        "api_key": ("api_key", "apiKey"),
-        "status": ("status",),
-    }
-    result: dict[str, Any] = {}
-    for target, names in mapping.items():
-        for name in names:
-            if name in source:
-                result[target] = source.get(name)
-                break
-    return result
-
-
-def _rollback_body(record: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: record.get(key)
-        for key in (
-            "name",
-            "provider_slug",
-            "base_url",
-            "model_name",
-            "api_mode",
-            "thinking_level",
-            "api_key",
-            "status",
-        )
-        if key in record
-    }
-
-
-def _restore_enabled_statuses(user_id: str, records: list[dict[str, Any]], enabled_ids: list[str]) -> None:
-    enabled_set = set(enabled_ids)
-    for record in records:
-        record_id = str(record.get("id") or "")
-        if not record_id:
-            continue
-        status = "enabled" if record_id in enabled_set else "disabled"
-        try:
-            update_user_ai_provider_record(user_id, record_id, {"status": status}, partial=True)
-        except Exception:
-            pass
 
 
 def _remember_sync(user_id: str, provider_id: str, sync: dict[str, Any] | None) -> None:
@@ -384,7 +284,6 @@ def _remember_sync(user_id: str, provider_id: str, sync: dict[str, Any] | None) 
             "status": sync.get("status") or "synced",
             "request_id": sync.get("request_id") or "",
             "mode": sync.get("mode") or "",
-            "updated_at": str(int(time.time())),
         },
     )
 
@@ -394,14 +293,6 @@ def _find_provider(records: list[dict[str, Any]], provider_id: str) -> dict[str,
         if str(record.get("id") or "") == provider_id:
             return record
     raise UserProviderLookupError("provider not found")
-
-
-def _is_enabled(record: dict[str, Any]) -> bool:
-    return str(record.get("status") or "").strip().lower() == "enabled"
-
-
-def _provider_id_from_body(body: dict[str, Any]) -> str:
-    return str(body.get("id") or body.get("provider_id") or body.get("providerId") or "").strip()
 
 
 def _required_provider_id(provider_id: str) -> str:

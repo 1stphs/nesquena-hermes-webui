@@ -217,63 +217,55 @@ def validate_runtime_signature_omits_api_key() -> None:
     assert "sk-user-one-1234567890" not in str(signature)
 
 
-def validate_enabled_status_selects_latest_provider_without_is_default() -> None:
-    original_candidates = user_provider._provider_candidates_for_user
+def validate_selected_provider_uses_user_relation_and_mode_mapping() -> None:
+    original_selection = user_provider.get_user_provider_selection_id
+    original_global_records = user_provider.list_global_user_ai_provider_records
     original_validate_base_url = user_provider._validate_base_url
     records = [
         {
-            "id": "old-enabled",
-            "user_id": "u1",
-            "name": "Old Enabled",
-            "provider_slug": "old-enabled",
-            "base_url": "https://old.example.invalid/v1",
-            "model_name": "old-model",
-            "api_mode": "codex_responses",
-            "thinking_level": "low",
-            "api_key": "sk-old-provider-1234567890",
-            "status": "enabled",
-            "updatedAt": "2026-06-01T00:00:00Z",
-        },
-        {
-            "id": "new-enabled",
-            "user_id": "u1",
-            "name": "New Enabled",
-            "provider_slug": "new-enabled",
+            "id": "367908558667776",
+            "provider_name": "aihubmix",
             "base_url": "https://new.example.invalid/v1",
-            "model_name": "new-model",
-            "api_mode": "codex_responses",
-            "thinking_level": "low",
+            "model_name": "deepseek-v4-flash",
+            "api_mode": "openai-chat-complete",
+            "model_level": "low",
             "api_key": "sk-new-provider-1234567890",
-            "status": "enabled",
+            "is_enable": True,
+            "is_default": True,
             "updatedAt": "2026-06-02T00:00:00Z",
         },
         {
-            "id": "latest-disabled",
-            "user_id": "u1",
-            "name": "Latest Disabled",
-            "provider_slug": "latest-disabled",
-            "base_url": "https://disabled.example.invalid/v1",
-            "model_name": "disabled-model",
-            "api_mode": "codex_responses",
-            "thinking_level": "low",
-            "api_key": "sk-disabled-provider-1234567890",
-            "status": "disabled",
+            "id": "367907417817088",
+            "provider_name": "aihubmix",
+            "base_url": "https://old.example.invalid/v1/responses",
+            "model_name": "grok-4.3",
+            "api_mode": "openai-chat-complete",
+            "model_level": "high",
+            "api_key": "sk-old-provider-1234567890",
+            "is_enable": True,
+            "is_default": False,
             "updatedAt": "2026-06-03T00:00:00Z",
         },
     ]
 
     try:
-        user_provider._provider_candidates_for_user = lambda user_id: records
+        user_provider.get_user_provider_selection_id = lambda user_id: "367907417817088"
+        user_provider.list_global_user_ai_provider_records = lambda user_id: records
         user_provider._validate_base_url = lambda base_url: str(base_url or "").strip().rstrip("/")
         resolution = user_provider.resolve_user_provider("u1")
     finally:
-        user_provider._provider_candidates_for_user = original_candidates
+        user_provider.get_user_provider_selection_id = original_selection
+        user_provider.list_global_user_ai_provider_records = original_global_records
         user_provider._validate_base_url = original_validate_base_url
 
     assert resolution.status == "active"
     assert resolution.reason == "active_provider"
-    assert resolution.provider["id"] == "new-enabled"
-    assert "is_default" not in resolution.provider
+    assert resolution.provider["id"] == "367907417817088"
+    assert resolution.provider["provider_name"] == "aihubmix"
+    assert resolution.provider["api_mode"] == "chat_completions"
+    assert resolution.provider["raw_api_mode"] == "openai-chat-complete"
+    assert resolution.provider["thinking_level"] == "high"
+    assert resolution.provider["base_url"] == "https://old.example.invalid/v1"
 
 
 def validate_user_id_runtime_lookup_does_not_need_legacy_env() -> None:
@@ -851,7 +843,7 @@ def main() -> None:
     validate_lookup_fallback_and_redaction_with_user_context()
     validate_models_cache_isolated_by_user_and_provider()
     validate_runtime_signature_omits_api_key()
-    validate_enabled_status_selects_latest_provider_without_is_default()
+    validate_selected_provider_uses_user_relation_and_mode_mapping()
     validate_user_id_runtime_lookup_does_not_need_legacy_env()
     validate_private_and_local_base_urls_are_rejected()
     validate_dns_resolution_to_private_ip_is_rejected()

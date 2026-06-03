@@ -29,13 +29,27 @@ from api.helpers import _redact_text
 logger = logging.getLogger(__name__)
 
 USER_PROVIDER_COLLECTION = "hermes_user_ai_providers"
+GLOBAL_PROVIDER_COLLECTION = "hermes_providers"
+HERMES_USERS_COLLECTION = "hermes_users"
+USER_PROVIDER_FOREIGN_KEY = "hermes_providers_id"
 PROFILE_COLLECTION = "hermes_profiles"
 # Legacy env names are kept as public constants for compatibility, but runtime
 # provider lookup no longer depends on these switches.
 X_USER_ID_CONTEXT_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_X_USER_ID_CONTEXT"
 UNTRUSTED_CONTEXT_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_UNTRUSTED_CONTEXT"
 LEGACY_NOCOBASE_AUTH_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_NOCOBASE_AUTH"
-SUPPORTED_API_MODES = {"anthropic_messages", "codex_responses"}
+SUPPORTED_API_MODES = {"anthropic_messages", "codex_responses", "chat_completions"}
+NOCOBASE_PROVIDER_API_MODE_MAP = {
+    "anthropic": "anthropic_messages",
+    "anthropic_messages": "anthropic_messages",
+    "openai-response": "codex_responses",
+    "openai-responses": "codex_responses",
+    "codex_responses": "codex_responses",
+    "openai-chat-complete": "chat_completions",
+    "openai-chat-completion": "chat_completions",
+    "openai-chat-completions": "chat_completions",
+    "chat_completions": "chat_completions",
+}
 VALID_THINKING_LEVELS = {"minimal", "low", "medium", "high", "xhigh"}
 CANONICAL_AGENT_PROVIDER = "custom"
 DEFAULT_NOCOBASE_BASE_URL = "https://www.foxuai.com"
@@ -115,6 +129,33 @@ def _normalize_id(value: Any) -> str:
         return ""
     if len(normalized) > 128 or any(ch in normalized for ch in "\r\n\t"):
         raise UserProviderAuthError("Invalid user context", status=400, code="invalid_user_context")
+    return normalized
+
+
+def normalize_nocobase_provider_api_mode(raw: Any) -> str:
+    return NOCOBASE_PROVIDER_API_MODE_MAP.get(str(raw or "").strip().lower(), "")
+
+
+def _is_nocobase_false(value: Any) -> bool:
+    if value is False or value is None:
+        return value is False
+    if isinstance(value, (int, float)):
+        return value == 0
+    return str(value).strip().lower() in {"false", "0", "no", "off"}
+
+
+def _normalize_runtime_base_url(base_url: str, api_mode: str) -> str:
+    normalized = str(base_url or "").strip().rstrip("/")
+    suffixes: tuple[str, ...] = ()
+    if api_mode in {"chat_completions", "codex_responses"}:
+        suffixes = ("/chat/completions", "/responses")
+    elif api_mode == "anthropic_messages":
+        suffixes = ("/v1/messages", "/messages")
+    lower = normalized.lower()
+    for suffix in suffixes:
+        if lower.endswith(suffix):
+            normalized = normalized[: -len(suffix)].rstrip("/")
+            break
     return normalized
 
 
@@ -324,9 +365,86 @@ def list_user_profile_records(user_id: str) -> list[dict[str, Any]]:
     )
 
 
+def list_global_user_ai_provider_records(user_id: str) -> list[dict[str, Any]]:
+    user_id = _normalize_id(user_id)
+    try:
+        records = _nocobase_list(GLOBAL_PROVIDER_COLLECTION, user_id)
+    except UserProviderLookupError:
+        raise
+    enabled_records: list[dict[str, Any]] = []
+    for record in records:
+        if _is_nocobase_false(record.get("is_enable")):
+            continue
+        enabled_records.append(record)
+    return enabled_records
+
+
+def get_user_provider_selection_id(user_id: str) -> str:
+    user_id = _normalize_id(user_id)
+    records = _nocobase_list(
+        HERMES_USERS_COLLECTION,
+        user_id,
+        {
+            "filter[id]": user_id,
+            "appends": "hermes_providers",
+        },
+    )
+    if not records:
+        return ""
+    record = records[0]
+    relation = record.get("hermes_providers")
+    if isinstance(relation, dict) and relation.get("id") is not None:
+        return str(relation.get("id")).strip()
+    return str(record.get(USER_PROVIDER_FOREIGN_KEY) or "").strip()
+
+
+def set_user_provider_selection_id(user_id: str, provider_id: str | None) -> dict[str, Any]:
+    user_id = _normalize_id(user_id)
+    payload = {
+        USER_PROVIDER_FOREIGN_KEY: _normalize_id(provider_id) if provider_id else None,
+    }
+    response = _nocobase_mutation(
+        HERMES_USERS_COLLECTION,
+        "update",
+        user_id,
+        params={"filterByTk": user_id},
+        body=payload,
+    )
+    return _nocobase_response_record(response)
+
+
 def list_user_ai_provider_records(user_id: str) -> list[dict[str, Any]]:
     user_id = _normalize_id(user_id)
-    return _provider_candidates_for_user(user_id)
+    selected_provider_id = ""
+    try:
+        selected_provider_id = get_user_provider_selection_id(user_id)
+    except UserProviderLookupError:
+        raise
+    records = list_global_user_ai_provider_records(user_id)
+    normalized_records: list[dict[str, Any]] = []
+    for record in records:
+        provider_id = str(record.get("id") or "").strip()
+        is_selected = bool(selected_provider_id) and provider_id == selected_provider_id
+        normalized_records.append(
+            {
+                **record,
+                "status": "enabled" if is_selected else "disabled",
+                "user_id": user_id,
+                "selected": is_selected,
+                "active": is_selected,
+                "enabled": is_selected,
+            }
+        )
+    normalized_records.sort(
+        key=lambda item: (
+            bool(item.get("selected")),
+            bool(item.get("is_default")),
+            str(item.get("updatedAt") or item.get("updated_at") or ""),
+            str(item.get("id") or ""),
+        ),
+        reverse=True,
+    )
+    return normalized_records
 
 
 def get_user_ai_provider_record(user_id: str, provider_id: str) -> dict[str, Any]:
@@ -472,33 +590,49 @@ def _record_user_id(record: dict[str, Any]) -> str:
     return ""
 
 
-def _provider_candidates_for_user(user_id: str) -> list[dict[str, Any]]:
-    records = _nocobase_list(
-        USER_PROVIDER_COLLECTION,
-        user_id,
-        {
-            "filter[user_id]": user_id,
-        },
-    )
+def _provider_candidates_for_user(user_id: str, selected_provider_id: str | None = None) -> list[dict[str, Any]]:
+    selected_provider_id = str(selected_provider_id or "").strip() or get_user_provider_selection_id(user_id)
+    if not selected_provider_id:
+        return []
+    records = list_global_user_ai_provider_records(user_id)
     return [
-        record
+        {
+            **record,
+            "status": "enabled",
+            "user_id": user_id,
+            "selected": True,
+            "active": True,
+            "enabled": True,
+        }
         for record in records
-        if not _record_user_id(record) or _record_user_id(record) == str(user_id)
+        if str(record.get("id") or "").strip() == selected_provider_id
     ]
 
 
 def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[dict[str, Any] | None, str]:
     provider_id = str(record.get("id") or "").strip()
-    provider_slug = str(record.get("provider_slug") or provider_id or "").strip().lower()
+    provider_name = str(record.get("provider_name") or record.get("name") or "").strip()
+    provider_slug_source = record.get("provider_slug")
+    if provider_slug_source:
+        provider_slug = str(provider_slug_source).strip().lower()
+    elif provider_name and provider_id:
+        provider_slug = f"{provider_name}-{provider_id}".strip().lower()
+    else:
+        provider_slug = str(provider_name or provider_id or "").strip().lower()
+    if provider_slug:
+        provider_slug = "-".join(part for part in provider_slug.replace("_", "-").split() if part)
+    if not provider_slug and provider_id:
+        provider_slug = f"provider-{provider_id}"
     base_url = str(record.get("base_url") or "").strip().rstrip("/")
     model_name = str(record.get("model_name") or record.get("model") or "").strip()
-    api_mode = str(record.get("api_mode") or "").strip().lower()
+    raw_api_mode = str(record.get("raw_api_mode") or record.get("api_mode") or "").strip().lower()
+    api_mode = normalize_nocobase_provider_api_mode(raw_api_mode)
     api_key = str(record.get("api_key") or "").strip()
-    thinking_level = str(record.get("thinking_level") or "").strip().lower()
+    model_level = str(record.get("model_level") or record.get("thinking_level") or "").strip().lower()
+    thinking_level = model_level
     missing = [
         name
         for name, value in (
-            ("provider_slug", provider_slug),
             ("base_url", base_url),
             ("model_name", model_name),
             ("api_mode", api_mode),
@@ -510,8 +644,9 @@ def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[di
         return None, "missing_" + "_".join(missing)
     if api_mode not in SUPPORTED_API_MODES:
         return None, "unsupported_api_mode"
-    if api_mode == "codex_responses" and thinking_level and thinking_level not in VALID_THINKING_LEVELS:
+    if thinking_level and thinking_level not in VALID_THINKING_LEVELS:
         return None, "unsupported_thinking_level"
+    base_url = _normalize_runtime_base_url(base_url, api_mode)
     try:
         base_url = _validate_base_url(base_url)
     except ValueError:
@@ -519,22 +654,30 @@ def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[di
     return {
         "id": provider_id,
         "user_id": str(user_id),
-        "name": str(record.get("name") or provider_slug).strip(),
+        "name": provider_name or provider_slug,
+        "provider_name": provider_name or provider_slug,
         "provider_slug": provider_slug,
         "base_url": base_url,
         "model_name": model_name,
         "api_mode": api_mode,
+        "raw_api_mode": raw_api_mode,
         "thinking_level": thinking_level,
+        "model_level": model_level,
         "api_key": api_key,
         "status": str(record.get("status") or "").strip().lower(),
+        "selected": bool(record.get("selected") or str(record.get("status") or "").strip().lower() == "enabled"),
+        "is_default": bool(record.get("is_default")),
+        "is_enable": bool(record.get("is_enable", True)),
         "updatedAt": str(record.get("updatedAt") or record.get("updated_at") or ""),
+        "createdAt": str(record.get("createdAt") or record.get("created_at") or ""),
     }, ""
 
 
 def resolve_user_provider(user_id: str) -> UserProviderResolution:
     user_id = _normalize_id(user_id)
     try:
-        records = _provider_candidates_for_user(user_id)
+        selected_provider_id = get_user_provider_selection_id(user_id)
+        records = _provider_candidates_for_user(user_id, selected_provider_id)
     except UserProviderLookupError as exc:
         logger.warning("[webui] user provider lookup failed for user=%s: %s", user_id, exc)
         return UserProviderResolution(
@@ -544,25 +687,13 @@ def resolve_user_provider(user_id: str) -> UserProviderResolution:
             error=str(exc),
         )
 
-    if not records:
+    if not selected_provider_id:
         return UserProviderResolution(status="none", reason="no_provider", user_id=user_id)
 
-    active_records = [
-        record
-        for record in records
-        if str(record.get("status") or "").strip().lower() == "enabled"
-    ]
-    if not active_records:
-        return UserProviderResolution(status="disabled", reason="no_enabled_provider", user_id=user_id)
+    if not records:
+        return UserProviderResolution(status="disabled", reason="selected_provider_unavailable", user_id=user_id)
 
-    active_records.sort(
-        key=lambda item: (
-            str(item.get("updatedAt") or item.get("updated_at") or ""),
-            str(item.get("id") or ""),
-        ),
-        reverse=True,
-    )
-    provider, reason = _normalize_provider_record(active_records[0], user_id)
+    provider, reason = _normalize_provider_record(records[0], user_id)
     if not provider:
         return UserProviderResolution(status="incomplete", reason=reason or "incomplete_provider", user_id=user_id)
     return UserProviderResolution(status="active", reason="active_provider", user_id=user_id, provider=provider)
@@ -584,10 +715,13 @@ def public_provider_resolution(resolution: UserProviderResolution) -> dict[str, 
 def public_provider_metadata(provider: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(provider.get("id") or ""),
-        "name": str(provider.get("name") or ""),
+        "name": str(provider.get("name") or provider.get("provider_name") or ""),
+        "provider_name": str(provider.get("provider_name") or provider.get("name") or ""),
         "provider_slug": str(provider.get("provider_slug") or ""),
         "api_mode": str(provider.get("api_mode") or ""),
+        "raw_api_mode": str(provider.get("raw_api_mode") or ""),
         "thinking_level": str(provider.get("thinking_level") or ""),
+        "model_level": str(provider.get("model_level") or ""),
         "updatedAt": str(provider.get("updatedAt") or ""),
     }
 
@@ -604,19 +738,32 @@ def masked_provider_key(api_key: Any) -> str:
 def public_user_ai_provider_record(record: dict[str, Any], sync_status: dict[str, Any] | None = None) -> dict[str, Any]:
     provider_id = str(record.get("id") or "").strip()
     status = str(record.get("status") or "disabled").strip().lower() or "disabled"
-    api_mode = str(record.get("api_mode") or "").strip()
+    api_mode = normalize_nocobase_provider_api_mode(record.get("api_mode"))
+    raw_api_mode = str(record.get("raw_api_mode") or record.get("api_mode") or "").strip()
+    provider_name = str(record.get("provider_name") or record.get("name") or "").strip()
+    model_level = str(record.get("model_level") or record.get("thinking_level") or "").strip().lower()
+    is_selected = bool(record.get("selected") or record.get("active") or record.get("enabled") or status == "enabled")
+    provider_slug = str(record.get("provider_slug") or "").strip()
+    if not provider_slug:
+        provider_slug = f"{provider_name}-{provider_id}".strip("-") if provider_name and provider_id else provider_name or provider_id
     payload = {
         "id": provider_id,
         "user_id": _record_user_id(record),
-        "name": str(record.get("name") or "").strip(),
-        "provider_slug": str(record.get("provider_slug") or provider_id).strip(),
+        "name": provider_name,
+        "provider_name": provider_name,
+        "provider_slug": provider_slug.strip(),
         "base_url": str(record.get("base_url") or "").strip(),
         "model_name": str(record.get("model_name") or "").strip(),
         "api_mode": api_mode,
-        "thinking_level": str(record.get("thinking_level") or "").strip(),
+        "raw_api_mode": raw_api_mode,
+        "thinking_level": str(record.get("thinking_level") or model_level).strip(),
+        "model_level": model_level,
         "status": status,
-        "enabled": status == "enabled",
-        "active": status == "enabled",
+        "enabled": is_selected,
+        "active": is_selected,
+        "selected": is_selected,
+        "is_default": bool(record.get("is_default")),
+        "is_enable": bool(record.get("is_enable", True)),
         "api_key": "",
         "api_key_masked": masked_provider_key(record.get("api_key")),
         "has_api_key": bool(str(record.get("api_key") or "").strip()),
@@ -828,6 +975,13 @@ def _mode_test_request(provider: dict[str, Any]) -> tuple[bool, str]:
             "model": model_name,
             "max_tokens": 1,
             "messages": [{"role": "user", "content": "ping"}],
+        }
+    elif api_mode == "chat_completions":
+        resources = ["chat/completions"]
+        body = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 8,
         }
     elif api_mode == "codex_responses":
         resources = ["responses"]
