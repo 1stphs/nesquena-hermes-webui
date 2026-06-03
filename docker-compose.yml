@@ -16,6 +16,7 @@ services:
       - /var/www/hermes-agent/.hermes:/.hermes
       - ./hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
       - /var/www/hermes_skills_hub:/var/www/hermes_skills_hub:ro
+      - /var/www/hermes_skills_hub/hermes_talent_market:/var/www/hermes_skills_hub/hermes_talent_market:rw
 
     environment:
       # macOS bind mounts often use UID/GID 501+; run `id -u` and `id -g`
