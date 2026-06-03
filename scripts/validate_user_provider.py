@@ -50,7 +50,8 @@ def _active_resolution(user_id, provider_id, *, model, api_key):
             "base_url": "https://example.invalid/v1",
             "model_name": model,
             "api_mode": "codex_responses",
-            "thinking_level": "low",
+            "thinking_level": "",
+            "model_level": "low",
             "api_key": api_key,
             "status": "enabled",
             "updatedAt": "2026-06-01T00:00:00Z",
@@ -264,7 +265,8 @@ def validate_selected_provider_uses_user_relation_and_mode_mapping() -> None:
     assert resolution.provider["provider_name"] == "aihubmix"
     assert resolution.provider["api_mode"] == "chat_completions"
     assert resolution.provider["raw_api_mode"] == "openai-chat-complete"
-    assert resolution.provider["thinking_level"] == "high"
+    assert resolution.provider["thinking_level"] == ""
+    assert resolution.provider["model_level"] == "high"
     assert resolution.provider["base_url"] == "https://old.example.invalid/v1"
 
 
@@ -776,7 +778,8 @@ def validate_real_agent_local_provider_e2e() -> None:
                 "base_url": mock_base_url,
                 "model_name": "smoke-model",
                 "api_mode": "codex_responses",
-                "thinking_level": "low",
+                "thinking_level": "",
+                "model_level": "low",
                 "api_key": FAKE_PROVIDER_KEY,
                 "status": "enabled",
                 "updatedAt": "2026-06-02T00:00:00Z",

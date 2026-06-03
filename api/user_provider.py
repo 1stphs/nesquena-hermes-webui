@@ -629,7 +629,6 @@ def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[di
     api_mode = normalize_nocobase_provider_api_mode(raw_api_mode)
     api_key = str(record.get("api_key") or "").strip()
     model_level = str(record.get("model_level") or record.get("thinking_level") or "").strip().lower()
-    thinking_level = model_level
     missing = [
         name
         for name, value in (
@@ -644,8 +643,6 @@ def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[di
         return None, "missing_" + "_".join(missing)
     if api_mode not in SUPPORTED_API_MODES:
         return None, "unsupported_api_mode"
-    if thinking_level and thinking_level not in VALID_THINKING_LEVELS:
-        return None, "unsupported_thinking_level"
     base_url = _normalize_runtime_base_url(base_url, api_mode)
     try:
         base_url = _validate_base_url(base_url)
@@ -661,7 +658,8 @@ def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[di
         "model_name": model_name,
         "api_mode": api_mode,
         "raw_api_mode": raw_api_mode,
-        "thinking_level": thinking_level,
+        # 模型强度只做展示，不参与运行时思考深度覆盖。
+        "thinking_level": "",
         "model_level": model_level,
         "api_key": api_key,
         "status": str(record.get("status") or "").strip().lower(),
@@ -756,7 +754,7 @@ def public_user_ai_provider_record(record: dict[str, Any], sync_status: dict[str
         "model_name": str(record.get("model_name") or "").strip(),
         "api_mode": api_mode,
         "raw_api_mode": raw_api_mode,
-        "thinking_level": str(record.get("thinking_level") or model_level).strip(),
+        "thinking_level": str(record.get("thinking_level") or "").strip(),
         "model_level": model_level,
         "status": status,
         "enabled": is_selected,
@@ -968,7 +966,6 @@ def _mode_test_request(provider: dict[str, Any]) -> tuple[bool, str]:
     api_key = str(provider.get("api_key") or "")
     model_name = str(provider.get("model_name") or "")
     api_mode = str(provider.get("api_mode") or "")
-    thinking_level = str(provider.get("thinking_level") or "").strip().lower()
     if api_mode == "anthropic_messages":
         resources = ["messages"]
         body = {
@@ -990,8 +987,6 @@ def _mode_test_request(provider: dict[str, Any]) -> tuple[bool, str]:
             "input": "ping",
             "max_output_tokens": 16,
         }
-        if thinking_level:
-            body["reasoning"] = {"effort": thinking_level}
     else:
         return False, "unsupported api_mode"
     last_error = ""
@@ -1023,7 +1018,6 @@ def _provider_from_test_body(body: dict[str, Any], user_id: str | None = None) -
         "api_key": body.get("api_key"),
         "model_name": body.get("model_name"),
         "api_mode": body.get("api_mode"),
-        "thinking_level": body.get("thinking_level"),
         "status": "enabled",
         "updatedAt": "",
     }

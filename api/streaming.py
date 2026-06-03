@@ -2418,17 +2418,6 @@ def _run_agent_streaming(
                 _reasoning_config = _parse_reff(_effort_raw)
             except Exception:
                 _reasoning_config = None
-            if _user_provider_active:
-                _thinking_level = str((_user_provider_resolution.provider or {}).get("thinking_level") or "").strip().lower()
-                if _thinking_level:
-                    try:
-                        from api.config import parse_reasoning_effort as _parse_reff
-                        _provider_reasoning = _parse_reff(_thinking_level)
-                    except Exception:
-                        _provider_reasoning = None
-                    if _provider_reasoning is not None:
-                        _reasoning_config = _provider_reasoning
-
             _agent_kwargs = dict(
                 model=resolved_model,
                 provider=resolved_provider,
