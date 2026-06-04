@@ -105,7 +105,7 @@ class TestGetAllSkillsDirs:
 
 
 class TestExternalSkillsInFindAll:
-    def test_external_skills_found(self, hermes_home, external_skills_dir):
+    def test_external_skills_not_visible_in_find_all(self, hermes_home, external_skills_dir):
         (hermes_home / "config.yaml").write_text(
             f"skills:\n  external_dirs:\n    - {external_skills_dir}\n"
         )
@@ -117,10 +117,10 @@ class TestExternalSkillsInFindAll:
             from tools.skills_tool import _find_all_skills
             skills = _find_all_skills()
         names = [s["name"] for s in skills]
-        assert "my-external-skill" in names
+        assert "my-external-skill" not in names
 
     def test_local_takes_precedence(self, hermes_home, external_skills_dir):
-        """If the same skill name exists locally and externally, local wins."""
+        """Local profile skills should still be discovered normally."""
         local_skills = hermes_home / "skills"
         local_skill = local_skills / "my-external-skill"
         local_skill.mkdir(parents=True)
@@ -142,7 +142,7 @@ class TestExternalSkillsInFindAll:
 
 
 class TestExternalSkillView:
-    def test_skill_view_finds_external(self, hermes_home, external_skills_dir):
+    def test_skill_view_does_not_cross_into_external_dir(self, hermes_home, external_skills_dir):
         (hermes_home / "config.yaml").write_text(
             f"skills:\n  external_dirs:\n    - {external_skills_dir}\n"
         )
@@ -153,5 +153,56 @@ class TestExternalSkillView:
         ):
             from tools.skills_tool import skill_view
             result = json.loads(skill_view("my-external-skill"))
-        assert result["success"] is True
-        assert "external things" in result["content"]
+        assert result["success"] is False
+        assert "not found" in result["error"].lower()
+
+
+class TestExternalSkillsIgnoredByPromptAndConfig:
+    def test_system_prompt_ignores_external_skill_dirs(self, hermes_home, external_skills_dir):
+        (hermes_home / "config.yaml").write_text(
+            f"skills:\n  external_dirs:\n    - {external_skills_dir}\n"
+        )
+        local_skill = hermes_home / "skills" / "local-skill"
+        local_skill.mkdir(parents=True)
+        (local_skill / "SKILL.md").write_text(
+            "---\nname: local-skill\ndescription: Local profile skill\n---\n\n# Local\n"
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}):
+            from agent.prompt_builder import (
+                build_skills_system_prompt,
+                clear_skills_system_prompt_cache,
+            )
+
+            clear_skills_system_prompt_cache(clear_snapshot=True)
+            prompt = build_skills_system_prompt()
+
+        assert "local-skill" in prompt
+        assert "my-external-skill" not in prompt
+
+    def test_discover_all_skill_config_vars_ignores_external_dirs(
+        self, hermes_home, external_skills_dir
+    ):
+        external_skill = external_skills_dir / "config-skill"
+        external_skill.mkdir(parents=True, exist_ok=True)
+        (external_skill / "SKILL.md").write_text(
+            "---\nname: external-config-skill\ndescription: External config skill\nmetadata:\n  hermes:\n    config:\n      - key: external.path\n        description: External setting\n        default: /tmp/external\n---\n"
+        )
+
+        local_skill = hermes_home / "skills" / "local-config-skill"
+        local_skill.mkdir(parents=True)
+        (local_skill / "SKILL.md").write_text(
+            "---\nname: local-config-skill\ndescription: Local config skill\nmetadata:\n  hermes:\n    config:\n      - key: local.path\n        description: Local setting\n        default: /tmp/local\n---\n"
+        )
+        (hermes_home / "config.yaml").write_text(
+            f"skills:\n  external_dirs:\n    - {external_skills_dir}\n"
+        )
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}):
+            from agent.skill_utils import discover_all_skill_config_vars
+
+            vars_ = discover_all_skill_config_vars()
+
+        keys = [entry["key"] for entry in vars_]
+        assert "local.path" in keys
+        assert "external.path" not in keys

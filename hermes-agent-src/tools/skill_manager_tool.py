@@ -3,9 +3,9 @@
 Skill Manager Tool -- Agent-Managed Skill Creation & Editing
 
 Allows the agent to create, update, and delete skills, turning successful
-approaches into reusable procedural knowledge. New skills are created in
-~/.hermes/skills/. Existing skills (bundled, hub-installed, or user-created)
-can be modified or deleted wherever they live.
+approaches into reusable procedural knowledge. New skills are created in the
+active profile's skills directory. Existing skills can be modified or deleted
+only when they live in that profile.
 
 Skills are the agent's procedural memory: they capture *how to do a specific
 type of task* based on proven experience. General memory (MEMORY.md, USER.md) is
@@ -39,7 +39,11 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from hermes_constants import get_hermes_home, display_hermes_home
+from hermes_constants import (
+    get_hermes_home,
+    display_hermes_home,
+    get_skills_dir as _get_runtime_skills_dir,
+)
 from typing import Dict, Any, Optional, Tuple
 
 from utils import atomic_replace
@@ -100,9 +104,21 @@ def _security_scan_skill(skill_dir: Path) -> Optional[str]:
 import yaml
 
 
-# All skills live in ~/.hermes/skills/ (single source of truth)
+# All skills live in the active profile's skills directory.
 HERMES_HOME = get_hermes_home()
 SKILLS_DIR = HERMES_HOME / "skills"
+_DEFAULT_SKILLS_DIR = SKILLS_DIR
+
+
+def _get_skills_dir() -> Path:
+    """Return the active profile's skills directory.
+
+    Keeps module-level ``SKILLS_DIR`` monkeypatch compatibility for tests.
+    """
+    runtime_skills_dir = _get_runtime_skills_dir()
+    if SKILLS_DIR != _DEFAULT_SKILLS_DIR:
+        return SKILLS_DIR
+    return runtime_skills_dir
 
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
@@ -111,10 +127,11 @@ MAX_DESCRIPTION_LENGTH = 1024
 def _is_local_skill(skill_path: Path) -> bool:
     """Check if a skill path is within the local SKILLS_DIR.
 
-    Skills found in external_dirs are read-only from the agent's perspective.
+    Skills are only editable when they live in the active profile's local
+    skills directory.
     """
     try:
-        skill_path.resolve().relative_to(SKILLS_DIR.resolve())
+        skill_path.resolve().relative_to(_get_skills_dir().resolve())
         return True
     except ValueError:
         return False
@@ -227,26 +244,28 @@ def _validate_content_size(content: str, label: str = "SKILL.md") -> Optional[st
 
 def _resolve_skill_dir(name: str, category: str = None) -> Path:
     """Build the directory path for a new skill, optionally under a category."""
+    skills_dir = _get_skills_dir()
     if category:
-        return SKILLS_DIR / category / name
-    return SKILLS_DIR / name
+        return skills_dir / category / name
+    return skills_dir / name
 
 
 def _find_skill(name: str) -> Optional[Dict[str, Any]]:
     """
-    Find a skill by name across all skill directories.
-
-    Searches the local skills dir (~/.hermes/skills/) first, then any
-    external dirs configured via skills.external_dirs.  Returns
-    {"path": Path} or None.
+    Find a skill by name in the active profile's local skills directory.
     """
-    from agent.skill_utils import get_all_skills_dirs
-    for skills_dir in get_all_skills_dirs():
-        if not skills_dir.exists():
+    from agent.skill_utils import iter_skill_index_files
+    from tools.path_security import validate_within_dir
+
+    skills_dir = _get_skills_dir()
+    if not skills_dir.exists():
+        return None
+
+    for skill_md in iter_skill_index_files(skills_dir, "SKILL.md"):
+        if validate_within_dir(skill_md, skills_dir):
             continue
-        for skill_md in skills_dir.rglob("SKILL.md"):
-            if skill_md.parent.name == name:
-                return {"path": skill_md.parent}
+        if skill_md.parent.name == name:
+            return {"path": skill_md.parent}
     return None
 
 
@@ -370,7 +389,7 @@ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, An
     result = {
         "success": True,
         "message": f"Skill '{name}' created.",
-        "path": str(skill_dir.relative_to(SKILLS_DIR)),
+        "path": str(skill_dir.relative_to(_get_skills_dir())),
         "skill_md": str(skill_md),
     }
     if category:
@@ -529,7 +548,7 @@ def _delete_skill(name: str) -> Dict[str, Any]:
 
     # Clean up empty category directories (don't remove SKILLS_DIR itself)
     parent = skill_dir.parent
-    if parent != SKILLS_DIR and parent.exists() and not any(parent.iterdir()):
+    if parent != _get_skills_dir() and parent.exists() and not any(parent.iterdir()):
         parent.rmdir()
 
     return {
@@ -700,6 +719,11 @@ def skill_manage(
             clear_skills_system_prompt_cache(clear_snapshot=True)
         except Exception:
             pass
+        try:
+            from agent.skill_commands import clear_skill_commands_cache
+            clear_skill_commands_cache()
+        except Exception:
+            pass
 
     return json.dumps(result, ensure_ascii=False)
 
@@ -713,7 +737,7 @@ SKILL_MANAGE_SCHEMA = {
     "description": (
         "Manage skills (create, update, delete). Skills are your procedural "
         "memory — reusable approaches for recurring task types. "
-        f"New skills go to {display_hermes_home()}/skills/; existing skills can be modified wherever they live.\n\n"
+        f"New skills go to {display_hermes_home()}/skills/; existing skills can be modified only within the active profile.\n\n"
         "Actions: create (full SKILL.md + optional category), "
         "patch (old_string/new_string — preferred for fixes), "
         "edit (full SKILL.md rewrite — major overhauls only), "

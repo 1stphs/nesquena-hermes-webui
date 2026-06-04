@@ -7,6 +7,7 @@ can invoke skills via /skill-name commands.
 import json
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -19,10 +20,36 @@ from agent.skill_preprocessing import (
 
 logger = logging.getLogger(__name__)
 
-_skill_commands: Dict[str, Dict[str, Any]] = {}
+# Cache slash-command discovery per active profile skills directory so profile
+# switches do not leak one profile's commands into another.
+_skill_commands_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_skill_commands_cache_lock = threading.RLock()
 # Patterns for sanitizing skill names into clean hyphen-separated slugs.
 _SKILL_INVALID_CHARS = re.compile(r"[^a-z0-9-]")
 _SKILL_MULTI_HYPHEN = re.compile(r"-{2,}")
+
+
+def _skill_commands_cache_key(skills_dir: Path) -> str:
+    """Return the cache key for one profile's skills directory."""
+    try:
+        return str(Path(skills_dir).resolve())
+    except Exception:
+        return str(Path(skills_dir))
+
+
+def clear_skill_commands_cache(skills_dir: Path | None = None) -> None:
+    """Invalidate cached slash-command discovery.
+
+    When ``skills_dir`` is omitted, all cached profiles are cleared. This is
+    useful after skill installs, edits, deletes, or when tests need a fresh
+    discovery pass.
+    """
+    with _skill_commands_cache_lock:
+        if skills_dir is None:
+            _skill_commands_cache.clear()
+            return
+        _skill_commands_cache.pop(_skill_commands_cache_key(skills_dir), None)
+
 
 def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tuple[dict[str, Any], Path | None, str] | None:
     """Load a skill by name/path and return (loaded_payload, skill_dir, display_name)."""
@@ -31,12 +58,13 @@ def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tu
         return None
 
     try:
-        from tools.skills_tool import SKILLS_DIR, skill_view
+        from tools.skills_tool import get_skills_dir, skill_view
 
         identifier_path = Path(raw_identifier).expanduser()
+        skills_dir = get_skills_dir()
         if identifier_path.is_absolute():
             try:
-                normalized = str(identifier_path.resolve().relative_to(SKILLS_DIR.resolve()))
+                normalized = str(identifier_path.resolve().relative_to(skills_dir.resolve()))
             except Exception:
                 normalized = raw_identifier
         else:
@@ -54,16 +82,15 @@ def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tu
     skill_name = str(loaded_skill.get("name") or normalized)
     skill_path = str(loaded_skill.get("path") or "")
     skill_dir = None
-    # Prefer the absolute skill_dir returned by skill_view() — this is
-    # correct for both local and external skills.  Fall back to the old
-    # SKILLS_DIR-relative reconstruction only when skill_dir is absent
+    # Prefer the absolute skill_dir returned by skill_view().  Fall back to a
+    # current-profile-relative reconstruction only when skill_dir is absent
     # (e.g. legacy skill_view responses).
     abs_skill_dir = loaded_skill.get("skill_dir")
     if abs_skill_dir:
         skill_dir = Path(abs_skill_dir)
     elif skill_path:
         try:
-            skill_dir = SKILLS_DIR / Path(skill_path).parent
+            skill_dir = get_skills_dir() / Path(skill_path).parent
         except Exception:
             skill_dir = None
 
@@ -118,7 +145,7 @@ def _build_skill_message(
     session_id: str | None = None,
 ) -> str:
     """Format a loaded skill into a user/system message payload."""
-    from tools.skills_tool import SKILLS_DIR
+    from tools.skills_tool import get_skills_dir
 
     content = str(loaded_skill.get("content") or "")
 
@@ -186,10 +213,10 @@ def _build_skill_message(
                         supporting.append(rel)
 
     if supporting and skill_dir:
+        skills_dir = get_skills_dir()
         try:
-            skill_view_target = str(skill_dir.relative_to(SKILLS_DIR))
+            skill_view_target = str(skill_dir.relative_to(skills_dir))
         except ValueError:
-            # Skill is from an external dir — use the skill name instead
             skill_view_target = skill_dir.name
         parts.append("")
         parts.append("[This skill has supporting files:]")
@@ -212,76 +239,92 @@ def _build_skill_message(
     return "\n".join(parts)
 
 
-def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
-    """Scan ~/.hermes/skills/ and return a mapping of /command -> skill info.
-
-    Returns:
-        Dict mapping "/skill-name" to {name, description, skill_md_path, skill_dir}.
-    """
-    global _skill_commands
-    _skill_commands = {}
+def _scan_skill_commands_for_dir(skills_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """Scan one profile's skills directory and refresh its cached mapping."""
+    cache_key = _skill_commands_cache_key(skills_dir)
+    skill_commands: Dict[str, Dict[str, Any]] = {}
     try:
-        from tools.skills_tool import SKILLS_DIR, _parse_frontmatter, skill_matches_platform, _get_disabled_skill_names
-        from agent.skill_utils import get_external_skills_dirs, iter_skill_index_files
+        from tools.skills_tool import (
+            _get_disabled_skill_names,
+            _parse_frontmatter,
+            skill_matches_platform,
+        )
+        from agent.skill_utils import iter_skill_index_files
+        from tools.path_security import validate_within_dir
+
         disabled = _get_disabled_skill_names()
         seen_names: set = set()
 
-        # Scan local dir first, then external dirs
-        dirs_to_scan = []
-        if SKILLS_DIR.exists():
-            dirs_to_scan.append(SKILLS_DIR)
-        dirs_to_scan.extend(get_external_skills_dirs())
+        if not skills_dir.exists():
+            return skill_commands
 
-        for scan_dir in dirs_to_scan:
-            for skill_md in iter_skill_index_files(scan_dir, "SKILL.md"):
-                if any(part in ('.git', '.github', '.hub') for part in skill_md.parts):
+        for skill_md in iter_skill_index_files(skills_dir, "SKILL.md"):
+            if any(part in ('.git', '.github', '.hub') for part in skill_md.parts):
+                continue
+            if validate_within_dir(skill_md, skills_dir):
+                continue
+            try:
+                content = skill_md.read_text(encoding='utf-8')
+                frontmatter, body = _parse_frontmatter(content)
+                # Skip skills incompatible with the current OS platform
+                if not skill_matches_platform(frontmatter):
                     continue
-                try:
-                    content = skill_md.read_text(encoding='utf-8')
-                    frontmatter, body = _parse_frontmatter(content)
-                    # Skip skills incompatible with the current OS platform
-                    if not skill_matches_platform(frontmatter):
-                        continue
-                    name = frontmatter.get('name', skill_md.parent.name)
-                    if name in seen_names:
-                        continue
-                    # Respect user's disabled skills config
-                    if name in disabled:
-                        continue
-                    description = frontmatter.get('description', '')
-                    if not description:
-                        for line in body.strip().split('\n'):
-                            line = line.strip()
-                            if line and not line.startswith('#'):
-                                description = line[:80]
-                                break
-                    seen_names.add(name)
-                    # Normalize to hyphen-separated slug, stripping
-                    # non-alnum chars (e.g. +, /) to avoid invalid
-                    # Telegram command names downstream.
-                    cmd_name = name.lower().replace(' ', '-').replace('_', '-')
-                    cmd_name = _SKILL_INVALID_CHARS.sub('', cmd_name)
-                    cmd_name = _SKILL_MULTI_HYPHEN.sub('-', cmd_name).strip('-')
-                    if not cmd_name:
-                        continue
-                    _skill_commands[f"/{cmd_name}"] = {
-                        "name": name,
-                        "description": description or f"Invoke the {name} skill",
-                        "skill_md_path": str(skill_md),
-                        "skill_dir": str(skill_md.parent),
-                    }
-                except Exception:
+                name = frontmatter.get('name', skill_md.parent.name)
+                if name in seen_names:
                     continue
+                # Respect user's disabled skills config
+                if name in disabled:
+                    continue
+                description = frontmatter.get('description', '')
+                if not description:
+                    for line in body.strip().split('\n'):
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            description = line[:80]
+                            break
+                seen_names.add(name)
+                # Normalize to hyphen-separated slug, stripping
+                # non-alnum chars (e.g. +, /) to avoid invalid
+                # Telegram command names downstream.
+                cmd_name = name.lower().replace(' ', '-').replace('_', '-')
+                cmd_name = _SKILL_INVALID_CHARS.sub('', cmd_name)
+                cmd_name = _SKILL_MULTI_HYPHEN.sub('-', cmd_name).strip('-')
+                if not cmd_name:
+                    continue
+                skill_commands[f"/{cmd_name}"] = {
+                    "name": name,
+                    "description": description or f"Invoke the {name} skill",
+                    "skill_md_path": str(skill_md),
+                    "skill_dir": str(skill_md.parent),
+                }
+            except Exception:
+                continue
     except Exception:
-        pass
-    return _skill_commands
+        skill_commands = {}
+    finally:
+        with _skill_commands_cache_lock:
+            _skill_commands_cache[cache_key] = skill_commands
+    return skill_commands
+
+
+def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
+    """Scan the active profile's skills directory and refresh its cache."""
+    from tools.skills_tool import get_skills_dir
+
+    return _scan_skill_commands_for_dir(get_skills_dir())
 
 
 def get_skill_commands() -> Dict[str, Dict[str, Any]]:
-    """Return the current skill commands mapping (scan first if empty)."""
-    if not _skill_commands:
-        scan_skill_commands()
-    return _skill_commands
+    """Return the current profile's skill commands mapping."""
+    from tools.skills_tool import get_skills_dir
+
+    skills_dir = get_skills_dir()
+    cache_key = _skill_commands_cache_key(skills_dir)
+    with _skill_commands_cache_lock:
+        cached = _skill_commands_cache.get(cache_key)
+        if cached is not None:
+            return cached
+    return _scan_skill_commands_for_dir(skills_dir)
 
 
 def resolve_skill_command_key(command: str) -> Optional[str]:

@@ -69,7 +69,11 @@ Usage:
 import json
 import logging
 
-from hermes_constants import get_hermes_home, display_hermes_home
+from hermes_constants import (
+    get_hermes_home,
+    display_hermes_home,
+    get_skills_dir as _get_runtime_skills_dir,
+)
 import os
 import re
 from enum import Enum
@@ -81,11 +85,12 @@ from tools.registry import registry, tool_error
 logger = logging.getLogger(__name__)
 
 
-# All skills live in ~/.hermes/skills/ (seeded from bundled skills/ on install).
-# This is the single source of truth -- agent edits, hub installs, and bundled
-# skills all coexist here without polluting the git repo.
+# All skills live in the active profile's skills directory.  This module keeps a
+# patchable module-level alias for tests, but all runtime lookups go through the
+# helper below so profile switches take effect immediately.
 HERMES_HOME = get_hermes_home()
 SKILLS_DIR = HERMES_HOME / "skills"
+_DEFAULT_SKILLS_DIR = SKILLS_DIR
 
 # Anthropic-recommended limits for progressive disclosure efficiency
 MAX_NAME_LENGTH = 64
@@ -102,6 +107,20 @@ _ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _EXCLUDED_SKILL_DIRS = frozenset((".git", ".github", ".hub"))
 _REMOTE_ENV_BACKENDS = frozenset({"docker", "singularity", "modal", "ssh", "daytona"})
 _secret_capture_callback = None
+
+
+def get_skills_dir() -> Path:
+    """Return the active profile's skills directory.
+
+    ``SKILLS_DIR`` remains a compatibility alias for tests and older callers
+    that monkeypatch the module attribute directly.  When it is untouched, the
+    runtime helper from :mod:`hermes_constants` wins so a changed ``HERMES_HOME``
+    is reflected immediately.
+    """
+    runtime_skills_dir = _get_runtime_skills_dir()
+    if SKILLS_DIR != _DEFAULT_SKILLS_DIR:
+        return SKILLS_DIR
+    return runtime_skills_dir
 
 
 def load_env() -> Dict[str, str]:
@@ -445,24 +464,19 @@ def _get_category_from_path(skill_path: Path) -> Optional[str]:
     Extract category from skill path based on directory structure.
 
     For paths like: ~/.hermes/skills/mlops/axolotl/SKILL.md -> "mlops"
-    Also works for external skill dirs configured via skills.external_dirs.
     """
-    # Try the module-level SKILLS_DIR first (respects monkeypatching in tests),
-    # then fall back to external dirs from config.
-    dirs_to_check = [SKILLS_DIR]
+    skills_dir = get_skills_dir()
     try:
-        from agent.skill_utils import get_external_skills_dirs
-        dirs_to_check.extend(get_external_skills_dirs())
+        from tools.path_security import validate_within_dir
+
+        if validate_within_dir(skill_path, skills_dir):
+            return None
+        rel_path = skill_path.resolve().relative_to(skills_dir.resolve())
+        parts = rel_path.parts
+        if len(parts) >= 3:
+            return parts[0]
     except Exception:
         pass
-    for skills_dir in dirs_to_check:
-        try:
-            rel_path = skill_path.relative_to(skills_dir)
-            parts = rel_path.parts
-            if len(parts) >= 3:
-                return parts[0]
-        except ValueError:
-            continue
     return None
 
 
@@ -544,7 +558,7 @@ def _is_skill_disabled(name: str, platform: str = None) -> bool:
 
 
 def _find_all_skills(*, skip_disabled: bool = False) -> List[Dict[str, Any]]:
-    """Recursively find all skills in ~/.hermes/skills/ and external dirs.
+    """Recursively find all skills in the active profile's skills directory.
 
     Args:
         skip_disabled: If True, return ALL skills regardless of disabled
@@ -554,7 +568,8 @@ def _find_all_skills(*, skip_disabled: bool = False) -> List[Dict[str, Any]]:
     Returns:
         List of skill metadata dicts (name, description, category).
     """
-    from agent.skill_utils import get_external_skills_dirs, iter_skill_index_files
+    from agent.skill_utils import iter_skill_index_files
+    from tools.path_security import validate_within_dir
 
     skills = []
     seen_names: set = set()
@@ -562,60 +577,59 @@ def _find_all_skills(*, skip_disabled: bool = False) -> List[Dict[str, Any]]:
     # Load disabled set once (not per-skill)
     disabled = set() if skip_disabled else _get_disabled_skill_names()
 
-    # Scan local dir first, then external dirs (local takes precedence)
-    dirs_to_scan = []
-    if SKILLS_DIR.exists():
-        dirs_to_scan.append(SKILLS_DIR)
-    dirs_to_scan.extend(get_external_skills_dirs())
+    skills_dir = get_skills_dir()
+    if not skills_dir.exists():
+        return skills
 
-    for scan_dir in dirs_to_scan:
-        for skill_md in iter_skill_index_files(scan_dir, "SKILL.md"):
-            if any(part in _EXCLUDED_SKILL_DIRS for part in skill_md.parts):
+    for skill_md in iter_skill_index_files(skills_dir, "SKILL.md"):
+        if any(part in _EXCLUDED_SKILL_DIRS for part in skill_md.parts):
+            continue
+        if validate_within_dir(skill_md, skills_dir):
+            continue
+
+        skill_dir = skill_md.parent
+
+        try:
+            content = skill_md.read_text(encoding="utf-8")[:4000]
+            frontmatter, body = _parse_frontmatter(content)
+
+            if not skill_matches_platform(frontmatter):
                 continue
 
-            skill_dir = skill_md.parent
-
-            try:
-                content = skill_md.read_text(encoding="utf-8")[:4000]
-                frontmatter, body = _parse_frontmatter(content)
-
-                if not skill_matches_platform(frontmatter):
-                    continue
-
-                name = frontmatter.get("name", skill_dir.name)[:MAX_NAME_LENGTH]
-                if name in seen_names:
-                    continue
-                if name in disabled:
-                    continue
-
-                description = frontmatter.get("description", "")
-                if not description:
-                    for line in body.strip().split("\n"):
-                        line = line.strip()
-                        if line and not line.startswith("#"):
-                            description = line
-                            break
-
-                if len(description) > MAX_DESCRIPTION_LENGTH:
-                    description = description[:MAX_DESCRIPTION_LENGTH - 3] + "..."
-
-                category = _get_category_from_path(skill_md)
-
-                seen_names.add(name)
-                skills.append({
-                    "name": name,
-                    "description": description,
-                    "category": category,
-                })
-
-            except (UnicodeDecodeError, PermissionError) as e:
-                logger.debug("Failed to read skill file %s: %s", skill_md, e)
+            name = frontmatter.get("name", skill_dir.name)[:MAX_NAME_LENGTH]
+            if name in seen_names:
                 continue
-            except Exception as e:
-                logger.debug(
-                    "Skipping skill at %s: failed to parse: %s", skill_md, e, exc_info=True
-                )
+            if name in disabled:
                 continue
+
+            description = frontmatter.get("description", "")
+            if not description:
+                for line in body.strip().split("\n"):
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        description = line
+                        break
+
+            if len(description) > MAX_DESCRIPTION_LENGTH:
+                description = description[:MAX_DESCRIPTION_LENGTH - 3] + "..."
+
+            category = _get_category_from_path(skill_md)
+
+            seen_names.add(name)
+            skills.append({
+                "name": name,
+                "description": description,
+                "category": category,
+            })
+
+        except (UnicodeDecodeError, PermissionError) as e:
+            logger.debug("Failed to read skill file %s: %s", skill_md, e)
+            continue
+        except Exception as e:
+            logger.debug(
+                "Skipping skill at %s: failed to parse: %s", skill_md, e, exc_info=True
+            )
+            continue
 
     return skills
 
@@ -683,8 +697,9 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         JSON string with minimal skill info: name, description, category
     """
     try:
-        if not SKILLS_DIR.exists():
-            SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+        skills_dir = get_skills_dir()
+        if not skills_dir.exists():
+            skills_dir.mkdir(parents=True, exist_ok=True)
             return json.dumps(
                 {
                     "success": True,
@@ -928,15 +943,12 @@ def skill_view(
             # Plugin itself not found — fall through to flat-tree scan
             # which will return a normal "not found" with suggestions.
 
-        from agent.skill_utils import get_external_skills_dirs
+        from agent.skill_utils import iter_skill_index_files
+        from tools.path_security import validate_within_dir
 
-        # Build list of all skill directories to search
-        all_dirs = []
-        if SKILLS_DIR.exists():
-            all_dirs.append(SKILLS_DIR)
-        all_dirs.extend(get_external_skills_dirs())
+        skills_dir = get_skills_dir()
 
-        if not all_dirs:
+        if not skills_dir.exists():
             return json.dumps(
                 {
                     "success": False,
@@ -948,40 +960,79 @@ def skill_view(
         skill_dir = None
         skill_md = None
 
-        # Search all dirs: local first, then external (first match wins)
-        for search_dir in all_dirs:
-            # Try direct path first (e.g., "mlops/axolotl")
-            direct_path = search_dir / name
-            if direct_path.is_dir() and (direct_path / "SKILL.md").exists():
-                skill_dir = direct_path
-                skill_md = direct_path / "SKILL.md"
-                break
-            elif direct_path.with_suffix(".md").exists():
-                skill_md = direct_path.with_suffix(".md")
-                break
+        requested_path = Path(name).expanduser()
+        if requested_path.is_absolute():
+            path_error = validate_within_dir(requested_path, skills_dir)
+            if path_error:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            f"Skill path '{name}' is outside the current profile skills directory."
+                        ),
+                        "hint": "Use a skill name or relative path within the active profile.",
+                    },
+                    ensure_ascii=False,
+                )
+            direct_candidates = [requested_path]
+        else:
+            direct_candidates = [skills_dir / requested_path]
 
-        # Search by directory name across all dirs
-        if not skill_md:
-            for search_dir in all_dirs:
-                from agent.skill_utils import iter_skill_index_files
-
-                for found_skill_md in iter_skill_index_files(search_dir, "SKILL.md"):
-                    if found_skill_md.parent.name == name:
-                        skill_dir = found_skill_md.parent
-                        skill_md = found_skill_md
-                        break
-                if skill_md:
+        # Search current profile only: direct path first, then basename lookups.
+        for direct_path in direct_candidates:
+            if direct_path.is_dir():
+                if validate_within_dir(direct_path, skills_dir):
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": (
+                                f"Skill path '{name}' escapes the current profile skills directory."
+                            ),
+                            "hint": "Use a skill name or relative path within the active profile.",
+                        },
+                        ensure_ascii=False,
+                    )
+                candidate_md = direct_path / "SKILL.md"
+                if candidate_md.exists():
+                    skill_dir = direct_path
+                    skill_md = candidate_md
                     break
 
-        # Legacy: flat .md files
+            candidate_md = direct_path.with_suffix(".md")
+            if candidate_md.exists():
+                if validate_within_dir(candidate_md, skills_dir):
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": (
+                                f"Skill file '{name}' escapes the current profile skills directory."
+                            ),
+                            "hint": "Use a skill name or relative path within the active profile.",
+                        },
+                        ensure_ascii=False,
+                    )
+                skill_md = candidate_md
+                break
+
+        # Search by directory name across the current profile only.
         if not skill_md:
-            for search_dir in all_dirs:
-                for found_md in search_dir.rglob(f"{name}.md"):
-                    if found_md.name != "SKILL.md":
-                        skill_md = found_md
-                        break
-                if skill_md:
+            for found_skill_md in iter_skill_index_files(skills_dir, "SKILL.md"):
+                if validate_within_dir(found_skill_md, skills_dir):
+                    continue
+                if found_skill_md.parent.name == name:
+                    skill_dir = found_skill_md.parent
+                    skill_md = found_skill_md
                     break
+
+        # Legacy: flat .md files, still restricted to the current profile.
+        if not skill_md:
+            for found_md in skills_dir.rglob(f"{name}.md"):
+                if found_md.name == "SKILL.md":
+                    continue
+                if validate_within_dir(found_md, skills_dir):
+                    continue
+                skill_md = found_md
+                break
 
         if not skill_md or not skill_md.exists():
             available = [s["name"] for s in _sort_skills(_find_all_skills())[:20]]
@@ -1007,33 +1058,27 @@ def skill_view(
                 ensure_ascii=False,
             )
 
-        # Security: warn if skill is loaded from outside trusted directories
-        # (local skills dir + configured external_dirs are all trusted)
-        _outside_skills_dir = True
-        _trusted_dirs = [SKILLS_DIR.resolve()]
-        try:
-            _trusted_dirs.extend(d.resolve() for d in all_dirs[1:])
-        except Exception:
-            pass
-        for _td in _trusted_dirs:
-            try:
-                skill_md.resolve().relative_to(_td)
-                _outside_skills_dir = False
-                break
-            except ValueError:
-                continue
+        # Security: reject any resolved path that escapes the active profile.
+        path_error = validate_within_dir(skill_md, skills_dir)
+        if path_error:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        f"Skill '{name}' is outside the current profile skills directory."
+                    ),
+                    "hint": "Use a skill name or relative path within the active profile.",
+                },
+                ensure_ascii=False,
+            )
 
         # Security: detect common prompt injection patterns
         # (pattern list at module level as _INJECTION_PATTERNS)
         _content_lower = content.lower()
         _injection_detected = any(p in _content_lower for p in _INJECTION_PATTERNS)
 
-        if _outside_skills_dir or _injection_detected:
-            _warnings = []
-            if _outside_skills_dir:
-                _warnings.append(f"skill file is outside the trusted skills directory (~/.hermes/skills/): {skill_md}")
-            if _injection_detected:
-                _warnings.append("skill content contains patterns that may indicate prompt injection")
+        if _injection_detected:
+            _warnings = ["skill content contains patterns that may indicate prompt injection"]
             logging.getLogger(__name__).warning("Skill security warning for '%s': %s", name, "; ".join(_warnings))
 
         parsed_frontmatter: Dict[str, Any] = {}
@@ -1106,7 +1151,7 @@ def skill_view(
 
                 # Scan for all readable files
                 for f in skill_dir.rglob("*"):
-                    if f.is_file() and f.name != "SKILL.md":
+                    if f.is_file() and f.name != "SKILL.md" and not validate_within_dir(f, skill_dir):
                         rel = str(f.relative_to(skill_dir))
                         if rel.startswith("references/"):
                             available_files["references"].append(rel)
@@ -1179,9 +1224,10 @@ def skill_view(
         if skill_dir:
             references_dir = skill_dir / "references"
             if references_dir.exists():
-                reference_files = [
-                    str(f.relative_to(skill_dir)) for f in references_dir.glob("*.md")
-                ]
+                for f in references_dir.glob("*.md"):
+                    if validate_within_dir(f, skill_dir):
+                        continue
+                    reference_files.append(str(f.relative_to(skill_dir)))
 
             templates_dir = skill_dir / "templates"
             if templates_dir.exists():
@@ -1194,26 +1240,25 @@ def skill_view(
                     "*.tex",
                     "*.sh",
                 ]:
-                    template_files.extend(
-                        [
-                            str(f.relative_to(skill_dir))
-                            for f in templates_dir.rglob(ext)
-                        ]
-                    )
+                    for f in templates_dir.rglob(ext):
+                        if not f.is_file() or validate_within_dir(f, skill_dir):
+                            continue
+                        template_files.append(str(f.relative_to(skill_dir)))
 
             # assets/ — agentskills.io standard directory for supplementary files
             assets_dir = skill_dir / "assets"
             if assets_dir.exists():
                 for f in assets_dir.rglob("*"):
-                    if f.is_file():
+                    if f.is_file() and not validate_within_dir(f, skill_dir):
                         asset_files.append(str(f.relative_to(skill_dir)))
 
             scripts_dir = skill_dir / "scripts"
             if scripts_dir.exists():
                 for ext in ["*.py", "*.sh", "*.bash", "*.js", "*.ts", "*.rb"]:
-                    script_files.extend(
-                        [str(f.relative_to(skill_dir)) for f in scripts_dir.glob(ext)]
-                    )
+                    for f in scripts_dir.glob(ext):
+                        if validate_within_dir(f, skill_dir):
+                            continue
+                        script_files.append(str(f.relative_to(skill_dir)))
 
         # Read tags/related_skills with backward compat:
         # Check metadata.hermes.* first (agentskills.io convention), fall back to top-level
@@ -1239,10 +1284,9 @@ def skill_view(
             linked_files["scripts"] = script_files
 
         try:
-            rel_path = str(skill_md.relative_to(SKILLS_DIR))
+            rel_path = str(skill_md.relative_to(skills_dir))
         except ValueError:
-            # External skill — use path relative to the skill's own parent dir
-            rel_path = str(skill_md.relative_to(skill_md.parent.parent)) if skill_md.parent.parent else skill_md.name
+            rel_path = skill_md.name
         skill_name = frontmatter.get(
             "name", skill_md.stem if not skill_dir else skill_dir.name
         )

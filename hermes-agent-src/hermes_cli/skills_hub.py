@@ -142,6 +142,20 @@ def _derive_category_from_install_path(install_path: str) -> str:
     return "" if parent == "." else parent
 
 
+def _clear_skill_runtime_caches() -> None:
+    """Clear prompt and slash-command caches after a skill change."""
+    try:
+        from agent.prompt_builder import clear_skills_system_prompt_cache
+        clear_skills_system_prompt_cache(clear_snapshot=True)
+    except Exception:
+        pass
+    try:
+        from agent.skill_commands import clear_skill_commands_cache
+        clear_skill_commands_cache()
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Interactive name/category resolution for URL-installed skills
 # ---------------------------------------------------------------------------
@@ -613,15 +627,12 @@ def do_install(identifier: str, category: str = "", force: bool = False,
     c.print(f"[dim]Files: {', '.join(bundle.files.keys())}[/]\n")
 
     if invalidate_cache:
-        # Invalidate the skills prompt cache so the new skill appears immediately
-        try:
-            from agent.prompt_builder import clear_skills_system_prompt_cache
-            clear_skills_system_prompt_cache(clear_snapshot=True)
-        except Exception:
-            pass
+        # Invalidate the prompt snapshot and skill command cache so the new
+        # skill appears immediately.
+        _clear_skill_runtime_caches()
     else:
         c.print("[dim]Skill will be available in your next session.[/]")
-        c.print("[dim]Use /reset to start a new session now, or --now to activate immediately (invalidates prompt cache).[/]\n")
+        c.print("[dim]Use /reset to start a new session now, or --now to activate immediately (invalidates prompt and skill command caches).[/]\n")
 
 
 def do_inspect(identifier: str, console: Optional[Console] = None) -> None:
@@ -956,14 +967,10 @@ def do_uninstall(name: str, console: Optional[Console] = None,
     if success:
         c.print(f"[bold green]{msg}[/]\n")
         if invalidate_cache:
-            try:
-                from agent.prompt_builder import clear_skills_system_prompt_cache
-                clear_skills_system_prompt_cache(clear_snapshot=True)
-            except Exception:
-                pass
+            _clear_skill_runtime_caches()
         else:
             c.print("[dim]Change will take effect in your next session.[/]")
-            c.print("[dim]Use /reset to start a new session now, or --now to apply immediately (invalidates prompt cache).[/]\n")
+            c.print("[dim]Use /reset to start a new session now, or --now to apply immediately (invalidates prompt and skill command caches).[/]\n")
     else:
         c.print(f"[bold red]Error:[/] {msg}\n")
 
@@ -1003,14 +1010,10 @@ def do_reset(name: str, restore: bool = False,
     c.print()
 
     if invalidate_cache:
-        try:
-            from agent.prompt_builder import clear_skills_system_prompt_cache
-            clear_skills_system_prompt_cache(clear_snapshot=True)
-        except Exception:
-            pass
+        _clear_skill_runtime_caches()
     else:
         c.print("[dim]Change will take effect in your next session.[/]")
-        c.print("[dim]Use /reset to start a new session now, or --now to apply immediately (invalidates prompt cache).[/]\n")
+        c.print("[dim]Use /reset to start a new session now, or --now to apply immediately (invalidates prompt and skill command caches).[/]\n")
 
 
 def do_tap(action: str, repo: str = "", console: Optional[Console] = None) -> None:

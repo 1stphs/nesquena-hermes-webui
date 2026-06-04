@@ -8,6 +8,8 @@ import tools.skills_tool as skills_tool_module
 from agent.skill_commands import (
     build_preloaded_skills_prompt,
     build_skill_invocation_message,
+    clear_skill_commands_cache,
+    get_skill_commands,
     resolve_skill_command_key,
     scan_skill_commands,
 )
@@ -111,7 +113,7 @@ class TestScanSkillCommands:
         assert "/enabled-skill" in result
         assert "/disabled-skill" not in result
 
-    def test_finds_skills_in_symlinked_category_dir(self, tmp_path):
+    def test_skips_skills_in_symlinked_category_dir(self, tmp_path):
         external_root = tmp_path / "repo"
         skills_root = tmp_path / "skills"
         skills_root.mkdir()
@@ -122,8 +124,49 @@ class TestScanSkillCommands:
         with patch("tools.skills_tool.SKILLS_DIR", skills_root):
             result = scan_skill_commands()
 
-        assert "/knowledge-brain" in result
-        assert result["/knowledge-brain"]["name"] == "knowledge-brain"
+        assert "/knowledge-brain" not in result
+
+
+class TestSkillCommandCache:
+    def test_get_skill_commands_tracks_current_profile(self, tmp_path):
+        profile_a = tmp_path / "profile-a"
+        profile_b = tmp_path / "profile-b"
+        profile_a.mkdir()
+        profile_b.mkdir()
+
+        clear_skill_commands_cache()
+        try:
+            with patch("tools.skills_tool.SKILLS_DIR", profile_a):
+                _make_skill(profile_a, "alpha")
+                profile_a_cmds = get_skill_commands()
+
+            with patch("tools.skills_tool.SKILLS_DIR", profile_b):
+                _make_skill(profile_b, "beta")
+                profile_b_cmds = get_skill_commands()
+
+            assert "/alpha" in profile_a_cmds
+            assert "/beta" not in profile_a_cmds
+            assert "/beta" in profile_b_cmds
+            assert "/alpha" not in profile_b_cmds
+        finally:
+            clear_skill_commands_cache()
+
+    def test_clear_skill_commands_cache_refreshes_same_profile(self, tmp_path):
+        clear_skill_commands_cache()
+        try:
+            with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
+                _make_skill(tmp_path, "alpha")
+                first_cmds = get_skill_commands()
+                _make_skill(tmp_path, "beta")
+                stale_cmds = get_skill_commands()
+                clear_skill_commands_cache()
+                refreshed_cmds = get_skill_commands()
+
+            assert "/alpha" in first_cmds
+            assert "/beta" not in stale_cmds
+            assert "/beta" in refreshed_cmds
+        finally:
+            clear_skill_commands_cache()
 
 
     def test_special_chars_stripped_from_cmd_key(self, tmp_path):

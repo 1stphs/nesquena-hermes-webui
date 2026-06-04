@@ -604,16 +604,17 @@ def _check_unavailable_skill(command_name: str) -> str | None:
     # Normalize: command uses hyphens, skill names may use hyphens or underscores
     normalized = command_name.lower().replace("_", "-")
     try:
-        from tools.skills_tool import _get_disabled_skill_names
-        from agent.skill_utils import get_all_skills_dirs
+        from tools.skills_tool import _get_disabled_skill_names, get_skills_dir
+        from tools.path_security import validate_within_dir
         disabled = _get_disabled_skill_names()
+        skills_dir = get_skills_dir()
 
-        # Check disabled skills across all dirs (local + external)
-        for skills_dir in get_all_skills_dirs():
-            if not skills_dir.exists():
-                continue
+        # Check disabled skills in the active profile only.
+        if skills_dir.exists():
             for skill_md in skills_dir.rglob("SKILL.md"):
                 if any(part in ('.git', '.github', '.hub') for part in skill_md.parts):
+                    continue
+                if validate_within_dir(skill_md, skills_dir):
                     continue
                 name = skill_md.parent.name.lower().replace("_", "-")
                 if name == normalized and name in disabled:

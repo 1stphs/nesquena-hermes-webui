@@ -318,11 +318,10 @@ def extract_skill_config_vars(frontmatter: Dict[str, Any]) -> List[Dict[str, Any
 
 
 def discover_all_skill_config_vars() -> List[Dict[str, Any]]:
-    """Scan all enabled skills and collect their config variable declarations.
+    """Scan the active profile's enabled skills and collect config variables.
 
-    Walks every skills directory, parses each SKILL.md frontmatter, and returns
-    a deduplicated list of config var dicts.  Each dict also includes a
-    ``skill`` key with the skill name for attribution.
+    Parses each local SKILL.md frontmatter and returns a deduplicated list of
+    config var dicts. Each dict also includes a ``skill`` key for attribution.
 
     Disabled and platform-incompatible skills are excluded.
     """
@@ -330,28 +329,33 @@ def discover_all_skill_config_vars() -> List[Dict[str, Any]]:
     seen_keys: set = set()
 
     disabled = get_disabled_skill_names()
-    for skills_dir in get_all_skills_dirs():
-        if not skills_dir.is_dir():
+    skills_dir = get_skills_dir()
+    if not skills_dir.is_dir():
+        return all_vars
+
+    from tools.path_security import validate_within_dir
+
+    for skill_file in iter_skill_index_files(skills_dir, "SKILL.md"):
+        if validate_within_dir(skill_file, skills_dir):
             continue
-        for skill_file in iter_skill_index_files(skills_dir, "SKILL.md"):
-            try:
-                raw = skill_file.read_text(encoding="utf-8")
-                frontmatter, _ = parse_frontmatter(raw)
-            except Exception:
-                continue
+        try:
+            raw = skill_file.read_text(encoding="utf-8")
+            frontmatter, _ = parse_frontmatter(raw)
+        except Exception:
+            continue
 
-            skill_name = frontmatter.get("name") or skill_file.parent.name
-            if str(skill_name) in disabled:
-                continue
-            if not skill_matches_platform(frontmatter):
-                continue
+        skill_name = frontmatter.get("name") or skill_file.parent.name
+        if str(skill_name) in disabled:
+            continue
+        if not skill_matches_platform(frontmatter):
+            continue
 
-            config_vars = extract_skill_config_vars(frontmatter)
-            for var in config_vars:
-                if var["key"] not in seen_keys:
-                    var["skill"] = str(skill_name)
-                    all_vars.append(var)
-                    seen_keys.add(var["key"])
+        config_vars = extract_skill_config_vars(frontmatter)
+        for var in config_vars:
+            if var["key"] not in seen_keys:
+                var["skill"] = str(skill_name)
+                all_vars.append(var)
+                seen_keys.add(var["key"])
 
     return all_vars
 

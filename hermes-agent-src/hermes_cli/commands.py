@@ -595,18 +595,27 @@ def _collect_gateway_skill_entries(
 
     skill_triples: list[tuple[str, str, str]] = []
     try:
+        from pathlib import Path as _P
         from agent.skill_commands import get_skill_commands
-        from tools.skills_tool import SKILLS_DIR
-        _skills_dir = str(SKILLS_DIR.resolve())
-        _hub_dir = str((SKILLS_DIR / ".hub").resolve())
+        from tools.skills_tool import get_skills_dir
+        _skills_dir = get_skills_dir().resolve()
+        _hub_dir = (_skills_dir / ".hub").resolve()
         skill_cmds = get_skill_commands()
         for cmd_key in sorted(skill_cmds):
             info = skill_cmds[cmd_key]
             skill_path = info.get("skill_md_path", "")
-            if not skill_path.startswith(_skills_dir):
+            if not skill_path:
                 continue
-            if skill_path.startswith(_hub_dir):
+            sp = _P(skill_path).expanduser().resolve()
+            try:
+                sp.relative_to(_skills_dir)
+            except ValueError:
                 continue
+            try:
+                sp.relative_to(_hub_dir)
+                continue
+            except ValueError:
+                pass
             skill_name = info.get("name", "")
             if skill_name in _platform_disabled:
                 continue
@@ -743,9 +752,9 @@ def discord_skill_commands_by_category(
 
     try:
         from agent.skill_commands import get_skill_commands
-        from tools.skills_tool import SKILLS_DIR
-        _skills_dir = SKILLS_DIR.resolve()
-        _hub_dir = (SKILLS_DIR / ".hub").resolve()
+        from tools.skills_tool import get_skills_dir
+        _skills_dir = get_skills_dir().resolve()
+        _hub_dir = (_skills_dir / ".hub").resolve()
         skill_cmds = get_skill_commands()
 
         for cmd_key in sorted(skill_cmds):

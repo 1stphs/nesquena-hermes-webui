@@ -267,7 +267,7 @@ class TestFindAllSkills:
         assert len(skills) == 1
         assert skills[0]["name"] == "real-skill"
 
-    def test_finds_skills_in_symlinked_category_dir(self, tmp_path):
+    def test_skips_skills_in_symlinked_category_dir(self, tmp_path):
         external_root = tmp_path / "repo"
         skills_root = tmp_path / "skills"
         skills_root.mkdir()
@@ -278,8 +278,7 @@ class TestFindAllSkills:
         with patch("tools.skills_tool.SKILLS_DIR", skills_root):
             skills = _find_all_skills()
 
-        assert [s["name"] for s in skills] == ["knowledge-brain"]
-        assert skills[0]["category"] == "linked"
+        assert skills == []
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +313,7 @@ class TestSkillsList:
         assert result["count"] == 1
         assert result["skills"][0]["name"] == "skill-a"
 
-    def test_category_filter_finds_symlinked_category(self, tmp_path):
+    def test_category_filter_ignores_symlinked_category(self, tmp_path):
         external_root = tmp_path / "repo"
         skills_root = tmp_path / "skills"
         skills_root.mkdir()
@@ -327,9 +326,8 @@ class TestSkillsList:
 
         result = json.loads(raw)
         assert result["success"] is True
-        assert result["count"] == 1
-        assert result["categories"] == ["linked"]
-        assert result["skills"][0]["name"] == "knowledge-brain"
+        assert result["skills"] == []
+        assert result.get("count", 0) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +494,7 @@ class TestSkillView:
         result = json.loads(raw)
         assert result["success"] is True
 
-    def test_view_finds_skill_in_symlinked_category_dir(self, tmp_path):
+    def test_view_does_not_cross_symlinked_category_dir(self, tmp_path):
         external_root = tmp_path / "repo"
         skills_root = tmp_path / "skills"
         skills_root.mkdir()
@@ -508,8 +506,8 @@ class TestSkillView:
             raw = skill_view("knowledge-brain")
 
         result = json.loads(raw)
-        assert result["success"] is True
-        assert result["name"] == "knowledge-brain"
+        assert result["success"] is False
+        assert "not found" in result["error"].lower()
 
     def test_not_found_hint_uses_same_order_as_skills_list(self, tmp_path):
         with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
