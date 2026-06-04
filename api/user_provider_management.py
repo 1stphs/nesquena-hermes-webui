@@ -7,12 +7,17 @@ from typing import Any
 from api.user_provider import (
     UserProviderAuthError,
     UserProviderLookupError,
+    get_user_profile_provider_id,
+    get_user_profile_record_by_id,
     get_user_ai_provider_record,
     get_user_provider_selection_id,
     list_user_ai_provider_records,
+    list_global_ai_provider_records_for_service,
     public_user_ai_provider_record,
     resolve_user_provider,
+    resolve_user_profile_sync_name,
     set_user_provider_selection_id,
+    set_user_profile_provider_id,
     verify_user_profile_access,
     _normalize_provider_record,
 )
@@ -45,42 +50,59 @@ def save_user_ai_provider_payload(user_id: str, body: dict[str, Any]) -> dict[st
     )
 
 
-def enable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str, Any]:
+def enable_user_ai_provider_payload(user_id: str, profile_id: str, provider_id: str) -> dict[str, Any]:
+    profile_id = _required_profile_id(profile_id)
     provider_id = _required_provider_id(provider_id)
     with user_provider_sync_lock(user_id):
-        records = list_user_ai_provider_records(user_id)
-        target = _find_provider(records, provider_id)
+        profile = get_user_profile_record_by_id(user_id, profile_id)
+        profile_owner_id = str(profile.get("user_id") or profile.get("userId") or "").strip()
+        if profile_owner_id != user_id:
+            raise UserProviderAuthError("Profile is not available for current user", status=403, code="profile_forbidden")
+        profile_name = resolve_user_profile_sync_name(profile)
+        if not profile_name:
+            raise UserProviderConfigSyncError("Profile name is missing", code="missing_profile_name", status=400)
+        provider_records = list_global_ai_provider_records_for_service()
+        target = next((record for record in provider_records if str(record.get("id") or "").strip() == provider_id), None)
+        if not target:
+            raise UserProviderConfigSyncError("Provider not found", code="provider_not_found", status=404)
         provider, _reason = _runtime_provider_or_raise(target, user_id)
-        previous_provider_id = get_user_provider_selection_id(user_id)
-        sync_user_provider_model_config(
+        previous_provider_id = get_user_profile_provider_id(profile)
+        sync_single_profile_model_config(
             user_id=user_id,
-            mode=SYNC_MODE_ACTIVE_PROVIDER,
+            profile_name=profile_name,
             provider=provider,
             dry_run=True,
             use_lock=False,
         )
         try:
-            set_user_provider_selection_id(user_id, provider_id)
-            sync = sync_user_provider_model_config(
+            updated_profile = set_user_profile_provider_id(user_id, profile_id, provider_id)
+            sync = sync_single_profile_model_config(
                 user_id=user_id,
-                mode=SYNC_MODE_ACTIVE_PROVIDER,
+                profile_name=profile_name,
                 provider=provider,
                 use_lock=False,
             )
         except Exception:
-            set_user_provider_selection_id(user_id, previous_provider_id or None)
+            set_user_profile_provider_id(user_id, profile_id, previous_provider_id or None)
             raise
         _remember_sync(user_id, provider_id, sync)
-        updated = {
-            **target,
-            "status": "enabled",
-            "selected": True,
-            "active": True,
-            "enabled": True,
-        }
         return {
             "ok": True,
-            "provider": public_user_ai_provider_record(updated, get_last_sync_status(user_id, provider_id)),
+            "profile": {
+                **updated_profile,
+                "hermes_providers_id": provider_id,
+            },
+            "provider": public_user_ai_provider_record(
+                {
+                    **target,
+                    "user_id": user_id,
+                    "status": "enabled",
+                    "selected": True,
+                    "active": True,
+                    "enabled": True,
+                },
+                get_last_sync_status(user_id, provider_id),
+            ),
             "sync": sync,
         }
 
@@ -299,4 +321,11 @@ def _required_provider_id(provider_id: str) -> str:
     normalized = str(provider_id or "").strip()
     if not normalized:
         raise UserProviderConfigSyncError("Missing Provider id", code="missing_provider_id", status=400)
+    return normalized
+
+
+def _required_profile_id(profile_id: str) -> str:
+    normalized = str(profile_id or "").strip()
+    if not normalized:
+        raise UserProviderConfigSyncError("Missing Profile id", code="missing_profile_id", status=400)
     return normalized

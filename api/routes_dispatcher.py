@@ -1219,8 +1219,9 @@ def dispatch_post(handler, parsed) -> bool:
             if parsed.path == "/api/user-ai-providers/save":
                 return j(handler, save_user_ai_provider_payload(user_id, body))
             if parsed.path == "/api/user-ai-providers/enable":
-                provider_id = body.get("id") or body.get("provider_id") or body.get("providerId")
-                return j(handler, enable_user_ai_provider_payload(user_id, provider_id))
+                profile_id = body.get("profile_id")
+                provider_id = body.get("provider_id")
+                return j(handler, enable_user_ai_provider_payload(user_id, profile_id, provider_id))
             if parsed.path == "/api/user-ai-providers/disable":
                 provider_id = body.get("id") or body.get("provider_id") or body.get("providerId")
                 return j(handler, disable_user_ai_provider_payload(user_id, provider_id))

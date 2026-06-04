@@ -459,6 +459,53 @@ def validate_route_models_uses_user_context_when_present() -> None:
     assert payload["provider_resolution"]["status"] == "active"
 
 
+def validate_route_user_ai_provider_enable_uses_profile_and_provider_ids() -> None:
+    import urllib.parse
+    import api.routes as routes
+    import api.routes_dispatcher as dispatcher
+    import api.user_provider_management as management
+
+    original_j = routes.j
+    original_read_body = routes.read_body
+    original_check_csrf = routes._check_csrf
+    original_enable = management.enable_user_ai_provider_payload
+    captured = {}
+
+    def capture_j(_handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+        return True
+
+    def fake_enable(user_id, profile_id, provider_id):
+        captured["args"] = (user_id, profile_id, provider_id)
+        return {
+            "ok": True,
+            "profile": {"id": profile_id, "hermes_providers_id": provider_id},
+            "provider": {"id": provider_id, "status": "enabled"},
+            "sync": {"status": "synced"},
+        }
+
+    try:
+        routes.j = capture_j
+        routes.read_body = lambda _handler: {"profile_id": "profile-1", "provider_id": "provider-a"}
+        routes._check_csrf = lambda _handler: True
+        management.enable_user_ai_provider_payload = fake_enable
+        assert dispatcher.dispatch_post(
+            Handler({"X-User-Id": "route-user"}),
+            urllib.parse.urlparse("/api/user-ai-providers/enable"),
+        ) is True
+    finally:
+        routes.j = original_j
+        routes.read_body = original_read_body
+        routes._check_csrf = original_check_csrf
+        management.enable_user_ai_provider_payload = original_enable
+
+    assert captured["status"] == 200
+    assert captured["args"] == ("route-user", "profile-1", "provider-a")
+    assert captured["payload"]["profile"]["id"] == "profile-1"
+    assert captured["payload"]["provider"]["id"] == "provider-a"
+
+
 def validate_route_session_new_uses_optional_user_context() -> None:
     import urllib.parse
     import api.models as models
@@ -854,6 +901,7 @@ def main() -> None:
     validate_real_agent_local_provider_e2e()
     validate_route_models_does_not_require_user_context()
     validate_route_models_uses_user_context_when_present()
+    validate_route_user_ai_provider_enable_uses_profile_and_provider_ids()
     validate_route_session_new_uses_optional_user_context()
     validate_x_user_id_header_sets_current_user()
     validate_x_user_id_cookie_sets_current_user()

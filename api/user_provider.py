@@ -33,6 +33,7 @@ GLOBAL_PROVIDER_COLLECTION = "hermes_providers"
 HERMES_USERS_COLLECTION = "hermes_users"
 USER_PROVIDER_FOREIGN_KEY = "hermes_providers_id"
 PROFILE_COLLECTION = "hermes_profiles"
+PROFILE_PROVIDER_FOREIGN_KEY = "hermes_providers_id"
 # Legacy env names are kept as public constants for compatibility, but runtime
 # provider lookup no longer depends on these switches.
 X_USER_ID_CONTEXT_ENABLE_ENV = "HERMES_USER_PROVIDER_ENABLE_X_USER_ID_CONTEXT"
@@ -378,6 +379,57 @@ def list_user_profile_records(user_id: str) -> list[dict[str, Any]]:
             "filter[user_id]": user_id,
         },
     )
+
+
+def get_user_profile_record_by_id(user_id: str, profile_id: str) -> dict[str, Any]:
+    user_id = _normalize_id(user_id)
+    profile_id = _normalize_id(profile_id)
+    if not profile_id:
+        raise UserProviderAuthError("Missing profile", status=400, code="missing_profile")
+    records = _nocobase_list(
+        PROFILE_COLLECTION,
+        user_id,
+        {
+            "filter[id]": profile_id,
+        },
+    )
+    if not records:
+        return {}
+    record = records[0]
+    if _record_user_id(record) != user_id:
+        raise UserProviderAuthError("Profile is not available for current user", status=403, code="profile_forbidden")
+    return record
+
+
+def resolve_user_profile_sync_name(record: dict[str, Any]) -> str:
+    for key in ("name", "profile_name", "profile_key", "webui_profile_id"):
+        value = str(record.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def get_user_profile_provider_id(record: dict[str, Any]) -> str:
+    relation = record.get("hermes_providers")
+    if isinstance(relation, dict) and relation.get("id") is not None:
+        return str(relation.get("id")).strip()
+    return str(record.get(PROFILE_PROVIDER_FOREIGN_KEY) or "").strip()
+
+
+def set_user_profile_provider_id(user_id: str, profile_id: str, provider_id: str | None) -> dict[str, Any]:
+    user_id = _normalize_id(user_id)
+    profile_id = _normalize_id(profile_id)
+    payload = {
+        PROFILE_PROVIDER_FOREIGN_KEY: _normalize_id(provider_id) if provider_id else None,
+    }
+    response = _nocobase_mutation(
+        PROFILE_COLLECTION,
+        "update",
+        user_id,
+        params={"filterByTk": profile_id},
+        body=payload,
+    )
+    return _nocobase_response_record(response)
 
 
 def list_global_user_ai_provider_records(user_id: str) -> list[dict[str, Any]]:
