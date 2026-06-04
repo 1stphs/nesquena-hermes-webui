@@ -2285,10 +2285,13 @@ def _run_agent_streaming(
             effective_user_id = str(user_id or "").strip()
             if effective_user_id:
                 from api.user_provider import (
-                    resolve_user_provider,
+                    resolve_user_profile_provider,
                 )
 
-                _user_provider_resolution = resolve_user_provider(effective_user_id)
+                _user_provider_resolution = resolve_user_profile_provider(
+                    effective_user_id,
+                    profile_name=getattr(s, 'profile', None),
+                )
                 _user_provider_active = bool(_user_provider_resolution and _user_provider_resolution.is_active)
 
             if _user_provider_active:

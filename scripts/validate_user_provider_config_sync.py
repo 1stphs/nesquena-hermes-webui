@@ -214,8 +214,7 @@ def validate_partial_failure_rolls_back_and_redacts() -> None:
 
 def validate_management_enable_updates_single_profile_and_uses_global_provider() -> None:
     original_get_profile = management.get_user_profile_record_by_id
-    original_get_provider_selection = management.get_user_provider_selection_id
-    original_set_provider_selection = management.set_user_provider_selection_id
+    original_set_profile_provider = management.set_user_profile_provider_id
     original_provider_list = management.list_global_ai_provider_records_for_service
     original_sync = management.sync_single_profile_model_config
     original_host_validator = provider_runtime._validate_provider_host
@@ -225,11 +224,11 @@ def validate_management_enable_updates_single_profile_and_uses_global_provider()
             "user_id": "u1",
             "profile_name": "p1",
             "display_name": "Profile 1",
+            "hermes_providers_id": "old-provider",
         }
     }
     sync_calls = []
-    user_selection = {"provider_id": "old-provider"}
-    selection_updates = []
+    profile_updates = []
     provider_record = {
         "id": "provider-a",
         "name": "Provider A",
@@ -258,11 +257,10 @@ def validate_management_enable_updates_single_profile_and_uses_global_provider()
 
     try:
         management.get_user_profile_record_by_id = lambda user_id, profile_id: copy.deepcopy(profile_state["record"])
-        management.get_user_provider_selection_id = lambda user_id: user_selection["provider_id"]
-        management.set_user_provider_selection_id = (
-            lambda user_id, provider_id: selection_updates.append(provider_id or "")
-            or user_selection.__setitem__("provider_id", provider_id or "")
-            or {"id": user_id, "hermes_providers_id": provider_id or None}
+        management.set_user_profile_provider_id = (
+            lambda user_id, profile_id, provider_id: profile_updates.append((profile_id, provider_id or ""))
+            or profile_state["record"].__setitem__("hermes_providers_id", provider_id or None)
+            or {"id": profile_id, "hermes_providers_id": provider_id or None}
         )
         management.list_global_ai_provider_records_for_service = lambda: [copy.deepcopy(provider_record)]
         management.sync_single_profile_model_config = sync_stub
@@ -271,13 +269,11 @@ def validate_management_enable_updates_single_profile_and_uses_global_provider()
         assert result["ok"] is True
         assert result["profile"]["id"] == "profile-1"
         assert result["profile"]["hermes_providers_id"] == "provider-a"
-        assert result["user"]["id"] == "u1"
-        assert result["user"]["hermes_providers_id"] == "provider-a"
         assert result["provider"]["id"] == "provider-a"
         assert result["provider"]["status"] == "enabled"
         assert result["sync"]["status"] == "synced"
-        assert selection_updates == ["provider-a"]
-        assert user_selection["provider_id"] == "provider-a"
+        assert profile_updates == [("profile-1", "provider-a")]
+        assert profile_state["record"]["hermes_providers_id"] == "provider-a"
         assert len(sync_calls) == 2
         assert sync_calls[0].get("dry_run") is True
         assert sync_calls[0]["profile_name"] == "p1"
@@ -287,8 +283,7 @@ def validate_management_enable_updates_single_profile_and_uses_global_provider()
         assert sync_calls[1]["provider"]["id"] == "provider-a"
     finally:
         management.get_user_profile_record_by_id = original_get_profile
-        management.get_user_provider_selection_id = original_get_provider_selection
-        management.set_user_provider_selection_id = original_set_provider_selection
+        management.set_user_profile_provider_id = original_set_profile_provider
         management.list_global_ai_provider_records_for_service = original_provider_list
         management.sync_single_profile_model_config = original_sync
         provider_runtime._validate_provider_host = original_host_validator
@@ -296,8 +291,7 @@ def validate_management_enable_updates_single_profile_and_uses_global_provider()
 
 def validate_management_enable_rolls_back_user_selection_on_sync_failure() -> None:
     original_get_profile = management.get_user_profile_record_by_id
-    original_get_provider_selection = management.get_user_provider_selection_id
-    original_set_provider_selection = management.set_user_provider_selection_id
+    original_set_profile_provider = management.set_user_profile_provider_id
     original_provider_list = management.list_global_ai_provider_records_for_service
     original_sync = management.sync_single_profile_model_config
     original_host_validator = provider_runtime._validate_provider_host
@@ -307,11 +301,11 @@ def validate_management_enable_rolls_back_user_selection_on_sync_failure() -> No
             "user_id": "u1",
             "profile_name": "p1",
             "display_name": "Profile 1",
+            "hermes_providers_id": "old-provider",
         }
     }
     sync_calls = []
-    user_selection = {"provider_id": "old-provider"}
-    selection_updates = []
+    profile_updates = []
     provider_record = {
         "id": "provider-a",
         "name": "Provider A",
@@ -338,11 +332,10 @@ def validate_management_enable_rolls_back_user_selection_on_sync_failure() -> No
 
     try:
         management.get_user_profile_record_by_id = lambda user_id, profile_id: copy.deepcopy(profile_state["record"])
-        management.get_user_provider_selection_id = lambda user_id: user_selection["provider_id"]
-        management.set_user_provider_selection_id = (
-            lambda user_id, provider_id: selection_updates.append(provider_id or "")
-            or user_selection.__setitem__("provider_id", provider_id or "")
-            or {"id": user_id, "hermes_providers_id": provider_id or None}
+        management.set_user_profile_provider_id = (
+            lambda user_id, profile_id, provider_id: profile_updates.append((profile_id, provider_id or ""))
+            or profile_state["record"].__setitem__("hermes_providers_id", provider_id or None)
+            or {"id": profile_id, "hermes_providers_id": provider_id or None}
         )
         management.list_global_ai_provider_records_for_service = lambda: [copy.deepcopy(provider_record)]
         management.sync_single_profile_model_config = sync_failure
@@ -353,15 +346,14 @@ def validate_management_enable_rolls_back_user_selection_on_sync_failure() -> No
             assert exc.code == "sync_failed"
         else:
             raise AssertionError("enable should fail when sync fails")
-        assert selection_updates == ["provider-a", "old-provider"]
-        assert user_selection["provider_id"] == "old-provider"
+        assert profile_updates == [("profile-1", "provider-a"), ("profile-1", "old-provider")]
+        assert profile_state["record"]["hermes_providers_id"] == "old-provider"
         assert len(sync_calls) == 2
         assert sync_calls[0].get("dry_run") is True
         assert sync_calls[1].get("dry_run") in (None, False)
     finally:
         management.get_user_profile_record_by_id = original_get_profile
-        management.get_user_provider_selection_id = original_get_provider_selection
-        management.set_user_provider_selection_id = original_set_provider_selection
+        management.set_user_profile_provider_id = original_set_profile_provider
         management.list_global_ai_provider_records_for_service = original_provider_list
         management.sync_single_profile_model_config = original_sync
         provider_runtime._validate_provider_host = original_host_validator
@@ -403,11 +395,10 @@ def validate_management_enable_rejects_foreign_profile_id() -> None:
 
 
 def validate_single_profile_payload_uses_active_provider() -> None:
-    original_resolver = management.resolve_user_provider
+    original_resolver = management.resolve_user_profile_provider
+    original_get_profile = management.get_user_profile_record_by_name
     original_sync = management.sync_single_profile_model_config
-    original_verify = management.verify_user_profile_access
     calls = []
-    verified = []
 
     class Resolution:
         is_active = True
@@ -416,8 +407,10 @@ def validate_single_profile_payload_uses_active_provider() -> None:
         provider = _provider()
 
     try:
-        management.resolve_user_provider = lambda user_id: Resolution()
-        management.verify_user_profile_access = lambda user_id, profile: verified.append((user_id, profile))
+        management.get_user_profile_record_by_name = (
+            lambda user_id, profile_name: {"id": "profile-1", "user_id": user_id, "profile_name": profile_name}
+        )
+        management.resolve_user_profile_provider = lambda user_id, **_kwargs: Resolution()
 
         def single_profile_sync(**kwargs):
             calls.append(kwargs)
@@ -432,40 +425,32 @@ def validate_single_profile_payload_uses_active_provider() -> None:
         management.sync_single_profile_model_config = single_profile_sync
         result = management.sync_user_ai_provider_profile_payload("u1", {"profile_name": "p1"})
         assert result["sync"]["status"] == "synced"
-        assert verified == [("u1", "p1")]
         assert calls[0]["user_id"] == "u1"
         assert calls[0]["profile_name"] == "p1"
         assert calls[0]["provider"]["id"] == "provider-a"
         assert "profile_home" not in calls[0]
     finally:
-        management.resolve_user_provider = original_resolver
+        management.resolve_user_profile_provider = original_resolver
+        management.get_user_profile_record_by_name = original_get_profile
         management.sync_single_profile_model_config = original_sync
-        management.verify_user_profile_access = original_verify
 
 
 def validate_single_profile_ownership_failure_blocks_sync() -> None:
-    original_resolver = management.resolve_user_provider
+    original_get_profile = management.get_user_profile_record_by_name
     original_sync = management.sync_single_profile_model_config
-    original_verify = management.verify_user_profile_access
     sync_calls = []
 
-    class Resolution:
-        is_active = True
-        status = "active"
-        reason = "active_provider"
-        provider = _provider()
-
-    def verify_access(user_id, profile):
+    def get_profile(user_id, profile):
         if user_id != "u1" or profile != "p1":
             raise management.UserProviderAuthError(
                 "Profile is not available for current user",
                 status=403,
                 code="profile_forbidden",
             )
+        return {"id": "profile-1", "user_id": user_id, "profile_name": profile}
 
     try:
-        management.resolve_user_provider = lambda user_id: Resolution()
-        management.verify_user_profile_access = verify_access
+        management.get_user_profile_record_by_name = get_profile
         management.sync_single_profile_model_config = lambda **kwargs: sync_calls.append(kwargs)
         for profile_name in ("other-user-profile", "missing-profile"):
             try:
@@ -477,15 +462,14 @@ def validate_single_profile_ownership_failure_blocks_sync() -> None:
                 raise AssertionError("profile ownership failure was expected")
         assert sync_calls == []
     finally:
-        management.resolve_user_provider = original_resolver
+        management.get_user_profile_record_by_name = original_get_profile
         management.sync_single_profile_model_config = original_sync
-        management.verify_user_profile_access = original_verify
 
 
 def validate_single_profile_lookup_failure_is_observable() -> None:
-    original_resolver = management.resolve_user_provider
+    original_resolver = management.resolve_user_profile_provider
+    original_get_profile = management.get_user_profile_record_by_name
     original_sync = management.sync_single_profile_model_config
-    original_verify = management.verify_user_profile_access
     sync_calls = []
 
     class Resolution:
@@ -495,8 +479,10 @@ def validate_single_profile_lookup_failure_is_observable() -> None:
         provider = None
 
     try:
-        management.resolve_user_provider = lambda user_id: Resolution()
-        management.verify_user_profile_access = lambda user_id, profile: None
+        management.get_user_profile_record_by_name = (
+            lambda user_id, profile_name: {"id": "profile-1", "user_id": user_id, "profile_name": profile_name}
+        )
+        management.resolve_user_profile_provider = lambda user_id, **_kwargs: Resolution()
         management.sync_single_profile_model_config = lambda **kwargs: sync_calls.append(kwargs)
         try:
             management.sync_user_ai_provider_profile_payload("u1", {"profile_name": "p1"})
@@ -508,15 +494,15 @@ def validate_single_profile_lookup_failure_is_observable() -> None:
             raise AssertionError("lookup_failed should be observable failure")
         assert sync_calls == []
     finally:
-        management.resolve_user_provider = original_resolver
+        management.resolve_user_profile_provider = original_resolver
+        management.get_user_profile_record_by_name = original_get_profile
         management.sync_single_profile_model_config = original_sync
-        management.verify_user_profile_access = original_verify
 
 
 def validate_single_profile_no_active_provider_skips_without_write() -> None:
-    original_resolver = management.resolve_user_provider
+    original_resolver = management.resolve_user_profile_provider
+    original_get_profile = management.get_user_profile_record_by_name
     original_sync = management.sync_single_profile_model_config
-    original_verify = management.verify_user_profile_access
     sync_calls = []
 
     class Resolution:
@@ -526,8 +512,10 @@ def validate_single_profile_no_active_provider_skips_without_write() -> None:
         provider = None
 
     try:
-        management.resolve_user_provider = lambda user_id: Resolution()
-        management.verify_user_profile_access = lambda user_id, profile: None
+        management.get_user_profile_record_by_name = (
+            lambda user_id, profile_name: {"id": "profile-1", "user_id": user_id, "profile_name": profile_name}
+        )
+        management.resolve_user_profile_provider = lambda user_id, **_kwargs: Resolution()
         management.sync_single_profile_model_config = lambda **kwargs: sync_calls.append(kwargs)
         result = management.sync_user_ai_provider_profile_payload("u1", {"profile_name": "p1"})
         assert result["ok"] is True
@@ -535,9 +523,9 @@ def validate_single_profile_no_active_provider_skips_without_write() -> None:
         assert result["sync"]["reason"] == "no_provider"
         assert sync_calls == []
     finally:
-        management.resolve_user_provider = original_resolver
+        management.resolve_user_profile_provider = original_resolver
+        management.get_user_profile_record_by_name = original_get_profile
         management.sync_single_profile_model_config = original_sync
-        management.verify_user_profile_access = original_verify
 
 
 def main() -> None:

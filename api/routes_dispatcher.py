@@ -5,6 +5,8 @@ That preserves the historical ``patch("api.routes.<name>")`` surface while
 letting api/routes.py stay as the stable public entrypoint.
 """
 
+import urllib.parse
+
 
 def _sync_routes_bindings() -> None:
     import api.routes as routes
@@ -132,7 +134,24 @@ self.addEventListener('fetch', () => {});
 
         try:
             user_id = optional_user_id_from_handler(handler)
-            return j(handler, build_user_provider_models_payload(user_id, get_available_models))
+            query = urllib.parse.parse_qs(parsed.query or "")
+            profile_id = (query.get("profile_id") or query.get("profileId") or [""])[0]
+            profile_name = (
+                query.get("profile")
+                or query.get("profile_name")
+                or query.get("profileName")
+                or query.get("hermes_profile")
+                or [""]
+            )[0]
+            return j(
+                handler,
+                build_user_provider_models_payload(
+                    user_id,
+                    get_available_models,
+                    profile_id=profile_id,
+                    profile_name=profile_name,
+                ),
+            )
         except UserProviderAuthError as exc:
             return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
 
@@ -142,7 +161,9 @@ self.addEventListener('fetch', () => {});
 
         try:
             user_id = current_user_id_from_handler(handler)
-            return j(handler, list_user_ai_providers_payload(user_id))
+            query = urllib.parse.parse_qs(parsed.query or "")
+            profile_id = (query.get("profile_id") or query.get("profileId") or [""])[0]
+            return j(handler, list_user_ai_providers_payload(user_id, profile_id=profile_id))
         except Exception as exc:
             payload, status = error_payload(exc)
             return j(handler, payload, status=status)
@@ -1219,12 +1240,12 @@ def dispatch_post(handler, parsed) -> bool:
             if parsed.path == "/api/user-ai-providers/save":
                 return j(handler, save_user_ai_provider_payload(user_id, body))
             if parsed.path == "/api/user-ai-providers/enable":
-                profile_id = body.get("profile_id")
-                provider_id = body.get("provider_id")
+                profile_id = body.get("profile_id") or body.get("profileId")
+                provider_id = body.get("provider_id") or body.get("providerId")
                 return j(handler, enable_user_ai_provider_payload(user_id, profile_id, provider_id))
             if parsed.path == "/api/user-ai-providers/disable":
-                provider_id = body.get("id") or body.get("provider_id") or body.get("providerId")
-                return j(handler, disable_user_ai_provider_payload(user_id, provider_id))
+                profile_id = body.get("profile_id") or body.get("profileId")
+                return j(handler, disable_user_ai_provider_payload(user_id, profile_id))
             if parsed.path == "/api/user-ai-providers/delete":
                 provider_id = body.get("id") or body.get("provider_id") or body.get("providerId")
                 return j(handler, delete_user_ai_provider_payload(user_id, provider_id))

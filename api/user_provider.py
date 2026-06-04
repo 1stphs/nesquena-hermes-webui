@@ -30,8 +30,6 @@ logger = logging.getLogger(__name__)
 
 USER_PROVIDER_COLLECTION = "hermes_user_ai_providers"
 GLOBAL_PROVIDER_COLLECTION = "hermes_providers"
-HERMES_USERS_COLLECTION = "hermes_users"
-USER_PROVIDER_FOREIGN_KEY = "hermes_providers_id"
 PROFILE_COLLECTION = "hermes_profiles"
 PROFILE_PROVIDER_FOREIGN_KEY = "hermes_providers_id"
 # Legacy env names are kept as public constants for compatibility, but runtime
@@ -101,6 +99,8 @@ class UserProviderResolution:
     user_id: str
     provider: dict[str, Any] | None = None
     error: str = ""
+    profile_id: str = ""
+    profile_name: str = ""
 
     @property
     def is_active(self) -> bool:
@@ -143,6 +143,16 @@ def _is_nocobase_false(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return value == 0
     return str(value).strip().lower() in {"false", "0", "no", "off"}
+
+
+def _is_nocobase_true(value: Any) -> bool:
+    if value is True:
+        return True
+    if value is False or value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
 
 
 def _normalize_runtime_base_url(base_url: str, api_mode: str) -> str:
@@ -401,6 +411,24 @@ def get_user_profile_record_by_id(user_id: str, profile_id: str) -> dict[str, An
     return record
 
 
+def get_user_profile_record_by_name(user_id: str, profile_name: str) -> dict[str, Any]:
+    user_id = _normalize_id(user_id)
+    profile_name = str(profile_name or "").strip()
+    if not profile_name:
+        raise UserProviderAuthError("Missing profile", status=400, code="missing_profile")
+    records = _nocobase_list(
+        PROFILE_COLLECTION,
+        user_id,
+        {
+            "filter[user_id]": user_id,
+        },
+    )
+    for record in records:
+        if _profile_matches(record, profile_name):
+            return record
+    raise UserProviderAuthError("Profile is not available for current user", status=403, code="profile_forbidden")
+
+
 def resolve_user_profile_sync_name(record: dict[str, Any]) -> str:
     for key in ("name", "profile_name", "profile_key", "webui_profile_id"):
         value = str(record.get(key) or "").strip()
@@ -430,6 +458,10 @@ def set_user_profile_provider_id(user_id: str, profile_id: str, provider_id: str
         body=payload,
     )
     return _nocobase_response_record(response)
+
+
+def _profile_id_from_record(record: dict[str, Any]) -> str:
+    return str(record.get("id") or record.get("profile_id") or record.get("profileId") or "").strip()
 
 
 def list_global_user_ai_provider_records(user_id: str) -> list[dict[str, Any]]:
@@ -466,48 +498,30 @@ def list_global_ai_provider_records_for_service() -> list[dict[str, Any]]:
     return enabled_records
 
 
-def get_user_provider_selection_id(user_id: str) -> str:
-    user_id = _normalize_id(user_id)
-    records = _nocobase_list(
-        HERMES_USERS_COLLECTION,
-        user_id,
-        {
-            "filter[id]": user_id,
-            "appends": "hermes_providers",
-        },
-    )
-    if not records:
-        return ""
-    record = records[0]
-    relation = record.get("hermes_providers")
-    if isinstance(relation, dict) and relation.get("id") is not None:
-        return str(relation.get("id")).strip()
-    return str(record.get(USER_PROVIDER_FOREIGN_KEY) or "").strip()
-
-
-def set_user_provider_selection_id(user_id: str, provider_id: str | None) -> dict[str, Any]:
-    user_id = _normalize_id(user_id)
-    payload = {
-        USER_PROVIDER_FOREIGN_KEY: _normalize_id(provider_id) if provider_id else None,
-    }
-    response = _nocobase_mutation(
-        HERMES_USERS_COLLECTION,
-        "update",
-        user_id,
-        params={"filterByTk": user_id},
-        body=payload,
-    )
-    return _nocobase_response_record(response)
-
-
-def list_user_ai_provider_records(user_id: str) -> list[dict[str, Any]]:
-    user_id = _normalize_id(user_id)
-    selected_provider_id = ""
-    try:
-        selected_provider_id = get_user_provider_selection_id(user_id)
-    except UserProviderLookupError:
-        raise
+def get_default_provider_record_for_user(user_id: str) -> dict[str, Any]:
     records = list_global_user_ai_provider_records(user_id)
+    if not records:
+        return {}
+    default_record = next((record for record in records if _is_nocobase_true(record.get("is_default"))), None)
+    return default_record or records[0]
+
+
+def get_default_provider_id(user_id: str) -> str:
+    return str(get_default_provider_record_for_user(user_id).get("id") or "").strip()
+
+
+def list_user_ai_provider_records(
+    user_id: str,
+    *,
+    selected_provider_id: str | None = "",
+    use_default_when_empty: bool = False,
+) -> list[dict[str, Any]]:
+    user_id = _normalize_id(user_id)
+    selected_provider_id = str(selected_provider_id or "").strip()
+    records = list_global_user_ai_provider_records(user_id)
+    if not selected_provider_id and use_default_when_empty:
+        default_record = next((record for record in records if _is_nocobase_true(record.get("is_default"))), None)
+        selected_provider_id = str((default_record or records[0] if records else {}).get("id") or "").strip()
     normalized_records: list[dict[str, Any]] = []
     for record in records:
         provider_id = str(record.get("id") or "").strip()
@@ -678,7 +692,7 @@ def _record_user_id(record: dict[str, Any]) -> str:
 
 
 def _provider_candidates_for_user(user_id: str, selected_provider_id: str | None = None) -> list[dict[str, Any]]:
-    selected_provider_id = str(selected_provider_id or "").strip() or get_user_provider_selection_id(user_id)
+    selected_provider_id = str(selected_provider_id or "").strip()
     if not selected_provider_id:
         return []
     records = list_global_user_ai_provider_records(user_id)
@@ -694,6 +708,27 @@ def _provider_candidates_for_user(user_id: str, selected_provider_id: str | None
         for record in records
         if str(record.get("id") or "").strip() == selected_provider_id
     ]
+
+
+def _profile_context_resolution(
+    *,
+    status: str,
+    reason: str,
+    user_id: str,
+    profile: dict[str, Any] | None = None,
+    provider: dict[str, Any] | None = None,
+    error: str = "",
+) -> UserProviderResolution:
+    profile_record = profile or {}
+    return UserProviderResolution(
+        status=status,
+        reason=reason,
+        user_id=user_id,
+        provider=provider,
+        error=error,
+        profile_id=_profile_id_from_record(profile_record),
+        profile_name=resolve_user_profile_sync_name(profile_record),
+    )
 
 
 def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[dict[str, Any] | None, str]:
@@ -758,30 +793,75 @@ def _normalize_provider_record(record: dict[str, Any], user_id: str) -> tuple[di
     }, ""
 
 
-def resolve_user_provider(user_id: str) -> UserProviderResolution:
+def resolve_user_profile_provider(
+    user_id: str,
+    *,
+    profile_id: str | None = "",
+    profile_name: str | None = "",
+) -> UserProviderResolution:
     user_id = _normalize_id(user_id)
+    normalized_profile_id = _normalize_id(profile_id)
+    normalized_profile_name = str(profile_name or "").strip()
+    if not normalized_profile_id and not normalized_profile_name:
+        return UserProviderResolution(
+            status="none",
+            reason="missing_profile_context",
+            user_id=user_id,
+        )
+
     try:
-        selected_provider_id = get_user_provider_selection_id(user_id)
+        profile = (
+            get_user_profile_record_by_id(user_id, normalized_profile_id)
+            if normalized_profile_id
+            else get_user_profile_record_by_name(user_id, normalized_profile_name)
+        )
+        selected_provider_id = get_user_profile_provider_id(profile)
+        reason = "profile_provider"
+        if not selected_provider_id:
+            selected_provider_id = get_default_provider_id(user_id)
+            reason = "system_default_provider"
         records = _provider_candidates_for_user(user_id, selected_provider_id)
     except UserProviderLookupError as exc:
-        logger.warning("[webui] user provider lookup failed for user=%s: %s", user_id, exc)
+        logger.warning("[webui] profile provider lookup failed for user=%s: %s", user_id, exc)
         return UserProviderResolution(
             status="lookup_failed",
             reason="nocobase_lookup_failed",
             user_id=user_id,
             error=str(exc),
+            profile_id=normalized_profile_id,
+            profile_name=normalized_profile_name,
         )
 
     if not selected_provider_id:
-        return UserProviderResolution(status="none", reason="no_provider", user_id=user_id)
-
+        return _profile_context_resolution(
+            status="none",
+            reason="no_default_provider",
+            user_id=user_id,
+            profile=profile,
+        )
     if not records:
-        return UserProviderResolution(status="disabled", reason="selected_provider_unavailable", user_id=user_id)
+        return _profile_context_resolution(
+            status="disabled",
+            reason="selected_provider_unavailable" if reason == "profile_provider" else "default_provider_unavailable",
+            user_id=user_id,
+            profile=profile,
+        )
 
-    provider, reason = _normalize_provider_record(records[0], user_id)
+    provider, failure_reason = _normalize_provider_record(records[0], user_id)
     if not provider:
-        return UserProviderResolution(status="incomplete", reason=reason or "incomplete_provider", user_id=user_id)
-    return UserProviderResolution(status="active", reason="active_provider", user_id=user_id, provider=provider)
+        return _profile_context_resolution(
+            status="incomplete",
+            reason=failure_reason or "incomplete_provider",
+            user_id=user_id,
+            profile=profile,
+        )
+    return _profile_context_resolution(
+        status="active",
+        reason=reason,
+        user_id=user_id,
+        profile=profile,
+        provider=provider,
+    )
 
 
 def public_provider_resolution(resolution: UserProviderResolution) -> dict[str, Any]:
@@ -790,6 +870,10 @@ def public_provider_resolution(resolution: UserProviderResolution) -> dict[str, 
         "reason": resolution.reason,
         "fallback": not resolution.is_active,
     }
+    if resolution.profile_id:
+        payload["profile_id"] = resolution.profile_id
+    if resolution.profile_name:
+        payload["profile_name"] = resolution.profile_name
     if resolution.error:
         payload["detail"] = _redact_error(resolution.error)
     if resolution.provider:
@@ -1164,6 +1248,8 @@ def _models_cache_key(user_id: str, resolution: UserProviderResolution) -> tuple
     provider = resolution.provider or {}
     return (
         user_id,
+        resolution.profile_id,
+        resolution.profile_name,
         resolution.status,
         resolution.reason,
         str(provider.get("id") or ""),
@@ -1203,6 +1289,9 @@ def clear_user_provider_models_cache() -> None:
 def build_user_provider_models_payload(
     user_id: str | None,
     fallback_factory: Callable[[], dict[str, Any]],
+    *,
+    profile_id: str | None = "",
+    profile_name: str | None = "",
 ) -> dict[str, Any]:
     if not user_id:
         resolution = UserProviderResolution(
@@ -1214,7 +1303,11 @@ def build_user_provider_models_payload(
         payload["provider_resolution"] = public_provider_resolution(resolution)
         return payload
 
-    resolution = resolve_user_provider(user_id)
+    resolution = resolve_user_profile_provider(
+        user_id,
+        profile_id=profile_id,
+        profile_name=profile_name,
+    )
     key = _models_cache_key(user_id, resolution)
     cached = _get_models_cache(key)
     if cached is not None:

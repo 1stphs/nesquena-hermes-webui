@@ -37,11 +37,22 @@ def _restore_env(name: str, value: str | None) -> None:
         os.environ[name] = value
 
 
-def _active_resolution(user_id, provider_id, *, model, api_key):
+def _active_resolution(
+    user_id,
+    provider_id,
+    *,
+    model,
+    api_key,
+    reason="profile_provider",
+    profile_id="profile-1",
+    profile_name="p1",
+):
     return user_provider.UserProviderResolution(
         status="active",
-        reason="active_provider",
+        reason=reason,
         user_id=user_id,
+        profile_id=profile_id,
+        profile_name=profile_name,
         provider={
             "id": provider_id,
             "user_id": user_id,
@@ -60,21 +71,21 @@ def _active_resolution(user_id, provider_id, *, model, api_key):
 
 
 def validate_missing_user_context_models_payload_does_not_read_provider() -> None:
-    original_resolve = user_provider.resolve_user_provider
+    original_resolve = user_provider.resolve_user_profile_provider
     original_fetch = user_provider.fetch_provider_models
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
     user_provider.clear_user_provider_models_cache()
 
-    def fail_lookup(_user_id):
-        raise AssertionError("resolve_user_provider must not run without user context")
+    def fail_lookup(_user_id, **_kwargs):
+        raise AssertionError("resolve_user_profile_provider must not run without user context")
 
     def fail_fetch(_provider):
         raise AssertionError("fetch_provider_models must not run without user context")
 
     try:
-        user_provider.resolve_user_provider = fail_lookup
+        user_provider.resolve_user_profile_provider = fail_lookup
         user_provider.fetch_provider_models = fail_fetch
         payload = user_provider.build_user_provider_models_payload(
             None,
@@ -85,7 +96,7 @@ def validate_missing_user_context_models_payload_does_not_read_provider() -> Non
             },
         )
     finally:
-        user_provider.resolve_user_provider = original_resolve
+        user_provider.resolve_user_profile_provider = original_resolve
         user_provider.fetch_provider_models = original_fetch
         _restore_env(X_USER_ID_ENV, previous_env)
         _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
@@ -98,23 +109,27 @@ def validate_missing_user_context_models_payload_does_not_read_provider() -> Non
 
 
 def validate_user_id_context_runs_runtime_lookup() -> None:
-    original_resolve = user_provider.resolve_user_provider
+    original_resolve = user_provider.resolve_user_profile_provider
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
     user_provider.clear_user_provider_models_cache()
     captured = {}
 
-    def resolve_none(user_id):
+    def resolve_none(user_id, *, profile_id="", profile_name=""):
         captured["user_id"] = user_id
+        captured["profile_id"] = profile_id
+        captured["profile_name"] = profile_name
         return user_provider.UserProviderResolution(
             status="none",
             reason="no_provider",
             user_id=user_id,
+            profile_id=profile_id,
+            profile_name=profile_name,
         )
 
     try:
-        user_provider.resolve_user_provider = resolve_none
+        user_provider.resolve_user_profile_provider = resolve_none
         payload = user_provider.build_user_provider_models_payload(
             "u1",
             lambda: {
@@ -122,9 +137,11 @@ def validate_user_id_context_runs_runtime_lookup() -> None:
                 "default_model": "default-model",
                 "groups": [{"provider": "Default", "provider_id": "default", "models": []}],
             },
+            profile_id="profile-1",
+            profile_name="p1",
         )
     finally:
-        user_provider.resolve_user_provider = original_resolve
+        user_provider.resolve_user_profile_provider = original_resolve
         _restore_env(X_USER_ID_ENV, previous_env)
         _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
         _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
@@ -132,25 +149,29 @@ def validate_user_id_context_runs_runtime_lookup() -> None:
     assert payload["active_provider"] == "default"
     assert payload["provider_resolution"]["status"] == "none"
     assert captured["user_id"] == "u1"
+    assert captured["profile_id"] == "profile-1"
+    assert captured["profile_name"] == "p1"
 
 
 def validate_lookup_fallback_and_redaction_with_user_context() -> None:
-    original_resolve = user_provider.resolve_user_provider
+    original_resolve = user_provider.resolve_user_profile_provider
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
     user_provider.clear_user_provider_models_cache()
 
-    def fail_lookup(user_id):
+    def fail_lookup(user_id, *, profile_id="", profile_name=""):
         return user_provider.UserProviderResolution(
             status="lookup_failed",
             reason="nocobase_lookup_failed",
             user_id=user_id,
             error="401 INVALID_TOKEN sk-test-secret-1234567890",
+            profile_id=profile_id,
+            profile_name=profile_name,
         )
 
     try:
-        user_provider.resolve_user_provider = fail_lookup
+        user_provider.resolve_user_profile_provider = fail_lookup
         payload = user_provider.build_user_provider_models_payload(
             "u1",
             lambda: {
@@ -158,9 +179,11 @@ def validate_lookup_fallback_and_redaction_with_user_context() -> None:
                 "default_model": "default-model",
                 "groups": [{"provider": "Default", "provider_id": "default", "models": []}],
             },
+            profile_id="profile-1",
+            profile_name="p1",
         )
     finally:
-        user_provider.resolve_user_provider = original_resolve
+        user_provider.resolve_user_profile_provider = original_resolve
         _restore_env(X_USER_ID_ENV, previous_env)
         _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
         _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
@@ -172,27 +195,53 @@ def validate_lookup_fallback_and_redaction_with_user_context() -> None:
 
 
 def validate_models_cache_isolated_by_user_and_provider() -> None:
-    original_resolve = user_provider.resolve_user_provider
+    original_resolve = user_provider.resolve_user_profile_provider
     original_fetch = user_provider.fetch_provider_models
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
     user_provider.clear_user_provider_models_cache()
     resolutions = {
-        "u1": _active_resolution("u1", "p1", model="model-a", api_key="sk-user-one-1234567890"),
-        "u2": _active_resolution("u2", "p2", model="model-b", api_key="sk-user-two-1234567890"),
+        ("u1", "profile-1"): _active_resolution(
+            "u1",
+            "p1",
+            model="model-a",
+            api_key="sk-user-one-1234567890",
+            profile_id="profile-1",
+            profile_name="p1",
+        ),
+        ("u1", "profile-2"): _active_resolution(
+            "u1",
+            "p2",
+            model="model-b",
+            api_key="sk-user-two-1234567890",
+            profile_id="profile-2",
+            profile_name="p2",
+        ),
     }
 
     try:
-        user_provider.resolve_user_provider = lambda user_id: resolutions[user_id]
+        user_provider.resolve_user_profile_provider = (
+            lambda user_id, *, profile_id="", profile_name="": resolutions[(user_id, profile_id)]
+        )
         user_provider.fetch_provider_models = lambda provider: (
             [{"id": provider["model_name"], "label": provider["model_name"]}],
             "",
         )
-        payload_one = user_provider.build_user_provider_models_payload("u1", lambda: {})
-        payload_two = user_provider.build_user_provider_models_payload("u2", lambda: {})
+        payload_one = user_provider.build_user_provider_models_payload(
+            "u1",
+            lambda: {},
+            profile_id="profile-1",
+            profile_name="p1",
+        )
+        payload_two = user_provider.build_user_provider_models_payload(
+            "u1",
+            lambda: {},
+            profile_id="profile-2",
+            profile_name="p2",
+        )
     finally:
-        user_provider.resolve_user_provider = original_resolve
+        user_provider.resolve_user_profile_provider = original_resolve
         user_provider.fetch_provider_models = original_fetch
         _restore_env(X_USER_ID_ENV, previous_env)
         _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
@@ -218,8 +267,8 @@ def validate_runtime_signature_omits_api_key() -> None:
     assert "sk-user-one-1234567890" not in str(signature)
 
 
-def validate_selected_provider_uses_user_relation_and_mode_mapping() -> None:
-    original_selection = user_provider.get_user_provider_selection_id
+def validate_profile_provider_uses_profile_relation_and_mode_mapping() -> None:
+    original_get_profile = user_provider.get_user_profile_record_by_id
     original_global_records = user_provider.list_global_user_ai_provider_records
     original_validate_base_url = user_provider._validate_base_url
     records = [
@@ -250,17 +299,24 @@ def validate_selected_provider_uses_user_relation_and_mode_mapping() -> None:
     ]
 
     try:
-        user_provider.get_user_provider_selection_id = lambda user_id: "367907417817088"
+        user_provider.get_user_profile_record_by_id = lambda user_id, profile_id: {
+            "id": profile_id,
+            "user_id": user_id,
+            "profile_name": "p1",
+            "hermes_providers_id": "367907417817088",
+        }
         user_provider.list_global_user_ai_provider_records = lambda user_id: records
         user_provider._validate_base_url = lambda base_url: str(base_url or "").strip().rstrip("/")
-        resolution = user_provider.resolve_user_provider("u1")
+        resolution = user_provider.resolve_user_profile_provider("u1", profile_id="profile-1")
     finally:
-        user_provider.get_user_provider_selection_id = original_selection
+        user_provider.get_user_profile_record_by_id = original_get_profile
         user_provider.list_global_user_ai_provider_records = original_global_records
         user_provider._validate_base_url = original_validate_base_url
 
     assert resolution.status == "active"
-    assert resolution.reason == "active_provider"
+    assert resolution.reason == "profile_provider"
+    assert resolution.profile_id == "profile-1"
+    assert resolution.profile_name == "p1"
     assert resolution.provider["id"] == "367907417817088"
     assert resolution.provider["provider_name"] == "aihubmix"
     assert resolution.provider["api_mode"] == "chat_completions"
@@ -270,24 +326,65 @@ def validate_selected_provider_uses_user_relation_and_mode_mapping() -> None:
     assert resolution.provider["base_url"] == "https://old.example.invalid/v1"
 
 
+def validate_empty_profile_provider_uses_system_default_provider() -> None:
+    original_get_profile = user_provider.get_user_profile_record_by_id
+    original_global_records = user_provider.list_global_user_ai_provider_records
+    original_validate_base_url = user_provider._validate_base_url
+    records = [
+        {
+            "id": "default-provider",
+            "provider_name": "default",
+            "base_url": "https://default.example.invalid/v1",
+            "model_name": "default-model",
+            "api_mode": "openai-response",
+            "model_level": "low",
+            "api_key": "sk-default-provider-1234567890",
+            "is_enable": True,
+            "is_default": True,
+            "updatedAt": "2026-06-02T00:00:00Z",
+        },
+        {
+            "id": "other-provider",
+            "provider_name": "other",
+            "base_url": "https://other.example.invalid/v1",
+            "model_name": "other-model",
+            "api_mode": "openai-response",
+            "model_level": "high",
+            "api_key": "sk-other-provider-1234567890",
+            "is_enable": True,
+            "is_default": False,
+            "updatedAt": "2026-06-03T00:00:00Z",
+        },
+    ]
+
+    try:
+        user_provider.get_user_profile_record_by_id = lambda user_id, profile_id: {
+            "id": profile_id,
+            "user_id": user_id,
+            "profile_name": "p-default",
+            "hermes_providers_id": None,
+        }
+        user_provider.list_global_user_ai_provider_records = lambda user_id: records
+        user_provider._validate_base_url = lambda base_url: str(base_url or "").strip().rstrip("/")
+        resolution = user_provider.resolve_user_profile_provider("u1", profile_id="profile-default")
+    finally:
+        user_provider.get_user_profile_record_by_id = original_get_profile
+        user_provider.list_global_user_ai_provider_records = original_global_records
+        user_provider._validate_base_url = original_validate_base_url
+
+    assert resolution.status == "active"
+    assert resolution.reason == "system_default_provider"
+    assert resolution.provider["id"] == "default-provider"
+    assert resolution.provider["model_name"] == "default-model"
+
+
 def validate_user_id_runtime_lookup_does_not_need_legacy_env() -> None:
-    original_resolve = user_provider.resolve_user_provider
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
     user_provider.clear_user_provider_models_cache()
-    captured = {}
-
-    def resolve_none(user_id):
-        captured["user_id"] = user_id
-        return user_provider.UserProviderResolution(
-            status="none",
-            reason="no_provider",
-            user_id=user_id,
-        )
 
     try:
-        user_provider.resolve_user_provider = resolve_none
         payload = user_provider.build_user_provider_models_payload(
             "legacy-user",
             lambda: {
@@ -297,13 +394,12 @@ def validate_user_id_runtime_lookup_does_not_need_legacy_env() -> None:
             },
         )
     finally:
-        user_provider.resolve_user_provider = original_resolve
         _restore_env(X_USER_ID_ENV, previous_env)
         _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
         _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
 
     assert payload["provider_resolution"]["status"] == "none"
-    assert captured["user_id"] == "legacy-user"
+    assert payload["provider_resolution"]["reason"] == "missing_profile_context"
 
 
 def validate_private_and_local_base_urls_are_rejected() -> None:
@@ -365,7 +461,7 @@ def validate_route_models_does_not_require_user_context() -> None:
 
     original_j = routes.j
     original_models = routes.get_available_models
-    original_resolve = user_provider.resolve_user_provider
+    original_resolve = user_provider.resolve_user_profile_provider
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
     previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
@@ -376,7 +472,7 @@ def validate_route_models_does_not_require_user_context() -> None:
         captured["status"] = status
         return True
 
-    def fail_lookup(_user_id):
+    def fail_lookup(_user_id, **_kwargs):
         raise AssertionError("route must not resolve user provider without user context")
 
     try:
@@ -386,12 +482,12 @@ def validate_route_models_does_not_require_user_context() -> None:
             "default_model": "default-model",
             "groups": [{"provider": "Default", "provider_id": "default", "models": []}],
         }
-        user_provider.resolve_user_provider = fail_lookup
+        user_provider.resolve_user_profile_provider = fail_lookup
         assert dispatcher.dispatch_get(Handler(), urllib.parse.urlparse("/api/models")) is True
     finally:
         routes.j = original_j
         routes.get_available_models = original_models
-        user_provider.resolve_user_provider = original_resolve
+        user_provider.resolve_user_profile_provider = original_resolve
         _restore_env(X_USER_ID_ENV, previous_env)
         _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
         _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
@@ -410,7 +506,7 @@ def validate_route_models_uses_user_context_when_present() -> None:
 
     original_j = routes.j
     original_models = routes.get_available_models
-    original_resolve = user_provider.resolve_user_provider
+    original_resolve = user_provider.resolve_user_profile_provider
     original_fetch = user_provider.fetch_provider_models
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
@@ -422,9 +518,18 @@ def validate_route_models_uses_user_context_when_present() -> None:
         captured["status"] = status
         return True
 
-    def resolve_active(user_id):
+    def resolve_active(user_id, *, profile_id="", profile_name=""):
         captured["user_id"] = user_id
-        return _active_resolution(user_id, "route-provider", model="route-model", api_key="sk-route-secret")
+        captured["profile_id"] = profile_id
+        captured["profile_name"] = profile_name
+        return _active_resolution(
+            user_id,
+            "route-provider",
+            model="route-model",
+            api_key="sk-route-secret",
+            profile_id=profile_id,
+            profile_name=profile_name,
+        )
 
     try:
         routes.j = capture_j
@@ -433,19 +538,19 @@ def validate_route_models_uses_user_context_when_present() -> None:
             "default_model": "default-model",
             "groups": [{"provider": "Default", "provider_id": "default", "models": []}],
         }
-        user_provider.resolve_user_provider = resolve_active
+        user_provider.resolve_user_profile_provider = resolve_active
         user_provider.fetch_provider_models = lambda provider: (
             [{"id": provider["model_name"], "label": provider["model_name"]}],
             "",
         )
         assert dispatcher.dispatch_get(
             Handler({"X-User-Id": "route-user"}),
-            urllib.parse.urlparse("/api/models"),
+            urllib.parse.urlparse("/api/models?profile_id=profile-route&profile=route-profile"),
         ) is True
     finally:
         routes.j = original_j
         routes.get_available_models = original_models
-        user_provider.resolve_user_provider = original_resolve
+        user_provider.resolve_user_profile_provider = original_resolve
         user_provider.fetch_provider_models = original_fetch
         _restore_env(X_USER_ID_ENV, previous_env)
         _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
@@ -453,6 +558,8 @@ def validate_route_models_uses_user_context_when_present() -> None:
 
     assert captured["status"] == 200
     assert captured["user_id"] == "route-user"
+    assert captured["profile_id"] == "profile-route"
+    assert captured["profile_name"] == "route-profile"
     payload = captured["payload"]
     assert payload["active_provider"] == "user-provider-route-provider"
     assert payload["default_model"] == "route-model"
@@ -779,10 +886,13 @@ def validate_real_agent_local_provider_e2e() -> None:
         LEGACY_NOCOBASE_AUTH_ENV,
     )}
     server = _start_mock_responses_server()
-    original_resolve = user_provider.resolve_user_provider
+    original_resolve = user_provider.resolve_user_profile_provider
     original_validate_base_url = user_provider._validate_base_url
     try:
-        with tempfile.TemporaryDirectory(prefix="hermes-webui-provider-state-") as state_dir, tempfile.TemporaryDirectory(prefix="hermes-home-provider-") as home_dir:
+        with tempfile.TemporaryDirectory(prefix="hermes-webui-provider-state-") as state_dir, tempfile.TemporaryDirectory(
+            prefix="hermes-home-provider-",
+            ignore_cleanup_errors=True,
+        ) as home_dir:
             state_path = Path(state_dir)
             home_path = Path(home_dir)
             workspace_path = state_path / "workspace"
@@ -831,10 +941,12 @@ def validate_real_agent_local_provider_e2e() -> None:
                 "status": "enabled",
                 "updatedAt": "2026-06-02T00:00:00Z",
             }
-            user_provider.resolve_user_provider = lambda user_id: user_provider.UserProviderResolution(
+            user_provider.resolve_user_profile_provider = lambda user_id, **_kwargs: user_provider.UserProviderResolution(
                 status="active",
-                reason="active_provider",
+                reason="profile_provider",
                 user_id=user_id,
+                profile_id="profile-local-e2e",
+                profile_name="default",
                 provider=provider_record,
             )
             user_provider._validate_base_url = lambda base_url: str(base_url or "").strip().rstrip("/")
@@ -879,7 +991,7 @@ def validate_real_agent_local_provider_e2e() -> None:
             assert FAKE_PROVIDER_KEY not in serialized_errors
             assert not error_payloads, f"unexpected streaming error payloads: {error_payloads}"
     finally:
-        user_provider.resolve_user_provider = original_resolve
+        user_provider.resolve_user_profile_provider = original_resolve
         user_provider._validate_base_url = original_validate_base_url
         server.shutdown()
         server.server_close()
@@ -893,7 +1005,8 @@ def main() -> None:
     validate_lookup_fallback_and_redaction_with_user_context()
     validate_models_cache_isolated_by_user_and_provider()
     validate_runtime_signature_omits_api_key()
-    validate_selected_provider_uses_user_relation_and_mode_mapping()
+    validate_profile_provider_uses_profile_relation_and_mode_mapping()
+    validate_empty_profile_provider_uses_system_default_provider()
     validate_user_id_runtime_lookup_does_not_need_legacy_env()
     validate_private_and_local_base_urls_are_rejected()
     validate_dns_resolution_to_private_ip_is_rejected()

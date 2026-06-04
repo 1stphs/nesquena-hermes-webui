@@ -7,16 +7,18 @@ from typing import Any
 from api.user_provider import (
     UserProviderAuthError,
     UserProviderLookupError,
+    get_default_provider_id,
+    get_default_provider_record_for_user,
     get_user_profile_record_by_id,
-    get_user_ai_provider_record,
-    get_user_provider_selection_id,
+    get_user_profile_record_by_name,
+    get_user_profile_provider_id,
     list_user_ai_provider_records,
+    list_user_profile_records,
     list_global_ai_provider_records_for_service,
     public_user_ai_provider_record,
-    resolve_user_provider,
+    resolve_user_profile_provider,
     resolve_user_profile_sync_name,
-    set_user_provider_selection_id,
-    verify_user_profile_access,
+    set_user_profile_provider_id,
     _normalize_provider_record,
 )
 from api.user_provider_config_sync import (
@@ -31,13 +33,33 @@ from api.user_provider_config_sync import (
 )
 
 
-def list_user_ai_providers_payload(user_id: str) -> dict[str, Any]:
-    records = list_user_ai_provider_records(user_id)
+def list_user_ai_providers_payload(user_id: str, profile_id: str = "") -> dict[str, Any]:
+    profile = None
+    profile_provider_id = ""
+    selected_provider_id = ""
+    if str(profile_id or "").strip():
+        profile = get_user_profile_record_by_id(user_id, profile_id)
+        profile_provider_id = get_user_profile_provider_id(profile)
+        selected_provider_id = profile_provider_id or get_default_provider_id(user_id)
+    records = list_user_ai_provider_records(
+        user_id,
+        selected_provider_id=selected_provider_id,
+        use_default_when_empty=bool(profile is not None and not profile_provider_id),
+    )
     providers = [
         public_user_ai_provider_record(record, get_last_sync_status(user_id, str(record.get("id") or "")))
         for record in records
     ]
-    return {"ok": True, "providers": providers}
+    payload = {"ok": True, "providers": providers}
+    if profile is not None:
+        payload["profile"] = {
+            **profile,
+            "hermes_providers_id": profile_provider_id or None,
+        }
+        payload["profile_provider_id"] = profile_provider_id
+        payload["selected_provider_id"] = selected_provider_id
+        payload["uses_system_default"] = not bool(profile_provider_id)
+    return payload
 
 
 def save_user_ai_provider_payload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -64,7 +86,7 @@ def enable_user_ai_provider_payload(user_id: str, profile_id: str, provider_id: 
         if not target:
             raise UserProviderConfigSyncError("Provider not found", code="provider_not_found", status=404)
         provider, _reason = _runtime_provider_or_raise(target, user_id)
-        previous_provider_id = get_user_provider_selection_id(user_id)
+        previous_provider_id = get_user_profile_provider_id(profile)
         sync_single_profile_model_config(
             user_id=user_id,
             profile_name=profile_name,
@@ -73,7 +95,7 @@ def enable_user_ai_provider_payload(user_id: str, profile_id: str, provider_id: 
             use_lock=False,
         )
         try:
-            updated_user = set_user_provider_selection_id(user_id, provider_id)
+            updated_profile = set_user_profile_provider_id(user_id, profile_id, provider_id)
             sync = sync_single_profile_model_config(
                 user_id=user_id,
                 profile_name=profile_name,
@@ -81,17 +103,14 @@ def enable_user_ai_provider_payload(user_id: str, profile_id: str, provider_id: 
                 use_lock=False,
             )
         except Exception:
-            set_user_provider_selection_id(user_id, previous_provider_id or None)
+            set_user_profile_provider_id(user_id, profile_id, previous_provider_id or None)
             raise
         _remember_sync(user_id, provider_id, sync)
         return {
             "ok": True,
-            "user": {
-                **updated_user,
-                "hermes_providers_id": provider_id,
-            },
             "profile": {
                 **profile,
+                **updated_profile,
                 "hermes_providers_id": provider_id,
             },
             "provider": public_user_ai_provider_record(
@@ -109,53 +128,59 @@ def enable_user_ai_provider_payload(user_id: str, profile_id: str, provider_id: 
         }
 
 
-def disable_user_ai_provider_payload(user_id: str, provider_id: str) -> dict[str, Any]:
-    provider_id = _required_provider_id(provider_id)
+def disable_user_ai_provider_payload(user_id: str, profile_id: str) -> dict[str, Any]:
+    profile_id = _required_profile_id(profile_id)
     with user_provider_sync_lock(user_id):
-        target = get_user_ai_provider_record(user_id, provider_id)
-        selected_provider_id = get_user_provider_selection_id(user_id)
-        if selected_provider_id != provider_id:
-            disabled_payload = {
-                **target,
-                "status": "disabled",
-                "selected": False,
-                "active": False,
-                "enabled": False,
-            }
-            return {
-                "ok": True,
-                "provider": public_user_ai_provider_record(
-                    disabled_payload,
-                    get_last_sync_status(user_id, provider_id),
-                ),
-                "sync": None,
-            }
-        sync_user_provider_model_config(
+        profile = get_user_profile_record_by_id(user_id, profile_id)
+        profile_owner_id = str(profile.get("user_id") or profile.get("userId") or "").strip()
+        if profile_owner_id != user_id:
+            raise UserProviderAuthError("Profile is not available for current user", status=403, code="profile_forbidden")
+        profile_name = resolve_user_profile_sync_name(profile)
+        if not profile_name:
+            raise UserProviderConfigSyncError("Profile name is missing", code="missing_profile_name", status=400)
+        previous_provider_id = get_user_profile_provider_id(profile)
+        default_record = get_default_provider_record_for_user(user_id)
+        if not default_record:
+            raise UserProviderConfigSyncError(
+                "System default Provider is unavailable",
+                code="no_default_provider",
+                status=400,
+            )
+        provider, _reason = _runtime_provider_or_raise(default_record, user_id)
+        provider_id = str(provider.get("id") or "")
+        sync_single_profile_model_config(
             user_id=user_id,
-            mode=SYNC_MODE_ROOT_DEFAULT,
+            profile_name=profile_name,
+            provider=provider,
             dry_run=True,
             use_lock=False,
         )
         try:
-            set_user_provider_selection_id(user_id, None)
-            sync = sync_user_provider_model_config(
+            updated_profile = set_user_profile_provider_id(user_id, profile_id, None)
+            sync = sync_single_profile_model_config(
                 user_id=user_id,
-                mode=SYNC_MODE_ROOT_DEFAULT,
+                profile_name=profile_name,
+                provider=provider,
                 use_lock=False,
             )
         except Exception:
-            set_user_provider_selection_id(user_id, provider_id)
+            set_user_profile_provider_id(user_id, profile_id, previous_provider_id or None)
             raise
         _remember_sync(user_id, provider_id, sync)
         updated = {
-            **target,
-            "status": "disabled",
-            "selected": False,
-            "active": False,
-            "enabled": False,
+            **provider,
+            "status": "enabled",
+            "selected": True,
+            "active": True,
+            "enabled": True,
         }
         return {
             "ok": True,
+            "profile": {
+                **profile,
+                **updated_profile,
+                "hermes_providers_id": None,
+            },
             "provider": public_user_ai_provider_record(updated, get_last_sync_status(user_id, provider_id)),
             "sync": sync,
         }
@@ -173,39 +198,43 @@ def sync_user_ai_provider_payload(user_id: str, body: dict[str, Any]) -> dict[st
     mode = str(body.get("mode") or SYNC_MODE_ACTIVE_PROVIDER).strip()
     dry_run = bool(body.get("dry_run"))
     with user_provider_sync_lock(user_id):
-        provider = None
-        provider_id = ""
         if mode == SYNC_MODE_ACTIVE_PROVIDER:
-            resolution = resolve_user_provider(user_id)
-            if not resolution.is_active:
-                raise UserProviderConfigSyncError(
-                    "Active Provider is unavailable",
-                    code=resolution.reason or "active_provider_unavailable",
-                    status=503 if resolution.status == "lookup_failed" else 400,
-                    payload={"provider_resolution": {"status": resolution.status, "reason": resolution.reason}},
-                )
-            provider = resolution.provider
-            provider_id = str(provider.get("id") or "")
+            sync = _sync_all_profile_providers(user_id, dry_run=dry_run)
+            if not dry_run:
+                for item in sync.get("profiles") or []:
+                    provider_id = str(item.get("provider_id") or "")
+                    if provider_id:
+                        _remember_sync(user_id, provider_id, sync)
+            return {"ok": True, "sync": sync}
         sync = sync_user_provider_model_config(
             user_id=user_id,
             mode=mode,
-            provider=provider,
             dry_run=dry_run,
             use_lock=False,
         )
-        if provider_id and not dry_run:
-            _remember_sync(user_id, provider_id, sync)
         return {"ok": True, "sync": sync}
 
 
 def sync_user_ai_provider_profile_payload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    profile_id = str(body.get("profile_id") or body.get("profileId") or "").strip()
     profile_name = str(body.get("profile_name") or body.get("profileName") or body.get("profile") or "").strip()
-    if not profile_name:
-        raise UserProviderConfigSyncError("Missing profile name", code="missing_profile_name", status=400)
+    if not profile_id and not profile_name:
+        raise UserProviderConfigSyncError("Missing profile", code="missing_profile", status=400)
     dry_run = bool(body.get("dry_run"))
     with user_provider_sync_lock(user_id):
-        verify_user_profile_access(user_id, profile_name)
-        resolution = resolve_user_provider(user_id)
+        profile = (
+            get_user_profile_record_by_id(user_id, profile_id)
+            if profile_id
+            else get_user_profile_record_by_name(user_id, profile_name)
+        )
+        profile_name = resolve_user_profile_sync_name(profile)
+        if not profile_name:
+            raise UserProviderConfigSyncError("Profile name is missing", code="missing_profile_name", status=400)
+        resolution = resolve_user_profile_provider(
+            user_id,
+            profile_id=str(profile.get("id") or profile_id),
+            profile_name=profile_name,
+        )
         if not resolution.is_active:
             if resolution.status == "lookup_failed":
                 raise UserProviderConfigSyncError(
@@ -237,7 +266,7 @@ def sync_user_ai_provider_profile_payload(user_id: str, body: dict[str, Any]) ->
 
 def sync_new_profile_if_enabled(user_id: str, profile_name: str) -> dict[str, Any] | None:
     with user_provider_sync_lock(user_id):
-        resolution = resolve_user_provider(user_id)
+        resolution = resolve_user_profile_provider(user_id, profile_name=profile_name)
         if not resolution.is_active:
             if resolution.status == "lookup_failed":
                 raise UserProviderConfigSyncError(
@@ -256,6 +285,94 @@ def sync_new_profile_if_enabled(user_id: str, profile_name: str) -> dict[str, An
         )
         _remember_sync(user_id, str(provider.get("id") or ""), sync)
         return sync
+
+
+def _sync_all_profile_providers(user_id: str, *, dry_run: bool) -> dict[str, Any]:
+    profiles = list_user_profile_records(user_id)
+    results: list[dict[str, Any]] = []
+    failures = 0
+    synced = 0
+    skipped = 0
+    for profile in profiles:
+        profile_id = str(profile.get("id") or "")
+        profile_name = resolve_user_profile_sync_name(profile)
+        base_payload = {
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+        }
+        if not profile_name:
+            skipped += 1
+            results.append(
+                {
+                    **base_payload,
+                    "status": "skipped",
+                    "reason": "missing_profile_name",
+                }
+            )
+            continue
+        resolution = resolve_user_profile_provider(user_id, profile_id=profile_id, profile_name=profile_name)
+        if not resolution.is_active:
+            status_code = 503 if resolution.status == "lookup_failed" else 400
+            if status_code >= 500:
+                failures += 1
+            else:
+                skipped += 1
+            results.append(
+                {
+                    **base_payload,
+                    "status": "failed" if status_code >= 500 else "skipped",
+                    "reason": resolution.reason,
+                    "provider_resolution": {"status": resolution.status, "reason": resolution.reason},
+                }
+            )
+            continue
+        provider = resolution.provider or {}
+        try:
+            sync = sync_single_profile_model_config(
+                user_id=user_id,
+                profile_name=profile_name,
+                provider=provider,
+                dry_run=dry_run,
+                use_lock=False,
+            )
+            synced += 1
+            results.append(
+                {
+                    **base_payload,
+                    "status": "planned" if dry_run else "synced",
+                    "provider_id": str(provider.get("id") or ""),
+                    "provider_resolution": {"status": resolution.status, "reason": resolution.reason},
+                    "sync": sync,
+                }
+            )
+        except Exception as exc:
+            failures += 1
+            results.append(
+                {
+                    **base_payload,
+                    "status": "failed",
+                    "provider_id": str(provider.get("id") or ""),
+                    "error": str(exc),
+                }
+            )
+    if failures:
+        status = "partial_failed"
+    elif dry_run:
+        status = "planned"
+    else:
+        status = "synced"
+    return {
+        "status": status,
+        "mode": SYNC_MODE_ACTIVE_PROVIDER,
+        "dry_run": dry_run,
+        "profiles": results,
+        "summary": {
+            "total": len(results),
+            "synced": synced,
+            "skipped": skipped,
+            "failed": failures,
+        },
+    }
 
 
 def test_user_ai_provider_payload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
