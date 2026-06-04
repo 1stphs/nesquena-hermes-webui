@@ -7,7 +7,6 @@ from typing import Any
 from api.user_provider import (
     UserProviderAuthError,
     UserProviderLookupError,
-    get_user_profile_provider_id,
     get_user_profile_record_by_id,
     get_user_ai_provider_record,
     get_user_provider_selection_id,
@@ -17,7 +16,6 @@ from api.user_provider import (
     resolve_user_provider,
     resolve_user_profile_sync_name,
     set_user_provider_selection_id,
-    set_user_profile_provider_id,
     verify_user_profile_access,
     _normalize_provider_record,
 )
@@ -66,7 +64,7 @@ def enable_user_ai_provider_payload(user_id: str, profile_id: str, provider_id: 
         if not target:
             raise UserProviderConfigSyncError("Provider not found", code="provider_not_found", status=404)
         provider, _reason = _runtime_provider_or_raise(target, user_id)
-        previous_provider_id = get_user_profile_provider_id(profile)
+        previous_provider_id = get_user_provider_selection_id(user_id)
         sync_single_profile_model_config(
             user_id=user_id,
             profile_name=profile_name,
@@ -75,7 +73,7 @@ def enable_user_ai_provider_payload(user_id: str, profile_id: str, provider_id: 
             use_lock=False,
         )
         try:
-            updated_profile = set_user_profile_provider_id(user_id, profile_id, provider_id)
+            updated_user = set_user_provider_selection_id(user_id, provider_id)
             sync = sync_single_profile_model_config(
                 user_id=user_id,
                 profile_name=profile_name,
@@ -83,13 +81,17 @@ def enable_user_ai_provider_payload(user_id: str, profile_id: str, provider_id: 
                 use_lock=False,
             )
         except Exception:
-            set_user_profile_provider_id(user_id, profile_id, previous_provider_id or None)
+            set_user_provider_selection_id(user_id, previous_provider_id or None)
             raise
         _remember_sync(user_id, provider_id, sync)
         return {
             "ok": True,
+            "user": {
+                **updated_user,
+                "hermes_providers_id": provider_id,
+            },
             "profile": {
-                **updated_profile,
+                **profile,
                 "hermes_providers_id": provider_id,
             },
             "provider": public_user_ai_provider_record(
