@@ -269,6 +269,24 @@ def _normalize_profile_agent_skills(
 
     return [available[name.lower()] for name in selected]
 
+def _normalize_existing_profile_agent_skills(existing: dict) -> list[str]:
+    raw_skills = existing.get("skills")
+    if not isinstance(raw_skills, list):
+        return []
+
+    skills: list[str] = []
+    seen: set[str] = set()
+    for item in raw_skills:
+        value = str(item or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        skills.append(value)
+    return skills
+
 _PROFILE_AGENT_DEFAULT_CLONE_FROM = "template_profile"
 
 def _profile_agent_create_options(body: dict) -> dict:
@@ -786,20 +804,22 @@ def _handle_profile_agent_update(handler, body):
             "prompt",
             max_len=_PROFILE_AGENT_PROMPT_MAX,
         )
-        if "skills" not in body and "skill_names" not in body:
-            raise ValueError("skills is required")
-        catalog = _routes_binding("_load_profile_agent_skills_catalog")()
-        skills = _normalize_profile_agent_skills(
-            body.get("skills", body.get("skill_names")),
-            catalog,
-            required=False,
-        )
         active_profile_name, profile_path = _resolve_profile_agent_update_target(body)
         profile_path = profile_path.resolve()
         if not profile_path.exists():
             raise FileNotFoundError(f"profile not found: {active_profile_name}")
 
         existing = _read_profile_agent_metadata(profile_path)
+        should_update_skills = "skills" in body or "skill_names" in body
+        if should_update_skills:
+            catalog = _routes_binding("_load_profile_agent_skills_catalog")()
+            skills = _normalize_profile_agent_skills(
+                body.get("skills", body.get("skill_names")),
+                catalog,
+                required=False,
+            )
+        else:
+            skills = _normalize_existing_profile_agent_skills(existing)
 
         from datetime import datetime, timezone
 
