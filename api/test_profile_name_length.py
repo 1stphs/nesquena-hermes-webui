@@ -171,3 +171,115 @@ def test_update_profile_agent_allows_explicit_empty_skills(tmp_path, monkeypatch
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata["skills"] == []
+
+
+@pytest.mark.parametrize(
+    ("field", "max_length", "error_label"),
+    [
+        ("description", 2000, "description"),
+        ("prompt", 5000, "prompt"),
+    ],
+)
+def test_update_profile_agent_accepts_description_and_prompt_length_limits(
+    tmp_path,
+    monkeypatch,
+    field,
+    max_length,
+    error_label,
+):
+    import api.routes_handlers.profile as profile_handler
+
+    profile_path = tmp_path / "profiles" / "assistant"
+    profile_path.mkdir(parents=True)
+    _write_agent_metadata(
+        profile_path,
+        {
+            "profile_id": "assistant",
+            "profile_name": "旧助理",
+            "avatar": "old.png",
+            "description": "旧简介",
+            "prompt": "旧 Prompt",
+            "skills": [],
+            "status": "active",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    responses = []
+
+    _patch_profile_handler_bindings(monkeypatch, profile_handler, responses)
+    monkeypatch.setattr(
+        profile_handler,
+        "_resolve_profile_agent_update_target",
+        lambda _body: ("assistant", profile_path),
+    )
+
+    body = {
+        "profile_id": "assistant",
+        "display_name": "新助理",
+        "description": "新简介",
+        "prompt": "新 Prompt",
+    }
+    body[field] = "a" * max_length
+
+    result = profile_handler._handle_profile_agent_update(object(), body)
+
+    assert result is True
+    assert responses[0][0] == 200
+    assert len(responses[0][1]["agent"][error_label]) == max_length
+
+
+@pytest.mark.parametrize(
+    ("field", "max_length", "error_label"),
+    [
+        ("description", 2000, "description"),
+        ("prompt", 5000, "prompt"),
+    ],
+)
+def test_update_profile_agent_rejects_description_and_prompt_over_length_limits(
+    tmp_path,
+    monkeypatch,
+    field,
+    max_length,
+    error_label,
+):
+    import api.routes_handlers.profile as profile_handler
+
+    profile_path = tmp_path / "profiles" / "assistant"
+    profile_path.mkdir(parents=True)
+    _write_agent_metadata(
+        profile_path,
+        {
+            "profile_id": "assistant",
+            "profile_name": "旧助理",
+            "avatar": "old.png",
+            "description": "旧简介",
+            "prompt": "旧 Prompt",
+            "skills": [],
+            "status": "active",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    responses = []
+
+    _patch_profile_handler_bindings(monkeypatch, profile_handler, responses)
+    monkeypatch.setattr(
+        profile_handler,
+        "_resolve_profile_agent_update_target",
+        lambda _body: ("assistant", profile_path),
+    )
+
+    body = {
+        "profile_id": "assistant",
+        "display_name": "新助理",
+        "description": "新简介",
+        "prompt": "新 Prompt",
+    }
+    body[field] = "a" * (max_length + 1)
+
+    result = profile_handler._handle_profile_agent_update(object(), body)
+
+    assert result is True
+    assert responses[0][0] == 400
+    assert responses[0][1]["error"] == f"{error_label} must be at most {max_length} characters"
