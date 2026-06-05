@@ -404,7 +404,7 @@ def get_user_profile_record_by_id(user_id: str, profile_id: str) -> dict[str, An
         },
     )
     if not records:
-        return {}
+        raise UserProviderAuthError("Profile is not available for current user", status=403, code="profile_forbidden")
     record = records[0]
     if _record_user_id(record) != user_id:
         raise UserProviderAuthError("Profile is not available for current user", status=403, code="profile_forbidden")

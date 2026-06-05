@@ -378,6 +378,36 @@ def validate_empty_profile_provider_uses_system_default_provider() -> None:
     assert resolution.provider["model_name"] == "default-model"
 
 
+def validate_missing_profile_id_is_observable_error() -> None:
+    original_nocobase_list = user_provider._nocobase_list
+    original_global_records = user_provider.list_global_user_ai_provider_records
+
+    try:
+        user_provider._nocobase_list = lambda collection, user_id, params: []
+        user_provider.list_global_user_ai_provider_records = lambda user_id: [
+            {
+                "id": "default-provider",
+                "provider_name": "default",
+                "base_url": "https://default.example.invalid/v1",
+                "model_name": "default-model",
+                "api_mode": "openai-response",
+                "api_key": "sk-default-provider-1234567890",
+                "is_enable": True,
+                "is_default": True,
+            }
+        ]
+        try:
+            user_provider.resolve_user_profile_provider("u1", profile_id="missing-profile")
+        except user_provider.UserProviderAuthError as exc:
+            assert exc.status == 403
+            assert exc.code == "profile_forbidden"
+        else:
+            raise AssertionError("missing profile id must not use system default provider")
+    finally:
+        user_provider._nocobase_list = original_nocobase_list
+        user_provider.list_global_user_ai_provider_records = original_global_records
+
+
 def validate_user_id_runtime_lookup_does_not_need_legacy_env() -> None:
     previous_env = os.environ.pop(X_USER_ID_ENV, None)
     previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
@@ -400,6 +430,59 @@ def validate_user_id_runtime_lookup_does_not_need_legacy_env() -> None:
 
     assert payload["provider_resolution"]["status"] == "none"
     assert payload["provider_resolution"]["reason"] == "missing_profile_context"
+
+
+def validate_route_models_rejects_missing_profile_context() -> None:
+    import urllib.parse
+    import api.routes as routes
+    import api.routes_dispatcher as dispatcher
+
+    original_j = routes.j
+    original_models = routes.get_available_models
+    original_resolve = user_provider.resolve_user_profile_provider
+    previous_env = os.environ.pop(X_USER_ID_ENV, None)
+    previous_legacy_env = os.environ.pop(LEGACY_X_USER_ID_ENV, None)
+    previous_nocobase_auth_env = os.environ.pop(LEGACY_NOCOBASE_AUTH_ENV, None)
+    captured = {}
+
+    def capture_j(_handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+        return True
+
+    def reject_lookup(user_id, *, profile_id="", profile_name=""):
+        assert user_id == "route-user"
+        assert profile_id == "missing-profile"
+        assert profile_name == "missing-name"
+        raise user_provider.UserProviderAuthError(
+            "Profile is not available for current user",
+            status=403,
+            code="profile_forbidden",
+        )
+
+    try:
+        routes.j = capture_j
+        routes.get_available_models = lambda: {
+            "active_provider": "default",
+            "default_model": "default-model",
+            "groups": [{"provider": "Default", "provider_id": "default", "models": []}],
+        }
+        user_provider.resolve_user_profile_provider = reject_lookup
+        assert dispatcher.dispatch_get(
+            Handler({"X-User-Id": "route-user"}),
+            urllib.parse.urlparse("/api/models?profile_id=missing-profile&profile=missing-name"),
+        ) is True
+    finally:
+        routes.j = original_j
+        routes.get_available_models = original_models
+        user_provider.resolve_user_profile_provider = original_resolve
+        _restore_env(X_USER_ID_ENV, previous_env)
+        _restore_env(LEGACY_X_USER_ID_ENV, previous_legacy_env)
+        _restore_env(LEGACY_NOCOBASE_AUTH_ENV, previous_nocobase_auth_env)
+
+    assert captured["status"] == 403
+    assert captured["payload"]["code"] == "profile_forbidden"
+    assert "provider_resolution" not in captured["payload"]
 
 
 def validate_private_and_local_base_urls_are_rejected() -> None:
@@ -1007,7 +1090,9 @@ def main() -> None:
     validate_runtime_signature_omits_api_key()
     validate_profile_provider_uses_profile_relation_and_mode_mapping()
     validate_empty_profile_provider_uses_system_default_provider()
+    validate_missing_profile_id_is_observable_error()
     validate_user_id_runtime_lookup_does_not_need_legacy_env()
+    validate_route_models_rejects_missing_profile_context()
     validate_private_and_local_base_urls_are_rejected()
     validate_dns_resolution_to_private_ip_is_rejected()
     validate_provider_key_redaction_is_forced_when_global_redaction_disabled()
