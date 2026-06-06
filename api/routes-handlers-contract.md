@@ -8,7 +8,7 @@
 {
   "contracts": [],
   "counts": {
-    "green": 84,
+    "green": 85,
     "red": 0,
     "yellow": 0
   },
@@ -363,6 +363,12 @@
       "status": "green"
     },
     {
+      "function": "_handle_profile_installed_skills",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
       "function": "_handle_profile_memory_read",
       "location": "api/routes_handlers/profile.py",
       "reasons": [],
@@ -524,7 +530,7 @@
 
 ## Summary
 
-- green: 84
+- green: 85
 - yellow: 0
 - red: 0
 
@@ -590,6 +596,7 @@
 | green | `_handle_profile_agents_list` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_change_soul` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_install_profiles` | `api/routes_handlers/profile.py` | no source-level contract detected |
+| green | `_handle_profile_installed_skills` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_profile_memory_read` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_memory_write` | `api/routes_handlers/profile.py` | no source-level contract detected |
 | green | `_handle_profile_soul_read` | `api/routes_handlers/profile.py` | no source-level contract detected |

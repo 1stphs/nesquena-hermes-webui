@@ -809,6 +809,9 @@ self.addEventListener('fetch', () => {});
             data["linked_files"] = {}
         return j(handler, data)
 
+    if parsed.path == "/api/profile/installed-skills":
+        return _handle_profile_installed_skills(handler, parsed)
+
     # ── Memory API (GET) ──
     if parsed.path == "/api/memory":
         return _handle_memory_read(handler)

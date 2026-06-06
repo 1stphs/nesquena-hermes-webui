@@ -353,6 +353,7 @@ from api.routes_handlers.workspace_extra import (
 from api.routes_handlers.skill import (
     _handle_skill_save as _handle_skill_save_impl,
     _handle_skill_delete,
+    _handle_profile_installed_skills,
     _community_skills_root,
     _community_skill_roots,
     _body_first_path,

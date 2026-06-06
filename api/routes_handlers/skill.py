@@ -3,6 +3,7 @@
 import logging
 import os
 import shutil
+import urllib.parse
 import uuid
 from pathlib import Path
 
@@ -10,6 +11,200 @@ from api.routes_handlers._base import _routes_binding
 
 
 logger = logging.getLogger(__name__)
+
+
+_PROFILE_INSTALLED_SKILL_EXCERPT_CHARS = 4000
+_PROFILE_INSTALLED_SKILL_TEXT_LIMIT = 280
+
+
+def _clean_profile_installed_skill_text(
+    value,
+    *,
+    limit: int = _PROFILE_INSTALLED_SKILL_TEXT_LIMIT,
+) -> str:
+    text = " ".join(str(value or "").replace("\r", "\n").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _split_skill_frontmatter(text: str) -> tuple[dict, str]:
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not normalized.startswith("---\n"):
+        return {}, normalized
+
+    lines = normalized.split("\n")
+    closing_index = None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            closing_index = index
+            break
+
+    if closing_index is None:
+        raise ValueError("missing frontmatter terminator")
+
+    frontmatter_text = "\n".join(lines[1:closing_index])
+    body = "\n".join(lines[closing_index + 1 :])
+    try:
+        import yaml as _yaml
+
+        metadata = _yaml.safe_load(frontmatter_text) or {}
+    except ImportError:
+        metadata = _parse_simple_skill_frontmatter(frontmatter_text)
+    except Exception as exc:
+        raise ValueError("invalid frontmatter") from exc
+
+    if not isinstance(metadata, dict):
+        raise ValueError("frontmatter must be an object")
+
+    return metadata, body
+
+
+def _parse_simple_skill_frontmatter(frontmatter_text: str) -> dict:
+    metadata = {}
+    for raw_line in str(frontmatter_text or "").splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        if raw_line[:1].isspace():
+            continue
+        if ":" not in raw_line:
+            raise ValueError("invalid frontmatter line")
+
+        key, value = raw_line.split(":", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("invalid frontmatter key")
+
+        value = value.strip()
+        if (value.startswith("[") and not value.endswith("]")) or (
+            value.startswith("{") and not value.endswith("}")
+        ):
+            raise ValueError("invalid frontmatter value")
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        metadata[key] = value
+    return metadata
+
+
+def _first_skill_body_summary(body: str) -> str:
+    for raw_line in str(body or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line == "---":
+            continue
+        return _clean_profile_installed_skill_text(line)
+    return ""
+
+
+def _read_profile_installed_skill(skill_dir: Path, skills_dir: Path) -> dict | None:
+    skill_name = skill_dir.name
+    if (
+        not skill_name
+        or skill_name in (".", "..")
+        or "/" in skill_name
+        or "\\" in skill_name
+        or ".." in skill_name
+    ):
+        return None
+    if not skill_dir.is_dir() or skill_dir.is_symlink():
+        return None
+
+    skill_file = skill_dir / "SKILL.md"
+    if not skill_file.is_file() or skill_file.is_symlink():
+        return None
+
+    try:
+        skill_dir.resolve().relative_to(skills_dir.resolve())
+        with skill_file.open("r", encoding="utf-8") as handle:
+            excerpt = handle.read(_PROFILE_INSTALLED_SKILL_EXCERPT_CHARS)
+        metadata, body = _split_skill_frontmatter(excerpt)
+    except (OSError, UnicodeError, ValueError):
+        logger.debug("Skipping unreadable or invalid profile skill: %s", skill_dir)
+        return None
+
+    name = _clean_profile_installed_skill_text(metadata.get("name")) or skill_name
+    title = (
+        _clean_profile_installed_skill_text(metadata.get("title"))
+        or _clean_profile_installed_skill_text(metadata.get("display_name"))
+        or name
+    )
+    description = _clean_profile_installed_skill_text(
+        metadata.get("description")
+    ) or _first_skill_body_summary(body)
+
+    return {
+        "id": skill_name,
+        "name": name,
+        "title": title,
+        "description": description,
+        "summary": description,
+        "path": skill_name,
+        "skill_file": f"{skill_name}/SKILL.md",
+    }
+
+
+def _handle_profile_installed_skills(handler, parsed):
+    query = urllib.parse.parse_qs(parsed.query or "")
+    profile = (query.get("profile") or [""])[0].strip()
+    if not profile:
+        return _routes_binding("j")(
+            handler,
+            {"error": "Missing profile", "code": "missing_profile"},
+            status=400,
+        )
+
+    from api.profiles import _PROFILE_ID_RE, get_hermes_home_for_profile
+    from api.user_provider import (
+        UserProviderAuthError,
+        current_user_id_from_handler,
+        verify_user_profile_access,
+    )
+
+    if not _PROFILE_ID_RE.fullmatch(profile):
+        return _routes_binding("j")(
+            handler,
+            {"error": "Invalid profile", "code": "invalid_profile"},
+            status=400,
+        )
+
+    try:
+        user_id = current_user_id_from_handler(handler)
+        verify_user_profile_access(user_id, profile)
+    except UserProviderAuthError as exc:
+        return _routes_binding("j")(
+            handler,
+            {"error": str(exc), "code": exc.code},
+            status=exc.status,
+        )
+
+    try:
+        profile_home = Path(get_hermes_home_for_profile(profile)).expanduser()
+        skills_dir = profile_home / "skills"
+        skills = []
+        if skills_dir.is_dir():
+            for skill_dir in sorted(
+                skills_dir.iterdir(),
+                key=lambda item: item.name.lower(),
+            ):
+                skill = _read_profile_installed_skill(skill_dir, skills_dir)
+                if skill:
+                    skills.append(skill)
+    except OSError as exc:
+        logger.exception("Failed to list profile installed skills")
+        return _routes_binding("bad")(
+            handler,
+            _routes_binding("_sanitize_error")(exc),
+            500,
+        )
+
+    return _routes_binding("j")(
+        handler,
+        {
+            "profile": profile,
+            "skills_path": str(skills_dir),
+            "skills": skills,
+            "count": len(skills),
+        },
+    )
 
 
 def _handle_skill_save(handler, body):
