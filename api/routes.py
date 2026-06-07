@@ -360,6 +360,8 @@ from api.routes_handlers.skill import (
     _coerce_hermes_home_path,
     _handle_skill_install_community,
     _handle_skill_uninstall_profile,
+    _handle_user_skill_import,
+    _handle_user_skill_import_cancel,
     _handle_user_skill_install_to_profile,
     _handle_user_skill_publish_from_profile,
     _handle_user_skill_update,

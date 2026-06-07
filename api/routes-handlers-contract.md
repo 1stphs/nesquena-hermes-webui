@@ -8,7 +8,7 @@
 {
   "contracts": [],
   "counts": {
-    "green": 89,
+    "green": 91,
     "red": 0,
     "yellow": 0
   },
@@ -495,6 +495,18 @@
       "status": "green"
     },
     {
+      "function": "_handle_user_skill_import",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
+      "function": "_handle_user_skill_import_cancel",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
       "function": "_handle_user_skill_install_to_profile",
       "location": "api/routes_handlers/skill.py",
       "reasons": [],
@@ -554,7 +566,7 @@
 
 ## Summary
 
-- green: 89
+- green: 91
 - yellow: 0
 - red: 0
 
@@ -642,6 +654,8 @@
 | green | `_handle_terminal_output` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_resize` | `api/routes_handlers/terminal.py` | no source-level contract detected |
 | green | `_handle_terminal_start` | `api/routes_handlers/terminal.py` | no source-level contract detected |
+| green | `_handle_user_skill_import` | `api/routes_handlers/skill.py` | no source-level contract detected |
+| green | `_handle_user_skill_import_cancel` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_install_to_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_publish_from_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_update` | `api/routes_handlers/skill.py` | no source-level contract detected |

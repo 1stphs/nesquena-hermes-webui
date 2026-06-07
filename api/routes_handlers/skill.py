@@ -1,15 +1,21 @@
 """Skill endpoint handlers re-exported by api.routes."""
 
+import io
 import logging
 import os
 import re
 import shutil
+import tarfile
 import urllib.parse
 import uuid
+import zipfile
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
+from api.config import MAX_UPLOAD_BYTES
 from api.routes_handlers._base import _routes_binding
+from api.upload import parse_multipart
 
 
 logger = logging.getLogger(__name__)
@@ -19,9 +25,21 @@ _PROFILE_INSTALLED_SKILL_EXCERPT_CHARS = 4000
 _PROFILE_INSTALLED_SKILL_TEXT_LIMIT = 280
 USER_SKILLS_ROOT = Path("/home/hermeswebui/.hermes/webui-mvp/users")
 _USER_MY_SKILLS_DIR_NAME = "my-skills"
+_USER_IMPORT_SKILLS_DIR_NAME = "import-skill"
 _USER_SKILL_NAME_MAX = 64
 _USER_SKILL_SLUG_MAX = 150
 _USER_SKILL_ENGLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+_USER_IMPORT_MAX_EXTRACTED_BYTES = 200 * 1024 * 1024
+_USER_IMPORT_ARCHIVE_SUFFIXES = (
+    ".zip",
+    ".tar",
+    ".tar.gz",
+    ".tgz",
+    ".tar.bz2",
+    ".tbz2",
+    ".tar.xz",
+    ".txz",
+)
 
 
 class _UserSkillError(ValueError):
@@ -173,6 +191,14 @@ def _user_my_skills_dir(user_id: str, *, create: bool = False) -> Path:
     return root
 
 
+def _user_import_skills_dir(user_id: str, *, create: bool = False) -> Path:
+    user_segment = _validate_user_skill_segment(user_id, "user_id", max_length=128)
+    root = _resolve_inside(USER_SKILLS_ROOT, user_segment, _USER_IMPORT_SKILLS_DIR_NAME)
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _assert_no_symlink_tree(source_dir: Path) -> None:
     if source_dir.is_symlink():
         raise _UserSkillError("Skill source cannot be a symlink", code="skill_source_symlink")
@@ -194,6 +220,251 @@ def _assert_no_symlink_tree(source_dir: Path) -> None:
 def _safe_skill_child_dir(root: Path, skill_slug: str) -> Path:
     slug = _validate_user_skill_segment(skill_slug, "skill_slug")
     return _resolve_inside(root, slug)
+
+
+def _create_import_skill_slug() -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"skill-{timestamp}-{uuid.uuid4().hex[:8]}"
+
+
+def _get_upload_source_type(filename: str) -> str:
+    lower_name = str(filename or "").lower()
+
+    if lower_name.endswith(".md"):
+        return "markdown"
+
+    if lower_name.endswith(_USER_IMPORT_ARCHIVE_SUFFIXES):
+        return "archive"
+
+    raise _UserSkillError(
+        "仅支持上传 .md 或 zip/tar 压缩包",
+        code="unsupported_skill_upload_type",
+    )
+
+
+def _validate_import_skill_metadata(content: str) -> tuple[dict, str]:
+    try:
+        metadata, _body = _split_skill_frontmatter(content)
+    except ValueError as exc:
+        raise _UserSkillError("Skill frontmatter 格式无效", code="invalid_skill_frontmatter") from exc
+
+    name = _clean_profile_installed_skill_text(metadata.get("name"))
+    description = _clean_profile_installed_skill_text(metadata.get("description"))
+
+    if not name:
+        raise _UserSkillError("SKILL.md 缺少 name", code="missing_skill_name")
+
+    if not description:
+        raise _UserSkillError("SKILL.md 缺少 description", code="missing_skill_description")
+
+    return metadata, description
+
+
+def _read_import_skill_file(skill_file: Path) -> tuple[dict, str, int]:
+    if not skill_file.is_file() or skill_file.is_symlink():
+        raise _UserSkillError("SKILL.md 不存在或不可读取", code="skill_file_not_found")
+
+    try:
+        content = skill_file.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise _UserSkillError("SKILL.md 必须是 UTF-8 文本", code="invalid_skill_encoding") from exc
+    except OSError as exc:
+        raise _UserSkillError(
+            "读取 SKILL.md 失败",
+            status=500,
+            code="skill_file_read_failed",
+        ) from exc
+
+    metadata, description = _validate_import_skill_metadata(content)
+    return metadata, description, len(content.encode("utf-8"))
+
+
+def _write_markdown_import(temp_dir: Path, file_bytes: bytes) -> tuple[dict, str, int]:
+    try:
+        content = file_bytes.decode("utf-8")
+    except UnicodeError as exc:
+        raise _UserSkillError("Skill markdown 必须是 UTF-8 文本", code="invalid_skill_encoding") from exc
+
+    metadata, description = _validate_import_skill_metadata(content)
+    skill_file = temp_dir / "SKILL.md"
+    skill_file.write_text(content, encoding="utf-8")
+    return metadata, description, len(file_bytes)
+
+
+def _assert_archive_member_path(root: Path, member_name: str) -> Path:
+    if "\x00" in member_name:
+        raise _UserSkillError("压缩包包含非法文件路径", code="invalid_archive_path")
+
+    target_path = (root / member_name).resolve(strict=False)
+    try:
+        target_path.relative_to(root.resolve(strict=False))
+    except ValueError as exc:
+        raise _UserSkillError("压缩包包含路径穿越文件", code="archive_path_traversal") from exc
+    return target_path
+
+
+def _extract_zip_import(file_bytes: bytes, temp_dir: Path) -> None:
+    total_extracted = 0
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+
+                target_path = _assert_archive_member_path(temp_dir, member.filename)
+                if member.external_attr >> 16 & 0o170000 == 0o120000:
+                    raise _UserSkillError("压缩包不能包含符号链接", code="archive_symlink")
+
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as source, target_path.open("wb") as destination:
+                    while True:
+                        chunk = source.read(65536)
+                        if not chunk:
+                            break
+                        total_extracted += len(chunk)
+                        if total_extracted > _USER_IMPORT_MAX_EXTRACTED_BYTES:
+                            raise _UserSkillError("压缩包解压后过大", code="archive_too_large")
+                        destination.write(chunk)
+    except zipfile.BadZipFile as exc:
+        raise _UserSkillError("压缩包格式无效", code="invalid_archive") from exc
+
+
+def _extract_tar_import(file_bytes: bytes, temp_dir: Path) -> None:
+    total_extracted = 0
+
+    try:
+        with tarfile.open(fileobj=io.BytesIO(file_bytes)) as archive:
+            for member in archive.getmembers():
+                if member.issym() or member.islnk():
+                    raise _UserSkillError("压缩包不能包含链接文件", code="archive_link")
+
+                if not member.isfile():
+                    continue
+
+                target_path = _assert_archive_member_path(temp_dir, member.name)
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                source = archive.extractfile(member)
+                if source is None:
+                    continue
+
+                with source, target_path.open("wb") as destination:
+                    while True:
+                        chunk = source.read(65536)
+                        if not chunk:
+                            break
+                        total_extracted += len(chunk)
+                        if total_extracted > _USER_IMPORT_MAX_EXTRACTED_BYTES:
+                            raise _UserSkillError("压缩包解压后过大", code="archive_too_large")
+                        destination.write(chunk)
+    except tarfile.TarError as exc:
+        raise _UserSkillError("压缩包格式无效", code="invalid_archive") from exc
+
+
+def _find_archive_skill_file(extract_dir: Path) -> Path:
+    skill_files = [
+        path
+        for path in extract_dir.rglob("*")
+        if path.is_file() and not path.is_symlink() and path.name.lower() == "skill.md"
+    ]
+
+    if not skill_files:
+        raise _UserSkillError("压缩包内缺少 SKILL.md", code="missing_skill_file")
+
+    if len(skill_files) > 1:
+        raise _UserSkillError("压缩包内包含多个 SKILL.md", code="multiple_skill_files")
+
+    return skill_files[0]
+
+
+def _write_archive_import(temp_dir: Path, file_bytes: bytes, filename: str) -> tuple[dict, str, int]:
+    extract_dir = temp_dir / ".extract"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    lower_name = filename.lower()
+
+    if lower_name.endswith(".zip"):
+        _extract_zip_import(file_bytes, extract_dir)
+    else:
+        _extract_tar_import(file_bytes, extract_dir)
+
+    source_skill_file = _find_archive_skill_file(extract_dir)
+    source_root = source_skill_file.parent
+    _assert_no_symlink_tree(source_root)
+    metadata, description, skill_file_bytes = _read_import_skill_file(source_skill_file)
+
+    for item in source_root.iterdir():
+        shutil.move(str(item), str(temp_dir / item.name))
+
+    shutil.rmtree(extract_dir, ignore_errors=True)
+    imported_skill_file = temp_dir / source_skill_file.name
+    if imported_skill_file.name != "SKILL.md":
+        imported_skill_file.rename(temp_dir / "SKILL.md")
+    return metadata, description, skill_file_bytes
+
+
+def _collect_import_tree_stats(root: Path) -> tuple[int, int]:
+    file_count = 0
+    size_bytes = 0
+
+    for item in root.rglob("*"):
+        if item.is_symlink():
+            raise _UserSkillError("Skill 不能包含符号链接", code="skill_source_symlink")
+        if item.is_file():
+            file_count += 1
+            size_bytes += item.stat().st_size
+
+    return file_count, size_bytes
+
+
+def _storage_path_for_import(user_id: str, skill_slug: str) -> str:
+    user_segment = _validate_user_skill_segment(user_id, "user_id", max_length=128)
+    slug = _validate_user_skill_segment(skill_slug, "skill_slug")
+    return f"{user_segment}/{_USER_IMPORT_SKILLS_DIR_NAME}/{slug}"
+
+
+def _validate_import_storage_path(user_id: str, storage_path: str, skill_slug: str = "") -> str:
+    normalized_path = str(storage_path or "").strip().replace("\\", "/")
+    user_segment = _validate_user_skill_segment(user_id, "user_id", max_length=128)
+    prefix = f"{user_segment}/{_USER_IMPORT_SKILLS_DIR_NAME}/"
+
+    if not normalized_path.startswith(prefix):
+        raise _UserSkillError("Invalid import storage path", code="invalid_storage_path")
+
+    slug = normalized_path.removeprefix(prefix).strip("/")
+    if "/" in slug:
+        raise _UserSkillError("Invalid import storage path", code="invalid_storage_path")
+
+    if skill_slug and slug != skill_slug:
+        raise _UserSkillError("Import path does not match skill", code="storage_path_mismatch")
+
+    return _validate_user_skill_segment(slug, "skill_slug")
+
+
+def _import_skill_payload(
+    *,
+    user_id: str,
+    skill_slug: str,
+    destination: Path,
+    source_filename: str,
+    source_type: str,
+    metadata: dict,
+    description: str,
+) -> dict:
+    file_count, size_bytes = _collect_import_tree_stats(destination)
+
+    return {
+        "ok": True,
+        "importId": skill_slug,
+        "skillSlug": skill_slug,
+        "name": _clean_profile_installed_skill_text(metadata.get("name")) or skill_slug,
+        "description": description,
+        "sourceFilename": source_filename,
+        "sourceType": source_type,
+        "storagePath": _storage_path_for_import(user_id, skill_slug),
+        "skillFilePath": "SKILL.md",
+        "fileCount": file_count,
+        "sizeBytes": size_bytes,
+    }
 
 
 @contextmanager
@@ -534,6 +805,132 @@ def _handle_user_skills_list(handler, parsed=None):
         {
             "skills": skills,
             "count": len(skills),
+        },
+    )
+
+
+def _handle_user_skill_import(handler):
+    destination = None
+    temp_dir = None
+
+    try:
+        content_type = handler.headers.get("Content-Type", "")
+        content_length = int(handler.headers.get("Content-Length", 0) or 0)
+        if content_length > MAX_UPLOAD_BYTES:
+            raise _UserSkillError("上传文件过大", status=413, code="upload_too_large")
+
+        _fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        if "file" not in files:
+            raise _UserSkillError("请选择要导入的 Skill 文件", code="missing_file")
+
+        filename, file_bytes = files["file"]
+        source_filename = Path(str(filename or "")).name
+        if not source_filename:
+            raise _UserSkillError("上传文件缺少文件名", code="missing_filename")
+
+        source_type = _get_upload_source_type(source_filename)
+        user_id = _get_current_user_id(handler)
+        import_dir = _user_import_skills_dir(user_id, create=True)
+        if import_dir.is_symlink():
+            raise _UserSkillError("Import directory cannot be a symlink", code="import_dir_symlink")
+        skill_slug = _create_import_skill_slug()
+        destination = _safe_skill_child_dir(import_dir, skill_slug)
+        temp_dir = _safe_skill_child_dir(import_dir, f".{skill_slug}.uploading")
+
+        if destination.exists() or temp_dir.exists():
+            raise _UserSkillError("Skill already exists", status=409, code="skill_conflict")
+
+        temp_dir.mkdir(parents=True)
+        if source_type == "markdown":
+            metadata, description, _skill_file_bytes = _write_markdown_import(temp_dir, file_bytes)
+        else:
+            metadata, description, _skill_file_bytes = _write_archive_import(
+                temp_dir,
+                file_bytes,
+                source_filename,
+            )
+
+        _assert_no_symlink_tree(temp_dir)
+        if not (temp_dir / "SKILL.md").is_file():
+            raise _UserSkillError("SKILL.md 不存在或不可读取", code="skill_file_not_found")
+
+        temp_dir.rename(destination)
+        temp_dir = None
+        payload = _import_skill_payload(
+            user_id=user_id,
+            skill_slug=skill_slug,
+            destination=destination,
+            source_filename=source_filename,
+            source_type=source_type,
+            metadata=metadata,
+            description=description,
+        )
+    except _UserSkillError as exc:
+        if temp_dir and temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if destination and destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        return _user_skill_error_response(handler, exc)
+    except ValueError as exc:
+        if temp_dir and temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if destination and destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        return _user_skill_error_response(
+            handler,
+            _UserSkillError(str(exc) or "导入请求格式无效", code="invalid_import_request"),
+        )
+    except OSError as exc:
+        logger.exception("Failed to import user skill")
+        if temp_dir and temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if destination and destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        return _routes_binding("j")(
+            handler,
+            {
+                "error": "导入 Skill 失败",
+                "code": "skill_import_failed",
+            },
+            status=500,
+        )
+
+    return _routes_binding("j")(handler, payload)
+
+
+def _handle_user_skill_import_cancel(handler, body):
+    try:
+        user_id = _get_current_user_id(handler)
+        skill_slug = str(body.get("skill_slug") or body.get("skillSlug") or body.get("importId") or "").strip()
+        storage_path = str(body.get("storage_path") or body.get("storagePath") or "").strip()
+
+        if storage_path:
+            skill_slug = _validate_import_storage_path(user_id, storage_path, skill_slug)
+        else:
+            skill_slug = _validate_user_skill_segment(skill_slug, "skill_slug")
+
+        import_dir = _user_import_skills_dir(user_id)
+        destination = _safe_skill_child_dir(import_dir, skill_slug)
+
+        if destination.exists():
+            if not destination.is_dir() or destination.is_symlink():
+                raise _UserSkillError("Invalid import destination", code="invalid_import_destination")
+            shutil.rmtree(destination)
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+    except OSError as exc:
+        logger.exception("Failed to cancel user skill import")
+        return _routes_binding("bad")(
+            handler,
+            _routes_binding("_sanitize_error")(exc),
+            500,
+        )
+
+    return _routes_binding("j")(
+        handler,
+        {
+            "ok": True,
+            "importId": skill_slug,
         },
     )
 

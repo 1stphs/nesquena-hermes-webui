@@ -1074,6 +1074,9 @@ def dispatch_post(handler, parsed) -> bool:
     if parsed.path == "/api/upload/extract":
         return handle_upload_extract(handler)
 
+    if parsed.path == "/api/user-skills/import":
+        return _handle_user_skill_import(handler)
+
     if parsed.path == "/api/transcribe":
         return handle_transcribe(handler)
 
@@ -1809,6 +1812,9 @@ def dispatch_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/user-skills/update":
         return _handle_user_skill_update(handler, body)
+
+    if parsed.path == "/api/user-skills/import/cancel":
+        return _handle_user_skill_import_cancel(handler, body)
 
     # ── Memory (POST) ──
     if parsed.path == "/api/memory/write":
