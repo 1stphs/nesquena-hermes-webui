@@ -8,7 +8,7 @@
 {
   "contracts": [],
   "counts": {
-    "green": 85,
+    "green": 89,
     "red": 0,
     "yellow": 0
   },
@@ -495,6 +495,30 @@
       "status": "green"
     },
     {
+      "function": "_handle_user_skill_install_to_profile",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
+      "function": "_handle_user_skill_publish_from_profile",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
+      "function": "_handle_user_skill_update",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
+      "function": "_handle_user_skills_list",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
       "function": "_handle_workspace_add",
       "location": "api/routes_handlers/workspace.py",
       "reasons": [],
@@ -530,7 +554,7 @@
 
 ## Summary
 
-- green: 85
+- green: 89
 - yellow: 0
 - red: 0
 
@@ -618,6 +642,10 @@
 | green | `_handle_terminal_output` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_resize` | `api/routes_handlers/terminal.py` | no source-level contract detected |
 | green | `_handle_terminal_start` | `api/routes_handlers/terminal.py` | no source-level contract detected |
+| green | `_handle_user_skill_install_to_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
+| green | `_handle_user_skill_publish_from_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
+| green | `_handle_user_skill_update` | `api/routes_handlers/skill.py` | no source-level contract detected |
+| green | `_handle_user_skills_list` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_workspace_add` | `api/routes_handlers/workspace.py` | no source-level contract detected |
 | green | `_handle_workspace_remove` | `api/routes_handlers/workspace.py` | no source-level contract detected |
 | green | `_handle_workspace_rename` | `api/routes_handlers/workspace.py` | no source-level contract detected |

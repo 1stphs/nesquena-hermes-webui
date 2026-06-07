@@ -360,6 +360,10 @@ from api.routes_handlers.skill import (
     _coerce_hermes_home_path,
     _handle_skill_install_community,
     _handle_skill_uninstall_profile,
+    _handle_user_skill_install_to_profile,
+    _handle_user_skill_publish_from_profile,
+    _handle_user_skill_update,
+    _handle_user_skills_list,
 )
 from api.routes_handlers.profile import (
     _PROFILE_AGENT_NAME_MAX,

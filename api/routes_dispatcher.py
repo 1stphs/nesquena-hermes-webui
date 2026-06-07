@@ -812,6 +812,9 @@ self.addEventListener('fetch', () => {});
     if parsed.path == "/api/profile/installed-skills":
         return _handle_profile_installed_skills(handler, parsed)
 
+    if parsed.path == "/api/user-skills":
+        return _handle_user_skills_list(handler, parsed)
+
     # ── Memory API (GET) ──
     if parsed.path == "/api/memory":
         return _handle_memory_read(handler)
@@ -1797,6 +1800,15 @@ def dispatch_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/skills/uninstall-profile":
         return _handle_skill_uninstall_profile(handler, body)
+
+    if parsed.path == "/api/user-skills/publish-from-profile":
+        return _handle_user_skill_publish_from_profile(handler, body)
+
+    if parsed.path == "/api/user-skills/install-to-profile":
+        return _handle_user_skill_install_to_profile(handler, body)
+
+    if parsed.path == "/api/user-skills/update":
+        return _handle_user_skill_update(handler, body)
 
     # ── Memory (POST) ──
     if parsed.path == "/api/memory/write":
