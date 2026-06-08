@@ -4,7 +4,7 @@ import re
 import sys
 import threading
 import time
-from datetime import date as _date, datetime as _datetime
+from datetime import date as _date, datetime as _datetime, timedelta as _timedelta
 
 
 logger = logging.getLogger(__name__)
@@ -147,6 +147,36 @@ def _parse_cron_calendar_month(value) -> tuple[str, int, int, int]:
     if month < 1 or month > 12:
         raise ValueError("month must be in yyyymm format")
     return raw, year, month, _calendar.monthrange(year, month)[1]
+
+
+def _parse_cron_calendar_date(value, field_name: str) -> _date:
+    raw = str(value or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        raise ValueError(f"{field_name} must be in yyyy-mm-dd format")
+    try:
+        return _date.fromisoformat(raw)
+    except ValueError:
+        raise ValueError(f"{field_name} must be in yyyy-mm-dd format") from None
+
+
+def _parse_cron_calendar_range(start_value, end_value, month_value) -> tuple[_date, _date, str | None]:
+    if start_value is not None or end_value is not None:
+        if start_value is None or end_value is None:
+            raise ValueError("start_date and end_date are required together")
+        start = _parse_cron_calendar_date(start_value, "start_date")
+        end = _parse_cron_calendar_date(end_value, "end_date")
+        if end < start:
+            raise ValueError("end_date must be on or after start_date")
+        return start, end, None
+
+    month_key, year, month, last_day = _parse_cron_calendar_month(month_value)
+    return _date(year, month, 1), _date(year, month, last_day), month_key
+
+
+def _next_month_start(day: _date) -> _date:
+    if day.month == 12:
+        return _date(day.year + 1, 1, 1)
+    return _date(day.year, day.month + 1, 1)
 
 
 def _cron_job_frequency(job: dict) -> str:
@@ -332,6 +362,30 @@ def _cron_calendar_days_for_job(job: dict, year: int, month: int, last_day: int)
         if "weekly" in text:
             return next_run_days
     return next_run_days or _all_days(last_day)
+
+
+def _cron_calendar_dates_for_job(job: dict, start: _date, end: _date) -> set[_date]:
+    dates: set[_date] = set()
+    cursor = _date(start.year, start.month, 1)
+    while cursor <= end:
+        last_day = _calendar.monthrange(cursor.year, cursor.month)[1]
+        for day in _cron_calendar_days_for_job(job, cursor.year, cursor.month, last_day):
+            if day < 1 or day > last_day:
+                continue
+            current = _date(cursor.year, cursor.month, day)
+            if start <= current <= end:
+                dates.add(current)
+        cursor = _next_month_start(cursor)
+    return dates
+
+
+def _cron_calendar_range_days(start: _date, end: _date) -> list[_date]:
+    days = []
+    cursor = start
+    while cursor <= end:
+        days.append(cursor)
+        cursor = cursor + _timedelta(days=1)
+    return days
 
 
 def _cron_calendar_entry(job: dict, profile: str) -> dict:

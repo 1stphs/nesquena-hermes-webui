@@ -213,3 +213,51 @@ def test_cron_calendar_days_for_job_keeps_legacy_schedule_cron_key():
     days = _cron_calendar_days_for_job(job, 2026, 6, 30)
 
     assert days == set(range(1, 31))
+
+
+def test_parse_cron_calendar_range_accepts_start_and_end_dates():
+    from datetime import date
+
+    from api.routes_helpers.cron import _parse_cron_calendar_range
+
+    start, end, month_key = _parse_cron_calendar_range("2026-05-30", "2026-06-02", None)
+
+    assert start == date(2026, 5, 30)
+    assert end == date(2026, 6, 2)
+    assert month_key is None
+
+
+def test_parse_cron_calendar_range_keeps_legacy_month():
+    from datetime import date
+
+    from api.routes_helpers.cron import _parse_cron_calendar_range
+
+    start, end, month_key = _parse_cron_calendar_range(None, None, "202606")
+
+    assert start == date(2026, 6, 1)
+    assert end == date(2026, 6, 30)
+    assert month_key == "202606"
+
+
+def test_cron_calendar_dates_for_job_filters_cross_month_range():
+    from datetime import date
+
+    from api.routes_helpers.cron import _cron_calendar_dates_for_job
+
+    job = {
+        "enabled": True,
+        "schedule": {
+            "kind": "cron",
+            "expr": "0 19 * * *",
+            "display": "0 19 * * *",
+        },
+    }
+
+    dates = _cron_calendar_dates_for_job(job, date(2026, 5, 30), date(2026, 6, 2))
+
+    assert dates == {
+        date(2026, 5, 30),
+        date(2026, 5, 31),
+        date(2026, 6, 1),
+        date(2026, 6, 2),
+    }

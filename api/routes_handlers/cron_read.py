@@ -147,7 +147,11 @@ def _handle_cron_calendar(handler, body):
     if not isinstance(raw_profiles, list):
         return _routes_binding("bad")(handler, "profile_names must be an array")
     try:
-        month_key, year, month, last_day = _routes_binding("_parse_cron_calendar_month")(body.get("month"))
+        start_date, end_date, month_key = _routes_binding("_parse_cron_calendar_range")(
+            body.get("start_date"),
+            body.get("end_date"),
+            body.get("month"),
+        )
     except ValueError as e:
         return _routes_binding("bad")(handler, str(e))
     if len(raw_profiles) > 100:
@@ -168,13 +172,14 @@ def _handle_cron_calendar(handler, body):
     from api.profiles import cron_profile_context_for_home
     from cron.jobs import list_jobs
 
+    calendar_days = _routes_binding("_cron_calendar_range_days")(start_date, end_date)
     buckets = {
-        day: {
-            "date": f"{year:04d}-{month:02d}-{day:02d}",
+        day.isoformat(): {
+            "date": day.isoformat(),
             "jobs": [],
             "count": 0,
         }
-        for day in range(1, last_day + 1)
+        for day in calendar_days
     }
     for profile in profiles:
         home = _routes_binding("_profile_home_for_cron_profile_name")(profile)
@@ -182,17 +187,22 @@ def _handle_cron_calendar(handler, body):
             jobs = _routes_binding("_cron_jobs_for_api")(list_jobs(include_disabled=True))
         for job in jobs:
             entry = _routes_binding("_cron_calendar_entry")(job, profile)
-            for day in sorted(_routes_binding("_cron_calendar_days_for_job")(job, year, month, last_day)):
-                if day not in buckets:
+            for scheduled_date in sorted(_routes_binding("_cron_calendar_dates_for_job")(job, start_date, end_date)):
+                key = scheduled_date.isoformat()
+                if key not in buckets:
                     continue
-                buckets[day]["jobs"].append(dict(entry))
-                buckets[day]["count"] += 1
+                buckets[key]["jobs"].append(dict(entry))
+                buckets[key]["count"] += 1
 
+    payload = {
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "profiles": profiles,
+        "days": [buckets[day.isoformat()] for day in calendar_days],
+    }
+    if month_key is not None:
+        payload["month"] = month_key
     return _routes_binding("j")(
         handler,
-        {
-            "month": month_key,
-            "profiles": profiles,
-            "days": [buckets[day] for day in range(1, last_day + 1)],
-        },
+        payload,
     )
