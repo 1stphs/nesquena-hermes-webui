@@ -31,6 +31,22 @@ _USER_SKILLS_COLLECTION_NAME = "hermes_user_skills"
 _USER_SKILL_NAME_MAX = 64
 _USER_SKILL_SLUG_MAX = 150
 _USER_SKILL_ENGLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+_USER_SKILL_STATUS_DRAFT = "draft"
+_USER_SKILL_STATUS_AVAILABILITY_TESTED = "availability_tested"
+_USER_SKILL_STATUS_SECURITY_TESTED = "security_tested"
+_USER_SKILL_STATUS_FULLY_TESTED = "fully_tested"
+_USER_SKILL_STATUS_LEGACY_ACTIVE = "active"
+_USER_SKILL_STATUS_VALUES = {
+    _USER_SKILL_STATUS_DRAFT,
+    _USER_SKILL_STATUS_AVAILABILITY_TESTED,
+    _USER_SKILL_STATUS_SECURITY_TESTED,
+    _USER_SKILL_STATUS_FULLY_TESTED,
+}
+_USER_SKILL_INSTALLABLE_STATUSES = {
+    _USER_SKILL_STATUS_AVAILABILITY_TESTED,
+    _USER_SKILL_STATUS_SECURITY_TESTED,
+    _USER_SKILL_STATUS_FULLY_TESTED,
+}
 _USER_IMPORT_MAX_EXTRACTED_BYTES = 200 * 1024 * 1024
 _USER_IMPORT_ARCHIVE_SUFFIXES = (
     ".zip",
@@ -177,6 +193,22 @@ def _validate_user_skill_name(value) -> str:
     if len(name) > _USER_SKILL_NAME_MAX:
         raise _UserSkillError("name is too long", code="invalid_name")
     return name
+
+
+def _normalize_user_skill_status(value) -> str:
+    status = str(value or "").strip()
+    if status == _USER_SKILL_STATUS_LEGACY_ACTIVE:
+        return _USER_SKILL_STATUS_FULLY_TESTED
+    if status in _USER_SKILL_STATUS_VALUES:
+        return status
+    return _USER_SKILL_STATUS_DRAFT
+
+
+def _validate_user_skill_status(value) -> str:
+    status = str(value or "").strip()
+    if status not in _USER_SKILL_STATUS_VALUES:
+        raise _UserSkillError("Invalid user skill status", code="invalid_status")
+    return status
 
 
 def _resolve_inside(root: Path, *parts: str) -> Path:
@@ -359,7 +391,7 @@ def _nocobase_user_skill_record_to_skill(record: dict) -> dict | None:
         ),
         "fileCount": int(record.get("file_count") or record.get("fileCount") or 0),
         "sizeBytes": int(record.get("size_bytes") or record.get("sizeBytes") or 0),
-        "status": _clean_profile_installed_skill_text(record.get("status")) or "active",
+        "status": _normalize_user_skill_status(record.get("status")),
         "createdAt": record.get("createdAt") or record.get("created_at") or "",
         "updatedAt": record.get("updatedAt") or record.get("updated_at") or "",
         "raw": record,
@@ -692,7 +724,7 @@ def _user_skill_record_body(
         "skill_file_path": "SKILL.md",
         "file_count": file_count,
         "size_bytes": size_bytes,
-        "status": "active",
+        "status": _USER_SKILL_STATUS_DRAFT,
     }
 
 
@@ -1266,6 +1298,15 @@ def _handle_user_skill_install_to_profile(handler, body):
         user_id = _get_current_user_id(handler)
         my_skills_dir = _user_my_skills_dir(user_id)
         source_dir = _safe_skill_child_dir(my_skills_dir, skill_slug)
+        record = _nocobase_get_user_skill_record(user_id, skill_slug)
+        skill_status = _normalize_user_skill_status(record.get("status") if record else "")
+
+        if skill_status not in _USER_SKILL_INSTALLABLE_STATUSES:
+            raise _UserSkillError(
+                "Skill must pass availability or security testing before installation",
+                code="user_skill_not_tested",
+            )
+
         profile_home = _get_owned_profile_home(handler, profile_name)
         target_skills_dir = profile_home / "skills"
         destination = _resolve_inside(target_skills_dir, skill_slug)
@@ -1303,11 +1344,18 @@ def _handle_user_skill_update(handler, body):
         skill_slug = _validate_user_skill_english_name(
             body.get("skill_slug") or body.get("skillSlug")
         )
+        user_id = _get_current_user_id(handler)
+
+        if "status" in body:
+            next_status = _validate_user_skill_status(body.get("status"))
+            record = _nocobase_update_user_skill_record(user_id, skill_slug, {"status": next_status})
+            payload = _user_skill_response_payload(record)
+            return _routes_binding("j")(handler, payload)
+
         english_name = _validate_user_skill_english_name(
             body.get("english_name") or body.get("englishName")
         )
         name = _validate_user_skill_name(body.get("name"))
-        user_id = _get_current_user_id(handler)
         my_skills_dir = _user_my_skills_dir(user_id)
         source_dir = _safe_skill_child_dir(my_skills_dir, skill_slug)
         destination = _resolve_inside(my_skills_dir, english_name)
@@ -1369,7 +1417,6 @@ def _handle_user_skill_update(handler, body):
             "skill_file_path": record_body["skill_file_path"],
             "file_count": record_body["file_count"],
             "size_bytes": record_body["size_bytes"],
-            "status": "active",
         }
         record = _nocobase_update_user_skill_record(user_id, skill_slug, update_patch)
         payload = _user_skill_response_payload(record)
