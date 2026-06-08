@@ -47,6 +47,7 @@ _USER_SKILL_INSTALLABLE_STATUSES = {
     _USER_SKILL_STATUS_SECURITY_TESTED,
     _USER_SKILL_STATUS_FULLY_TESTED,
 }
+_USER_SKILL_EDIT_MAX_BYTES = 2 * 1024 * 1024
 _USER_IMPORT_MAX_EXTRACTED_BYTES = 200 * 1024 * 1024
 _USER_IMPORT_ARCHIVE_SUFFIXES = (
     ".zip",
@@ -676,6 +677,184 @@ def _collect_import_tree_stats(root: Path) -> tuple[int, int]:
     return file_count, size_bytes
 
 
+def _normalize_user_skill_file_path(value) -> str:
+    relative_path = str(value or "").strip().replace("\\", "/")
+    if not relative_path:
+        raise _UserSkillError("path is required", code="missing_path")
+    if (
+        relative_path.startswith("/")
+        or relative_path in (".", "..")
+        or "/../" in f"/{relative_path}/"
+        or relative_path.startswith("../")
+        or relative_path.endswith("/..")
+        or "\x00" in relative_path
+    ):
+        raise _UserSkillError("Invalid file path", code="invalid_file_path")
+    normalized_parts = []
+    for part in relative_path.split("/"):
+        if not part or part in (".", ".."):
+            raise _UserSkillError("Invalid file path", code="invalid_file_path")
+        normalized_parts.append(part)
+    return "/".join(normalized_parts)
+
+
+def _get_owned_user_skill_dir(user_id: str, skill_slug: str) -> tuple[Path, Path, dict]:
+    slug = _validate_user_skill_english_name(skill_slug)
+    record = _nocobase_get_user_skill_record(user_id, slug)
+    if not record:
+        raise _UserSkillError("Skill record not found", status=404, code="skill_record_not_found")
+
+    my_skills_dir = _user_my_skills_dir(user_id)
+    if my_skills_dir.exists() and my_skills_dir.is_symlink():
+        raise _UserSkillError("My skills directory cannot be a symlink", code="my_skills_dir_symlink")
+
+    skill_dir = _safe_skill_child_dir(my_skills_dir, slug)
+    if not skill_dir.is_dir() or skill_dir.is_symlink():
+        raise _UserSkillError("Skill not found", status=404, code="skill_not_found")
+    _assert_no_symlink_tree(skill_dir)
+    return my_skills_dir, skill_dir, record
+
+
+def _resolve_user_skill_file(skill_dir: Path, relative_path: str) -> Path:
+    normalized_path = _normalize_user_skill_file_path(relative_path)
+    target = _resolve_inside(skill_dir, *normalized_path.split("/"))
+    if not target.exists():
+        raise _UserSkillError("File not found", status=404, code="skill_file_not_found")
+    if target.is_symlink():
+        raise _UserSkillError("Skill file cannot be a symlink", code="skill_file_symlink")
+    if not target.is_file():
+        raise _UserSkillError("Path must point to a file", code="skill_file_not_file")
+    return target
+
+
+def _relative_skill_path(skill_dir: Path, item: Path) -> str:
+    return item.relative_to(skill_dir).as_posix()
+
+
+def _build_user_skill_file_tree(skill_dir: Path) -> tuple[list[dict], list[dict], str]:
+    files: list[dict] = []
+
+    def build_node(path: Path) -> dict:
+        children = []
+        for child in sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower(), item.name)):
+            if child.is_symlink():
+                raise _UserSkillError("Skill source cannot contain symlinks", code="skill_source_symlink")
+            if child.is_dir():
+                children.append(build_node(child))
+                continue
+            if child.is_file():
+                try:
+                    size_bytes = child.stat().st_size
+                except OSError as exc:
+                    raise _UserSkillError(
+                        "Failed to inspect skill file",
+                        status=500,
+                        code="skill_file_inspect_failed",
+                    ) from exc
+                relative_path = _relative_skill_path(skill_dir, child)
+                file_node = {
+                    "type": "file",
+                    "name": child.name,
+                    "path": relative_path,
+                    "sizeBytes": size_bytes,
+                    "editable": size_bytes <= _USER_SKILL_EDIT_MAX_BYTES,
+                }
+                files.append(file_node)
+                children.append(file_node)
+        return {
+            "type": "directory",
+            "name": path.name,
+            "path": "" if path == skill_dir else _relative_skill_path(skill_dir, path),
+            "children": children,
+        }
+
+    root_node = build_node(skill_dir)
+    files.sort(key=lambda file: str(file.get("path") or "").lower())
+    selected_path = ""
+    editable_files = [file for file in files if file.get("editable")]
+    skill_file = next((file for file in editable_files if file.get("path") == "SKILL.md"), None)
+    if skill_file:
+        selected_path = "SKILL.md"
+    elif editable_files:
+        selected_path = str(editable_files[0].get("path") or "")
+    return root_node["children"], files, selected_path
+
+
+def _read_user_skill_text_file(target: Path) -> str:
+    try:
+        size_bytes = target.stat().st_size
+    except OSError as exc:
+        raise _UserSkillError(
+            "Failed to inspect skill file",
+            status=500,
+            code="skill_file_inspect_failed",
+        ) from exc
+    if size_bytes > _USER_SKILL_EDIT_MAX_BYTES:
+        raise _UserSkillError(
+            "该文件过大，暂不支持在线编辑",
+            status=413,
+            code="skill_file_too_large",
+        )
+    try:
+        return target.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise _UserSkillError(
+            "该文件类型暂不支持编辑",
+            code="unsupported_skill_file_text",
+        ) from exc
+    except OSError as exc:
+        raise _UserSkillError(
+            "读取 Skill 文件失败",
+            status=500,
+            code="skill_file_read_failed",
+        ) from exc
+
+
+def _validate_user_skill_text_content(content) -> str:
+    text = str(content if content is not None else "")
+    if len(text.encode("utf-8")) > _USER_SKILL_EDIT_MAX_BYTES:
+        raise _UserSkillError(
+            "该文件过大，暂不支持在线编辑",
+            status=413,
+            code="skill_file_too_large",
+        )
+    return text
+
+
+def _build_user_skill_file_update_patch(
+    *,
+    user_id: str,
+    skill_slug: str,
+    skill_dir: Path,
+    relative_path: str,
+    existing_record: dict,
+) -> dict:
+    file_count, size_bytes = _collect_import_tree_stats(skill_dir)
+    patch = {
+        "status": _USER_SKILL_STATUS_DRAFT,
+        "file_count": file_count,
+        "size_bytes": size_bytes,
+    }
+
+    if relative_path == "SKILL.md":
+        metadata, description = _read_user_skill_record_metadata(skill_dir)
+        patch.update(
+            {
+                "name": _clean_profile_installed_skill_text(metadata.get("name")) or skill_slug,
+                "description": description,
+                "skill_file_path": "SKILL.md",
+            }
+        )
+    else:
+        existing_skill_file_path = _clean_profile_installed_skill_text(
+            existing_record.get("skill_file_path") or existing_record.get("skillFilePath") or "SKILL.md"
+        )
+        patch["skill_file_path"] = existing_skill_file_path or "SKILL.md"
+
+    patch["storage_path"] = _storage_path_for_user_skill(user_id, skill_slug)
+    return patch
+
+
 def _validate_user_skill_storage_path(user_id: str, storage_path: str, skill_slug: str = "") -> str:
     normalized_path = str(storage_path or "").strip().replace("\\", "/")
     user_segment = _validate_user_skill_segment(user_id, "user_id", max_length=128)
@@ -1090,6 +1269,80 @@ def _handle_user_skills_list(handler, parsed=None):
     )
 
 
+def _handle_user_skill_files_list(handler, parsed):
+    try:
+        query = urllib.parse.parse_qs(parsed.query or "")
+        skill_slug = _validate_user_skill_english_name(
+            (query.get("skill_slug") or query.get("skillSlug") or [""])[0]
+        )
+        user_id = _get_current_user_id(handler)
+        my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
+        tree, files, selected_path = _build_user_skill_file_tree(skill_dir)
+        skill = _nocobase_user_skill_record_to_skill(record)
+        if not skill:
+            raise _UserSkillError(
+                "User skill record is unreadable",
+                status=500,
+                code="user_skill_record_unreadable",
+            )
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+    except OSError as exc:
+        logger.exception("Failed to list user skill files")
+        return _routes_binding("bad")(
+            handler,
+            _routes_binding("_sanitize_error")(exc),
+            500,
+        )
+
+    return _routes_binding("j")(
+        handler,
+        {
+            "ok": True,
+            "skillSlug": skill_slug,
+            "skillRoot": str(skill_dir.relative_to(my_skills_dir)),
+            "tree": tree,
+            "files": files,
+            "selectedPath": selected_path,
+            "skill": skill,
+        },
+    )
+
+
+def _handle_user_skill_file_read(handler, parsed):
+    try:
+        query = urllib.parse.parse_qs(parsed.query or "")
+        skill_slug = _validate_user_skill_english_name(
+            (query.get("skill_slug") or query.get("skillSlug") or [""])[0]
+        )
+        relative_path = _normalize_user_skill_file_path((query.get("path") or [""])[0])
+        user_id = _get_current_user_id(handler)
+        _my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
+        target = _resolve_user_skill_file(skill_dir, relative_path)
+        content = _read_user_skill_text_file(target)
+        skill = _nocobase_user_skill_record_to_skill(record)
+        if not skill:
+            raise _UserSkillError(
+                "User skill record is unreadable",
+                status=500,
+                code="user_skill_record_unreadable",
+            )
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+
+    return _routes_binding("j")(
+        handler,
+        {
+            "ok": True,
+            "skillSlug": skill_slug,
+            "path": relative_path,
+            "content": content,
+            "sizeBytes": target.stat().st_size,
+            "skill": skill,
+        },
+    )
+
+
 def _handle_user_skill_import(handler):
     destination = None
     temp_dir = None
@@ -1331,6 +1584,75 @@ def _handle_user_skill_install_to_profile(handler, body):
             "ok": True,
             "profile": profile_name,
             "skill": skill,
+        },
+    )
+
+
+def _handle_user_skill_file_update(handler, body):
+    target = None
+    original_content = None
+    try:
+        skill_slug = _validate_user_skill_english_name(
+            body.get("skill_slug") or body.get("skillSlug")
+        )
+        relative_path = _normalize_user_skill_file_path(body.get("path"))
+        next_content = _validate_user_skill_text_content(body.get("content"))
+        user_id = _get_current_user_id(handler)
+        _my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
+        target = _resolve_user_skill_file(skill_dir, relative_path)
+        original_content = _read_user_skill_text_file(target)
+
+        if relative_path == "SKILL.md":
+            _validate_import_skill_metadata(next_content)
+
+        temp_file = target.with_name(f".{target.name}.tmp-{uuid.uuid4().hex}")
+        try:
+            temp_file.write_text(next_content, encoding="utf-8")
+            temp_file.replace(target)
+        finally:
+            try:
+                if temp_file.exists():
+                    temp_file.unlink()
+            except OSError:
+                pass
+
+        update_patch = _build_user_skill_file_update_patch(
+            user_id=user_id,
+            skill_slug=skill_slug,
+            skill_dir=skill_dir,
+            relative_path=relative_path,
+            existing_record=record,
+        )
+        updated_record = _nocobase_update_user_skill_record(user_id, skill_slug, update_patch)
+        payload = _user_skill_response_payload(updated_record)
+    except _UserSkillError as exc:
+        if isinstance(exc, _NocobaseSkillError) and target and original_content is not None:
+            try:
+                target.write_text(original_content, encoding="utf-8")
+            except OSError:
+                return _user_skill_error_response(
+                    handler,
+                    _UserSkillError(
+                        "Skill file was updated but NoCoBase sync failed and rollback failed",
+                        status=500,
+                        code="user_skill_file_update_partially_failed",
+                    ),
+                )
+        return _user_skill_error_response(handler, exc)
+    except OSError as exc:
+        logger.exception("Failed to update user skill file")
+        return _routes_binding("bad")(
+            handler,
+            _routes_binding("_sanitize_error")(exc),
+            500,
+        )
+
+    return _routes_binding("j")(
+        handler,
+        {
+            **payload,
+            "path": relative_path,
+            "skillSlug": skill_slug,
         },
     )
 
