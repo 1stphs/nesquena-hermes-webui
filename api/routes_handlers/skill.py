@@ -1,16 +1,18 @@
 """Skill endpoint handlers re-exported by api.routes."""
 
 import io
+import json
 import logging
 import os
 import re
 import shutil
 import tarfile
 import urllib.parse
+import urllib.error
+import urllib.request
 import uuid
 import zipfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 from api.config import MAX_UPLOAD_BYTES
@@ -25,7 +27,7 @@ _PROFILE_INSTALLED_SKILL_EXCERPT_CHARS = 4000
 _PROFILE_INSTALLED_SKILL_TEXT_LIMIT = 280
 USER_SKILLS_ROOT = Path("/home/hermeswebui/.hermes/webui-mvp/users")
 _USER_MY_SKILLS_DIR_NAME = "my-skills"
-_USER_IMPORT_SKILLS_DIR_NAME = "import-skill"
+_USER_SKILLS_COLLECTION_NAME = "hermes_user_skills"
 _USER_SKILL_NAME_MAX = 64
 _USER_SKILL_SLUG_MAX = 150
 _USER_SKILL_ENGLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
@@ -47,6 +49,10 @@ class _UserSkillError(ValueError):
         super().__init__(message)
         self.status = status
         self.code = code
+
+
+class _NocobaseSkillError(_UserSkillError):
+    pass
 
 
 def _clean_profile_installed_skill_text(
@@ -191,12 +197,239 @@ def _user_my_skills_dir(user_id: str, *, create: bool = False) -> Path:
     return root
 
 
-def _user_import_skills_dir(user_id: str, *, create: bool = False) -> Path:
+def _storage_path_for_user_skill(user_id: str, skill_slug: str) -> str:
     user_segment = _validate_user_skill_segment(user_id, "user_id", max_length=128)
-    root = _resolve_inside(USER_SKILLS_ROOT, user_segment, _USER_IMPORT_SKILLS_DIR_NAME)
-    if create:
-        root.mkdir(parents=True, exist_ok=True)
-    return root
+    slug = _validate_user_skill_english_name(skill_slug)
+    return f"{user_segment}/{_USER_MY_SKILLS_DIR_NAME}/{slug}"
+
+
+def _normalize_nocobase_api_base_url() -> str:
+    raw_api_base_url = os.getenv("NOCOBASE_API_BASE_URL", "").strip()
+    if raw_api_base_url:
+        return raw_api_base_url.rstrip("/")
+
+    raw_base_url = (
+        os.getenv("HERMES_USER_PROVIDER_NOCOBASE_BASE_URL")
+        or os.getenv("FOXUAI_NOCOBASE_BASE_URL")
+        or os.getenv("NOCOBASE_BASE_URL")
+        or "https://www.foxuai.com"
+    ).strip()
+    if not raw_base_url:
+        raise _NocobaseSkillError(
+            "NoCoBase API base URL is not configured",
+            status=500,
+            code="nocobase_not_configured",
+        )
+    base_url = raw_base_url.rstrip("/")
+    if base_url.endswith("/api"):
+        return base_url
+    return f"{base_url}/api"
+
+
+def _nocobase_authorization_header() -> str:
+    raw_authorization = (
+        os.getenv("NOCOBASE_AUTHORIZATION")
+        or os.getenv("HERMES_USER_PROVIDER_NOCOBASE_AUTHORIZATION")
+        or os.getenv("FOXUAI_NOCOBASE_AUTHORIZATION")
+        or ""
+    ).strip()
+    if not raw_authorization:
+        raise _NocobaseSkillError(
+            "NoCoBase authorization is not configured",
+            status=500,
+            code="nocobase_not_configured",
+        )
+    if raw_authorization.lower().startswith("bearer "):
+        return raw_authorization
+    return f"Bearer {raw_authorization}"
+
+
+def _nocobase_headers(*, has_body: bool = False) -> dict:
+    headers = {
+        "Accept": "application/json",
+        "Authorization": _nocobase_authorization_header(),
+        "X-Hostname": os.getenv("NOCOBASE_HOSTNAME", "www.foxuai.com").strip() or "www.foxuai.com",
+        "X-Authenticator": os.getenv("NOCOBASE_AUTHENTICATOR", "basic").strip() or "basic",
+    }
+    if has_body:
+        headers["Content-Type"] = "application/json"
+    return headers
+
+
+def _nocobase_request(path: str, *, method: str = "GET", body: dict | None = None) -> dict:
+    normalized_path = "/" + str(path or "").lstrip("/")
+    url = f"{_normalize_nocobase_api_base_url()}{normalized_path}"
+    data = None
+    if body is not None:
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+
+    request = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers=_nocobase_headers(has_body=body is not None),
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310
+            raw_text = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        try:
+            error_body = exc.read().decode("utf-8")
+            error_payload = json.loads(error_body) if error_body else {}
+        except Exception:
+            error_payload = {}
+        message = (
+            error_payload.get("message")
+            or "; ".join(str(item.get("message")) for item in error_payload.get("errors", []) if isinstance(item, dict))
+            or f"NoCoBase request failed with status {exc.code}"
+        )
+        raise _NocobaseSkillError(
+            message,
+            status=502,
+            code="nocobase_request_failed",
+        ) from exc
+    except (OSError, TimeoutError) as exc:
+        raise _NocobaseSkillError(
+            "NoCoBase request failed",
+            status=502,
+            code="nocobase_request_failed",
+        ) from exc
+
+    if not raw_text:
+        return {}
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise _NocobaseSkillError(
+            "NoCoBase returned invalid JSON",
+            status=502,
+            code="nocobase_invalid_response",
+        ) from exc
+    if isinstance(payload, dict) and payload.get("errors"):
+        errors = payload.get("errors") or []
+        message = "; ".join(str(item.get("message")) for item in errors if isinstance(item, dict))
+        raise _NocobaseSkillError(
+            message or "NoCoBase request failed",
+            status=502,
+            code="nocobase_request_failed",
+        )
+    return payload if isinstance(payload, dict) else {"data": payload}
+
+
+def _nocobase_user_skill_record_to_skill(record: dict) -> dict | None:
+    if not isinstance(record, dict):
+        return None
+    skill_slug = _clean_profile_installed_skill_text(
+        record.get("skill_slug") or record.get("skillSlug") or record.get("englishName")
+    )
+    if not skill_slug:
+        return None
+    name = _clean_profile_installed_skill_text(record.get("name")) or skill_slug
+    description = _clean_profile_installed_skill_text(record.get("description"))
+    source = _clean_profile_installed_skill_text(record.get("source")) or "user"
+    return {
+        "recordId": str(record.get("id") or ""),
+        "id": skill_slug,
+        "englishName": skill_slug,
+        "title": skill_slug,
+        "name": name,
+        "title_cn": name,
+        "summary": description,
+        "description": description,
+        "path": skill_slug,
+        "skill_file": f"{skill_slug}/SKILL.md",
+        "source": source,
+        "sourceFilename": _clean_profile_installed_skill_text(
+            record.get("source_filename") or record.get("sourceFilename")
+        ),
+        "sourceType": _clean_profile_installed_skill_text(
+            record.get("source_type") or record.get("sourceType")
+        ),
+        "sourceProfileName": _clean_profile_installed_skill_text(
+            record.get("source_profile_name") or record.get("sourceProfileName")
+        ),
+        "sourceSkillSlug": _clean_profile_installed_skill_text(
+            record.get("source_skill_slug") or record.get("sourceSkillSlug")
+        ),
+        "storagePath": _clean_profile_installed_skill_text(
+            record.get("storage_path") or record.get("storagePath")
+        ),
+        "skillFilePath": _clean_profile_installed_skill_text(
+            record.get("skill_file_path") or record.get("skillFilePath") or "SKILL.md"
+        ),
+        "fileCount": int(record.get("file_count") or record.get("fileCount") or 0),
+        "sizeBytes": int(record.get("size_bytes") or record.get("sizeBytes") or 0),
+        "status": _clean_profile_installed_skill_text(record.get("status")) or "active",
+        "createdAt": record.get("createdAt") or record.get("created_at") or "",
+        "updatedAt": record.get("updatedAt") or record.get("updated_at") or "",
+        "raw": record,
+    }
+
+
+def _nocobase_list_user_skill_records(user_id: str, *, skill_slug: str = "") -> list[dict]:
+    params = [
+        ("paginate", "false"),
+        ("filter[user_id]", user_id),
+        ("sort", "-createdAt"),
+    ]
+    normalized_skill_slug = str(skill_slug or "").strip()
+    if normalized_skill_slug:
+        params.append(("filter[skill_slug]", normalized_skill_slug))
+    query = urllib.parse.urlencode(params)
+    payload = _nocobase_request(f"/{_USER_SKILLS_COLLECTION_NAME}:list?{query}")
+    records = payload.get("data")
+    return records if isinstance(records, list) else []
+
+
+def _nocobase_get_user_skill_record(user_id: str, skill_slug: str) -> dict | None:
+    records = _nocobase_list_user_skill_records(user_id, skill_slug=skill_slug)
+    return records[0] if records else None
+
+
+def _nocobase_create_user_skill_record(record: dict) -> dict:
+    user_id = str(record.get("user_id") or "").strip()
+    skill_slug = str(record.get("skill_slug") or "").strip()
+    if _nocobase_get_user_skill_record(user_id, skill_slug):
+        raise _NocobaseSkillError("Skill already exists", status=409, code="skill_conflict")
+    payload = _nocobase_request(
+        f"/{_USER_SKILLS_COLLECTION_NAME}:create",
+        method="POST",
+        body=record,
+    )
+    data = payload.get("data")
+    if isinstance(data, list):
+        created = data[0] if data else {}
+    elif isinstance(data, dict):
+        created = data
+    else:
+        created = payload
+    return created if isinstance(created, dict) and created else record
+
+
+def _nocobase_update_user_skill_record(user_id: str, original_skill_slug: str, patch: dict) -> dict:
+    record = _nocobase_get_user_skill_record(user_id, original_skill_slug)
+    if not record:
+        raise _NocobaseSkillError("Skill record not found", status=404, code="skill_record_not_found")
+    record_id = str(record.get("id") or "").strip()
+    if not record_id:
+        raise _NocobaseSkillError("Skill record missing id", status=502, code="skill_record_invalid")
+    params = urllib.parse.urlencode([
+        ("filterByTk", record_id),
+        ("filter[user_id]", user_id),
+    ])
+    payload = _nocobase_request(
+        f"/{_USER_SKILLS_COLLECTION_NAME}:update?{params}",
+        method="POST",
+        body=patch,
+    )
+    data = payload.get("data")
+    if isinstance(data, list):
+        updated = data[0] if data else {}
+    elif isinstance(data, dict):
+        updated = data
+    else:
+        updated = payload
+    return updated if isinstance(updated, dict) and updated else {**record, **patch}
 
 
 def _assert_no_symlink_tree(source_dir: Path) -> None:
@@ -220,11 +453,6 @@ def _assert_no_symlink_tree(source_dir: Path) -> None:
 def _safe_skill_child_dir(root: Path, skill_slug: str) -> Path:
     slug = _validate_user_skill_segment(skill_slug, "skill_slug")
     return _resolve_inside(root, slug)
-
-
-def _create_import_skill_slug() -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    return f"skill-{timestamp}-{uuid.uuid4().hex[:8]}"
 
 
 def _get_upload_source_type(filename: str) -> str:
@@ -416,55 +644,80 @@ def _collect_import_tree_stats(root: Path) -> tuple[int, int]:
     return file_count, size_bytes
 
 
-def _storage_path_for_import(user_id: str, skill_slug: str) -> str:
-    user_segment = _validate_user_skill_segment(user_id, "user_id", max_length=128)
-    slug = _validate_user_skill_segment(skill_slug, "skill_slug")
-    return f"{user_segment}/{_USER_IMPORT_SKILLS_DIR_NAME}/{slug}"
-
-
-def _validate_import_storage_path(user_id: str, storage_path: str, skill_slug: str = "") -> str:
+def _validate_user_skill_storage_path(user_id: str, storage_path: str, skill_slug: str = "") -> str:
     normalized_path = str(storage_path or "").strip().replace("\\", "/")
     user_segment = _validate_user_skill_segment(user_id, "user_id", max_length=128)
-    prefix = f"{user_segment}/{_USER_IMPORT_SKILLS_DIR_NAME}/"
+    prefix = f"{user_segment}/{_USER_MY_SKILLS_DIR_NAME}/"
 
     if not normalized_path.startswith(prefix):
-        raise _UserSkillError("Invalid import storage path", code="invalid_storage_path")
+        raise _UserSkillError("Invalid user skill storage path", code="invalid_storage_path")
 
     slug = normalized_path.removeprefix(prefix).strip("/")
     if "/" in slug:
-        raise _UserSkillError("Invalid import storage path", code="invalid_storage_path")
+        raise _UserSkillError("Invalid user skill storage path", code="invalid_storage_path")
 
     if skill_slug and slug != skill_slug:
-        raise _UserSkillError("Import path does not match skill", code="storage_path_mismatch")
+        raise _UserSkillError("Storage path does not match skill", code="storage_path_mismatch")
 
-    return _validate_user_skill_segment(slug, "skill_slug")
+    return _validate_user_skill_english_name(slug)
 
 
-def _import_skill_payload(
+def _user_skill_record_body(
     *,
     user_id: str,
     skill_slug: str,
     destination: Path,
-    source_filename: str,
+    source: str,
+    source_filename: str = "",
     source_type: str,
+    source_profile_name: str = "",
+    source_skill_slug: str = "",
     metadata: dict,
     description: str,
 ) -> dict:
     file_count, size_bytes = _collect_import_tree_stats(destination)
+    name = _clean_profile_installed_skill_text(metadata.get("name")) or skill_slug
 
     return {
-        "ok": True,
-        "importId": skill_slug,
-        "skillSlug": skill_slug,
-        "name": _clean_profile_installed_skill_text(metadata.get("name")) or skill_slug,
+        "user_id": user_id,
+        "skill_slug": skill_slug,
+        "name": name,
         "description": description,
-        "sourceFilename": source_filename,
-        "sourceType": source_type,
-        "storagePath": _storage_path_for_import(user_id, skill_slug),
-        "skillFilePath": "SKILL.md",
-        "fileCount": file_count,
-        "sizeBytes": size_bytes,
+        "source": source,
+        "source_filename": source_filename,
+        "source_type": source_type,
+        "source_profile_name": source_profile_name,
+        "source_skill_slug": source_skill_slug,
+        "storage_path": _storage_path_for_user_skill(user_id, skill_slug),
+        "skill_file_path": "SKILL.md",
+        "file_count": file_count,
+        "size_bytes": size_bytes,
+        "status": "active",
     }
+
+
+def _user_skill_response_payload(record: dict) -> dict:
+    skill = _nocobase_user_skill_record_to_skill(record)
+    if not skill:
+        raise _UserSkillError(
+            "User skill record is unreadable",
+            status=500,
+            code="user_skill_record_unreadable",
+        )
+    return {
+        "ok": True,
+        "skill": skill,
+        "skillSlug": skill["englishName"],
+        "storagePath": skill.get("storagePath", ""),
+        "skillFilePath": skill.get("skillFilePath", "SKILL.md"),
+        "fileCount": skill.get("fileCount", 0),
+        "sizeBytes": skill.get("sizeBytes", 0),
+    }
+
+
+def _read_user_skill_record_metadata(skill_dir: Path) -> tuple[dict, str]:
+    metadata, description, _skill_file_bytes = _read_import_skill_file(skill_dir / "SKILL.md")
+    return metadata, description
 
 
 @contextmanager
@@ -780,16 +1033,12 @@ def _handle_profile_installed_skills(handler, parsed):
 def _handle_user_skills_list(handler, parsed=None):
     try:
         user_id = _get_current_user_id(handler)
-        my_skills_dir = _user_my_skills_dir(user_id)
-        skills = []
-        if my_skills_dir.is_dir():
-            for skill_dir in sorted(
-                my_skills_dir.iterdir(),
-                key=lambda item: item.name.lower(),
-            ):
-                skill = _read_user_skill(skill_dir, my_skills_dir)
-                if skill:
-                    skills.append(skill)
+        records = _nocobase_list_user_skill_records(user_id)
+        skills = [
+            skill
+            for skill in (_nocobase_user_skill_record_to_skill(record) for record in records)
+            if skill
+        ]
     except _UserSkillError as exc:
         return _user_skill_error_response(handler, exc)
     except OSError as exc:
@@ -819,7 +1068,7 @@ def _handle_user_skill_import(handler):
         if content_length > MAX_UPLOAD_BYTES:
             raise _UserSkillError("上传文件过大", status=413, code="upload_too_large")
 
-        _fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        fields, files = parse_multipart(handler.rfile, content_type, content_length)
         if "file" not in files:
             raise _UserSkillError("请选择要导入的 Skill 文件", code="missing_file")
 
@@ -830,12 +1079,14 @@ def _handle_user_skill_import(handler):
 
         source_type = _get_upload_source_type(source_filename)
         user_id = _get_current_user_id(handler)
-        import_dir = _user_import_skills_dir(user_id, create=True)
-        if import_dir.is_symlink():
-            raise _UserSkillError("Import directory cannot be a symlink", code="import_dir_symlink")
-        skill_slug = _create_import_skill_slug()
-        destination = _safe_skill_child_dir(import_dir, skill_slug)
-        temp_dir = _safe_skill_child_dir(import_dir, f".{skill_slug}.uploading")
+        skill_slug = _validate_user_skill_english_name(
+            fields.get("english_name") or fields.get("englishName") or fields.get("skill_slug") or fields.get("skillSlug")
+        )
+        my_skills_dir = _user_my_skills_dir(user_id, create=True)
+        if my_skills_dir.is_symlink():
+            raise _UserSkillError("My skills directory cannot be a symlink", code="my_skills_dir_symlink")
+        destination = _safe_skill_child_dir(my_skills_dir, skill_slug)
+        temp_dir = _safe_skill_child_dir(my_skills_dir, f".{skill_slug}.uploading")
 
         if destination.exists() or temp_dir.exists():
             raise _UserSkillError("Skill already exists", status=409, code="skill_conflict")
@@ -856,15 +1107,23 @@ def _handle_user_skill_import(handler):
 
         temp_dir.rename(destination)
         temp_dir = None
-        payload = _import_skill_payload(
+        record_body = _user_skill_record_body(
             user_id=user_id,
             skill_slug=skill_slug,
             destination=destination,
+            source="imported",
             source_filename=source_filename,
             source_type=source_type,
             metadata=metadata,
             description=description,
         )
+        try:
+            record = _nocobase_create_user_skill_record(record_body)
+        except _UserSkillError:
+            if destination and destination.exists():
+                shutil.rmtree(destination, ignore_errors=True)
+            raise
+        payload = _user_skill_response_payload(record)
     except _UserSkillError as exc:
         if temp_dir and temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -905,16 +1164,16 @@ def _handle_user_skill_import_cancel(handler, body):
         storage_path = str(body.get("storage_path") or body.get("storagePath") or "").strip()
 
         if storage_path:
-            skill_slug = _validate_import_storage_path(user_id, storage_path, skill_slug)
+            skill_slug = _validate_user_skill_storage_path(user_id, storage_path, skill_slug)
         else:
-            skill_slug = _validate_user_skill_segment(skill_slug, "skill_slug")
+            skill_slug = _validate_user_skill_english_name(skill_slug)
 
-        import_dir = _user_import_skills_dir(user_id)
-        destination = _safe_skill_child_dir(import_dir, skill_slug)
+        my_skills_dir = _user_my_skills_dir(user_id)
+        destination = _safe_skill_child_dir(my_skills_dir, skill_slug)
 
         if destination.exists():
             if not destination.is_dir() or destination.is_symlink():
-                raise _UserSkillError("Invalid import destination", code="invalid_import_destination")
+                raise _UserSkillError("Invalid user skill destination", code="invalid_user_skill_destination")
             shutil.rmtree(destination)
     except _UserSkillError as exc:
         return _user_skill_error_response(handler, exc)
@@ -970,16 +1229,32 @@ def _handle_user_skill_publish_from_profile(handler, body):
                 status=500,
                 code="published_skill_unreadable",
             )
+        metadata, description = _read_user_skill_record_metadata(destination)
+        record_body = _user_skill_record_body(
+            user_id=user_id,
+            skill_slug=english_name,
+            destination=destination,
+            source="profile",
+            source_type="profile",
+            source_profile_name=profile_name,
+            source_skill_slug=skill_slug,
+            metadata=metadata,
+            description=description,
+        )
+        try:
+            record = _nocobase_create_user_skill_record(record_body)
+        except _UserSkillError:
+            try:
+                if destination.exists():
+                    shutil.rmtree(destination)
+            except OSError:
+                pass
+            raise
+        payload = _user_skill_response_payload(record)
     except _UserSkillError as exc:
         return _user_skill_error_response(handler, exc)
 
-    return _routes_binding("j")(
-        handler,
-        {
-            "ok": True,
-            "skill": skill,
-        },
-    )
+    return _routes_binding("j")(handler, payload)
 
 
 def _handle_user_skill_install_to_profile(handler, body):
@@ -1020,6 +1295,10 @@ def _handle_user_skill_install_to_profile(handler, body):
 
 
 def _handle_user_skill_update(handler, body):
+    source_dir = None
+    destination = None
+    original_content = None
+    did_rename = False
     try:
         skill_slug = _validate_user_skill_english_name(
             body.get("skill_slug") or body.get("skillSlug")
@@ -1036,6 +1315,7 @@ def _handle_user_skill_update(handler, body):
         if not source_dir.is_dir() or not (source_dir / "SKILL.md").is_file():
             raise _UserSkillError("Skill not found", status=404, code="skill_not_found")
         _assert_no_symlink_tree(source_dir)
+        original_content = (source_dir / "SKILL.md").read_text(encoding="utf-8")
 
         if source_dir == destination:
             _update_skill_frontmatter_name(source_dir / "SKILL.md", name)
@@ -1052,6 +1332,7 @@ def _handle_user_skill_update(handler, body):
                         status=500,
                         code="skill_rename_failed",
                     ) from exc
+                did_rename = True
                 try:
                     _update_skill_frontmatter_name(destination / "SKILL.md", name)
                 except _UserSkillError:
@@ -1070,7 +1351,44 @@ def _handle_user_skill_update(handler, body):
                 status=500,
                 code="updated_skill_unreadable",
             )
+        metadata, description = _read_user_skill_record_metadata(updated_dir)
+        record_body = _user_skill_record_body(
+            user_id=user_id,
+            skill_slug=english_name,
+            destination=updated_dir,
+            source="",
+            source_type="",
+            metadata=metadata,
+            description=description,
+        )
+        update_patch = {
+            "skill_slug": record_body["skill_slug"],
+            "name": record_body["name"],
+            "description": record_body["description"],
+            "storage_path": record_body["storage_path"],
+            "skill_file_path": record_body["skill_file_path"],
+            "file_count": record_body["file_count"],
+            "size_bytes": record_body["size_bytes"],
+            "status": "active",
+        }
+        record = _nocobase_update_user_skill_record(user_id, skill_slug, update_patch)
+        payload = _user_skill_response_payload(record)
     except _UserSkillError as exc:
+        if isinstance(exc, _NocobaseSkillError):
+            try:
+                if did_rename and destination and destination.exists() and source_dir and not source_dir.exists():
+                    destination.rename(source_dir)
+                if original_content is not None and source_dir:
+                    (source_dir / "SKILL.md").write_text(original_content, encoding="utf-8")
+            except OSError:
+                return _user_skill_error_response(
+                    handler,
+                    _UserSkillError(
+                        "Skill file was updated but NoCoBase sync failed and rollback failed",
+                        status=500,
+                        code="user_skill_update_partially_failed",
+                    ),
+                )
         return _user_skill_error_response(handler, exc)
     except OSError as exc:
         logger.exception("Failed to update user skill")
@@ -1080,13 +1398,7 @@ def _handle_user_skill_update(handler, body):
             500,
         )
 
-    return _routes_binding("j")(
-        handler,
-        {
-            "ok": True,
-            "skill": skill,
-        },
-    )
+    return _routes_binding("j")(handler, payload)
 
 
 def _handle_skill_save(handler, body):

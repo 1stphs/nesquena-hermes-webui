@@ -1,3 +1,5 @@
+import io
+import zipfile
 from types import SimpleNamespace
 
 import pytest
@@ -65,25 +67,113 @@ description: 原始简介
     )
 
 
+def _skill_markdown(name="邮箱助手", description="处理邮件草稿"):
+    return f"""---
+name: {name}
+description: {description}
+---
+
+# {name}
+"""
+
+
+def _make_user_skill_record(
+    *,
+    user_id="user-1",
+    skill_slug="mail-assistant",
+    name="邮箱助手",
+    description="处理邮件草稿",
+    source="profile",
+    source_filename="",
+    source_type="profile",
+    source_profile_name="default_367959913725953",
+    source_skill_slug="email-assistant",
+    record_id="record-1",
+):
+    return {
+        "id": record_id,
+        "user_id": user_id,
+        "skill_slug": skill_slug,
+        "name": name,
+        "description": description,
+        "source": source,
+        "source_filename": source_filename,
+        "source_type": source_type,
+        "source_profile_name": source_profile_name,
+        "source_skill_slug": source_skill_slug,
+        "storage_path": f"{user_id}/my-skills/{skill_slug}",
+        "skill_file_path": "SKILL.md",
+        "file_count": 1,
+        "size_bytes": 128,
+        "status": "active",
+    }
+
+
+@pytest.fixture(autouse=True)
+def nocobase_user_skills(monkeypatch):
+    import api.routes_handlers.skill as skill_handler
+
+    state = SimpleNamespace(records=[], create_calls=[], update_calls=[])
+
+    def fake_list_records(user_id, *, skill_slug=""):
+        return [
+            record
+            for record in state.records
+            if record.get("user_id") == user_id
+            and (not skill_slug or record.get("skill_slug") == skill_slug)
+        ]
+
+    def fake_create_record(record):
+        state.create_calls.append(record.copy())
+        created = {
+            **record,
+            "id": f"record-{len(state.records) + 1}",
+        }
+        state.records.insert(0, created)
+        return created
+
+    def fake_update_record(user_id, original_skill_slug, patch):
+        state.update_calls.append(
+            {
+                "user_id": user_id,
+                "original_skill_slug": original_skill_slug,
+                "patch": patch.copy(),
+            }
+        )
+        for index, record in enumerate(state.records):
+            if record.get("user_id") == user_id and record.get("skill_slug") == original_skill_slug:
+                updated = {**record, **patch}
+                state.records[index] = updated
+                return updated
+        raise skill_handler._NocobaseSkillError(
+            "Skill record not found",
+            status=404,
+            code="skill_record_not_found",
+        )
+
+    monkeypatch.setattr(skill_handler, "_nocobase_list_user_skill_records", fake_list_records)
+    monkeypatch.setattr(skill_handler, "_nocobase_create_user_skill_record", fake_create_record)
+    monkeypatch.setattr(skill_handler, "_nocobase_update_user_skill_record", fake_update_record)
+    return state
+
+
 def _response(responses):
     assert responses
     return responses[-1]
 
 
-def test_user_skills_list_reads_frontmatter_name_and_summary(tmp_path, monkeypatch):
+def test_user_skills_list_reads_nocobase_records(tmp_path, monkeypatch, nocobase_user_skills):
     import api.routes_handlers.skill as skill_handler
 
     user_root = tmp_path / "users"
-    my_skills_dir = user_root / "user-1" / "my-skills"
-    _write_skill(
-        my_skills_dir / "mail-assistant",
-        """---
-name: 邮箱助手
-description: 处理邮件草稿
----
-
-# 邮箱助手
-""",
+    nocobase_user_skills.records.append(
+        _make_user_skill_record(
+            source="imported",
+            source_filename="mail.md",
+            source_type="markdown",
+            source_profile_name="",
+            source_skill_slug="",
+        )
     )
     responses = []
 
@@ -94,29 +184,226 @@ description: 处理邮件草稿
     result = skill_handler._handle_user_skills_list(object(), SimpleNamespace(query=""))
 
     assert result is True
-    assert _response(responses) == (
-        200,
-        {
-            "skills": [
-                {
-                    "id": "mail-assistant",
-                    "englishName": "mail-assistant",
-                    "title": "mail-assistant",
-                    "name": "邮箱助手",
-                    "title_cn": "邮箱助手",
-                    "summary": "处理邮件草稿",
-                    "description": "处理邮件草稿",
-                    "path": "mail-assistant",
-                    "skill_file": "mail-assistant/SKILL.md",
-                    "source": "user",
-                }
-            ],
-            "count": 1,
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["count"] == 1
+    assert payload["skills"][0]["englishName"] == "mail-assistant"
+    assert payload["skills"][0]["name"] == "邮箱助手"
+    assert payload["skills"][0]["summary"] == "处理邮件草稿"
+    assert payload["skills"][0]["source"] == "imported"
+    assert payload["skills"][0]["sourceFilename"] == "mail.md"
+    assert payload["skills"][0]["storagePath"] == "user-1/my-skills/mail-assistant"
+
+
+def test_import_markdown_writes_my_skills_and_creates_nocobase_record(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    responses = []
+    handler = SimpleNamespace(
+        headers={
+            "Content-Type": "multipart/form-data",
+            "Content-Length": "100",
         },
+        rfile=io.BytesIO(b""),
     )
 
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    monkeypatch.setattr(
+        skill_handler,
+        "parse_multipart",
+        lambda _rfile, _content_type, _content_length: (
+            {"english_name": "mail-assistant"},
+            {"file": ("mail.md", _skill_markdown().encode("utf-8"))},
+        ),
+    )
 
-def test_publish_from_profile_copies_skill_and_updates_name(tmp_path, monkeypatch):
+    result = skill_handler._handle_user_skill_import(handler)
+
+    destination = user_root / "user-1" / "my-skills" / "mail-assistant"
+    assert result is True
+    assert destination.is_dir()
+    assert (destination / "SKILL.md").is_file()
+    assert len(nocobase_user_skills.create_calls) == 1
+    assert nocobase_user_skills.create_calls[0]["source"] == "imported"
+    assert nocobase_user_skills.create_calls[0]["source_filename"] == "mail.md"
+    assert nocobase_user_skills.create_calls[0]["source_type"] == "markdown"
+    assert nocobase_user_skills.create_calls[0]["storage_path"] == "user-1/my-skills/mail-assistant"
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["skill"]["englishName"] == "mail-assistant"
+    assert payload["skill"]["source"] == "imported"
+
+
+def test_import_archive_writes_my_skills_and_creates_nocobase_record(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as archive:
+        archive.writestr("bundle/SKILL.md", _skill_markdown())
+        archive.writestr("bundle/assets/readme.txt", "asset")
+
+    user_root = tmp_path / "users"
+    responses = []
+    handler = SimpleNamespace(
+        headers={
+            "Content-Type": "multipart/form-data",
+            "Content-Length": "200",
+        },
+        rfile=io.BytesIO(b""),
+    )
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    monkeypatch.setattr(
+        skill_handler,
+        "parse_multipart",
+        lambda _rfile, _content_type, _content_length: (
+            {"skill_slug": "mail-assistant"},
+            {"file": ("mail.zip", archive_bytes.getvalue())},
+        ),
+    )
+
+    result = skill_handler._handle_user_skill_import(handler)
+
+    destination = user_root / "user-1" / "my-skills" / "mail-assistant"
+    assert result is True
+    assert destination.is_dir()
+    assert (destination / "SKILL.md").is_file()
+    assert (destination / "assets" / "readme.txt").is_file()
+    assert len(nocobase_user_skills.create_calls) == 1
+    assert nocobase_user_skills.create_calls[0]["source_type"] == "archive"
+    assert _response(responses)[0] == 200
+
+
+def test_import_rejects_missing_english_name(tmp_path, monkeypatch, nocobase_user_skills):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    responses = []
+    handler = SimpleNamespace(
+        headers={
+            "Content-Type": "multipart/form-data",
+            "Content-Length": "100",
+        },
+        rfile=io.BytesIO(b""),
+    )
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    monkeypatch.setattr(
+        skill_handler,
+        "parse_multipart",
+        lambda _rfile, _content_type, _content_length: (
+            {},
+            {"file": ("mail.md", _skill_markdown().encode("utf-8"))},
+        ),
+    )
+
+    result = skill_handler._handle_user_skill_import(handler)
+
+    assert result is True
+    assert not (user_root / "user-1" / "my-skills").exists()
+    assert not nocobase_user_skills.create_calls
+    assert _response(responses)[0] == 400
+    assert _response(responses)[1]["code"] == "missing_english_name"
+
+
+def test_import_rejects_invalid_english_name(tmp_path, monkeypatch, nocobase_user_skills):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    responses = []
+    handler = SimpleNamespace(
+        headers={
+            "Content-Type": "multipart/form-data",
+            "Content-Length": "100",
+        },
+        rfile=io.BytesIO(b""),
+    )
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    monkeypatch.setattr(
+        skill_handler,
+        "parse_multipart",
+        lambda _rfile, _content_type, _content_length: (
+            {"english_name": "../mail"},
+            {"file": ("mail.md", _skill_markdown().encode("utf-8"))},
+        ),
+    )
+
+    result = skill_handler._handle_user_skill_import(handler)
+
+    assert result is True
+    assert not (user_root / "user-1" / "my-skills").exists()
+    assert not nocobase_user_skills.create_calls
+    assert _response(responses)[0] == 400
+    assert _response(responses)[1]["code"] == "invalid_english_name"
+
+
+def test_import_cleans_up_files_when_nocobase_create_fails(tmp_path, monkeypatch):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    responses = []
+    handler = SimpleNamespace(
+        headers={
+            "Content-Type": "multipart/form-data",
+            "Content-Length": "100",
+        },
+        rfile=io.BytesIO(b""),
+    )
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    monkeypatch.setattr(
+        skill_handler,
+        "parse_multipart",
+        lambda _rfile, _content_type, _content_length: (
+            {"english_name": "mail-assistant"},
+            {"file": ("mail.md", _skill_markdown().encode("utf-8"))},
+        ),
+    )
+    monkeypatch.setattr(
+        skill_handler,
+        "_nocobase_create_user_skill_record",
+        lambda _record: (_ for _ in ()).throw(
+            skill_handler._NocobaseSkillError(
+                "NoCoBase create failed",
+                status=502,
+                code="nocobase_request_failed",
+            )
+        ),
+    )
+
+    result = skill_handler._handle_user_skill_import(handler)
+
+    assert result is True
+    assert not (user_root / "user-1" / "my-skills" / "mail-assistant").exists()
+    assert _response(responses)[0] == 502
+    assert _response(responses)[1]["code"] == "nocobase_request_failed"
+
+
+def test_publish_from_profile_copies_skill_updates_name_and_creates_nocobase_record(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
     import api.routes_handlers.skill as skill_handler
 
     profile_name = "default_367959913725953"
@@ -145,11 +432,20 @@ def test_publish_from_profile_copies_skill_and_updates_name(tmp_path, monkeypatc
     assert calls == [("user-1", profile_name)]
     assert destination.is_dir()
     assert "name: 邮箱助手" in (destination / "SKILL.md").read_text(encoding="utf-8")
+    assert len(nocobase_user_skills.create_calls) == 1
+    assert nocobase_user_skills.create_calls[0]["user_id"] == "user-1"
+    assert nocobase_user_skills.create_calls[0]["skill_slug"] == "mail-assistant"
+    assert nocobase_user_skills.create_calls[0]["source"] == "profile"
+    assert nocobase_user_skills.create_calls[0]["source_type"] == "profile"
+    assert nocobase_user_skills.create_calls[0]["source_profile_name"] == profile_name
+    assert nocobase_user_skills.create_calls[0]["source_skill_slug"] == "email-assistant"
+    assert nocobase_user_skills.create_calls[0]["storage_path"] == "user-1/my-skills/mail-assistant"
     status, payload = _response(responses)
     assert status == 200
     assert payload["ok"] is True
     assert payload["skill"]["englishName"] == "mail-assistant"
     assert payload["skill"]["name"] == "邮箱助手"
+    assert payload["skill"]["source"] == "profile"
 
 
 def test_publish_from_profile_rejects_existing_english_name(tmp_path, monkeypatch):
@@ -211,7 +507,51 @@ def test_publish_from_profile_rejects_destination_lock(tmp_path, monkeypatch):
     assert _response(responses)[1]["code"] == "skill_conflict"
 
 
-def test_install_user_skill_to_profile_copies_without_nocobase_binding(tmp_path, monkeypatch):
+def test_publish_from_profile_cleans_up_when_nocobase_create_fails(tmp_path, monkeypatch):
+    import api.routes_handlers.skill as skill_handler
+
+    profile_name = "default_367959913725953"
+    profile_home = tmp_path / "profiles" / profile_name
+    user_root = tmp_path / "users"
+    _write_skill(profile_home / "skills" / "email-assistant")
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=profile_home)
+    monkeypatch.setattr(
+        skill_handler,
+        "_nocobase_create_user_skill_record",
+        lambda _record: (_ for _ in ()).throw(
+            skill_handler._NocobaseSkillError(
+                "NoCoBase create failed",
+                status=502,
+                code="nocobase_request_failed",
+            )
+        ),
+    )
+
+    result = skill_handler._handle_user_skill_publish_from_profile(
+        object(),
+        {
+            "profile_name": profile_name,
+            "skill_slug": "email-assistant",
+            "english_name": "mail-assistant",
+            "name": "邮箱助手",
+        },
+    )
+
+    assert result is True
+    assert not (user_root / "user-1" / "my-skills" / "mail-assistant").exists()
+    assert _response(responses)[0] == 502
+    assert _response(responses)[1]["code"] == "nocobase_request_failed"
+
+
+def test_install_user_skill_to_profile_copies_without_nocobase_binding(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
     import api.routes_handlers.skill as skill_handler
 
     profile_name = "target_367959913725953"
@@ -238,6 +578,8 @@ def test_install_user_skill_to_profile_copies_without_nocobase_binding(tmp_path,
     assert _response(responses)[0] == 200
     assert _response(responses)[1]["profile"] == profile_name
     assert _response(responses)[1]["skill"]["id"] == "mail-assistant"
+    assert not nocobase_user_skills.create_calls
+    assert not nocobase_user_skills.update_calls
 
 
 def test_install_user_skill_to_profile_rejects_same_folder_name(tmp_path, monkeypatch):
@@ -295,12 +637,17 @@ def test_install_user_skill_to_profile_rejects_destination_lock(tmp_path, monkey
     assert _response(responses)[1]["code"] == "skill_conflict"
 
 
-def test_update_user_skill_renames_folder_and_updates_name(tmp_path, monkeypatch):
+def test_update_user_skill_renames_folder_updates_name_and_updates_nocobase(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
     import api.routes_handlers.skill as skill_handler
 
     user_root = tmp_path / "users"
     source = user_root / "user-1" / "my-skills" / "mail-assistant"
     _write_skill(source)
+    nocobase_user_skills.records.append(_make_user_skill_record())
     responses = []
 
     _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
@@ -321,8 +668,91 @@ def test_update_user_skill_renames_folder_and_updates_name(tmp_path, monkeypatch
     assert not source.exists()
     assert destination.is_dir()
     assert "name: 新邮箱助手" in (destination / "SKILL.md").read_text(encoding="utf-8")
+    assert len(nocobase_user_skills.update_calls) == 1
+    update_call = nocobase_user_skills.update_calls[0]
+    assert update_call["user_id"] == "user-1"
+    assert update_call["original_skill_slug"] == "mail-assistant"
+    assert update_call["patch"]["skill_slug"] == "new-mail-assistant"
+    assert update_call["patch"]["name"] == "新邮箱助手"
+    assert update_call["patch"]["storage_path"] == "user-1/my-skills/new-mail-assistant"
     assert _response(responses)[0] == 200
     assert _response(responses)[1]["skill"]["englishName"] == "new-mail-assistant"
+
+
+def test_update_user_skill_same_slug_updates_frontmatter_and_nocobase(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    source = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(source)
+    nocobase_user_skills.records.append(_make_user_skill_record())
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_update(
+        object(),
+        {
+            "skill_slug": "mail-assistant",
+            "english_name": "mail-assistant",
+            "name": "新邮箱助手",
+        },
+    )
+
+    assert result is True
+    assert source.is_dir()
+    assert "name: 新邮箱助手" in (source / "SKILL.md").read_text(encoding="utf-8")
+    assert len(nocobase_user_skills.update_calls) == 1
+    assert nocobase_user_skills.update_calls[0]["patch"]["skill_slug"] == "mail-assistant"
+    assert nocobase_user_skills.update_calls[0]["patch"]["name"] == "新邮箱助手"
+    assert _response(responses)[0] == 200
+
+
+def test_update_user_skill_rolls_back_files_when_nocobase_update_fails(tmp_path, monkeypatch):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    source = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(source)
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    monkeypatch.setattr(
+        skill_handler,
+        "_nocobase_update_user_skill_record",
+        lambda _user_id, _original_skill_slug, _patch: (_ for _ in ()).throw(
+            skill_handler._NocobaseSkillError(
+                "NoCoBase update failed",
+                status=502,
+                code="nocobase_request_failed",
+            )
+        ),
+    )
+
+    result = skill_handler._handle_user_skill_update(
+        object(),
+        {
+            "skill_slug": "mail-assistant",
+            "english_name": "new-mail-assistant",
+            "name": "新邮箱助手",
+        },
+    )
+
+    destination = user_root / "user-1" / "my-skills" / "new-mail-assistant"
+    assert result is True
+    assert source.is_dir()
+    assert not destination.exists()
+    assert "name: 原始助手" in (source / "SKILL.md").read_text(encoding="utf-8")
+    assert _response(responses)[0] == 502
+    assert _response(responses)[1]["code"] == "nocobase_request_failed"
 
 
 def test_update_user_skill_rejects_english_name_conflict(tmp_path, monkeypatch):

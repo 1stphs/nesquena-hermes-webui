@@ -38,3 +38,6 @@ services:
       HERMES_TALENT_MARKET_DIR: "/var/www/hermes_skills_hub/hermes_talent_market"
       HERMES_WEBUI_PASSWORD: "foxu_ai_is_best"
       HERMES_WEBUI_CORS_ALLOW_ALL: "1"
+      NOCOBASE_API_BASE_URL: "${NOCOBASE_API_BASE_URL:-https://www.foxuai.com/api}"
+      NOCOBASE_HOSTNAME: "${NOCOBASE_HOSTNAME:-www.foxuai.com}"
+      NOCOBASE_AUTHENTICATOR: "${NOCOBASE_AUTHENTICATOR:-basic}"
