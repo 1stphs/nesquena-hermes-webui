@@ -9,7 +9,7 @@ ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
 ARG APT_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
 ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG UV_VERSION=0.11.16
-ARG NODE_MAJOR=20
+ARG NODE_MAJOR=24
 
 # Make use of apt-cacher-ng if available
 RUN set -eux; \

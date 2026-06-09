@@ -865,6 +865,7 @@ def test_user_skill_security_test_passes_and_promotes_status(
     assert update_call["patch"]["status"] == "fully_tested"
     assert update_call["patch"]["security_test_result"]["status"] == "passed"
     assert update_call["patch"]["security_test_result"]["issues"] == []
+    assert update_call["patch"]["security_test_result"]["checkedFilePaths"] == ["SKILL.md"]
     assert update_call["patch"]["security_tested_at"]
     status, payload = _response(responses)
     assert status == 200
@@ -941,6 +942,7 @@ def test_user_skill_security_test_records_unsupported_files_as_skipped(
     update_call = nocobase_user_skills.update_calls[-1]
     scan_result = update_call["patch"]["security_test_result"]
     assert scan_result["status"] == "passed"
+    assert scan_result["checkedFilePaths"] == ["SKILL.md"]
     assert scan_result["skippedFiles"] == [{"path": "asset.png", "reason": "unsupported_type"}]
     status, payload = _response(responses)
     assert status == 200
@@ -1270,6 +1272,24 @@ def test_user_skill_availability_result_redacts_secret_snippets():
     assert "sk-[REDACTED]" in case["outputSnippet"]
 
 
+def test_build_promptfoo_config_uses_real_newlines():
+    import api.routes_handlers.skill as skill_handler
+
+    config = skill_handler._build_promptfoo_config(
+        "Skill content",
+        {
+            "base_url": "https://api.example.com",
+            "api_mode": "chat_completions",
+            "model_name": "test-model",
+            "api_key": "secret-token",
+        },
+    )
+
+    prompt = config["prompts"][0]
+    assert "\n\nSkill 说明：\n" in prompt
+    assert "\\n" not in prompt
+
+
 def test_run_promptfoo_eval_rejects_missing_cli(tmp_path, monkeypatch):
     import api.routes_handlers.skill as skill_handler
 
@@ -1283,6 +1303,40 @@ def test_run_promptfoo_eval_rejects_missing_cli(tmp_path, monkeypatch):
         )
 
     assert exc_info.value.code == "promptfoo_not_installed"
+
+
+def test_run_promptfoo_eval_missing_output_returns_clean_diagnostic(tmp_path, monkeypatch):
+    import subprocess
+
+    import api.routes_handlers.skill as skill_handler
+
+    stderr = """\x1b[33mWarning: Node.js 20 has reached end-of-life and is deprecated in promptfoo.\x1b[0m
+Detected: v20.20.2
+Recommended: Node.js >=22.22.0
+(node:485) ExperimentalWarning: DecompressInterceptor is experimental and subject to change
+Failed to validate configuration: There are no prompts in "bad"
+"""
+
+    def fake_run(command, *, cwd, **_kwargs):
+        assert cwd == str(tmp_path / "task")
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=stderr)
+
+    monkeypatch.setattr(skill_handler.shutil, "which", lambda _name: "/usr/local/bin/promptfoo")
+    monkeypatch.setattr(skill_handler.subprocess, "run", fake_run)
+
+    with pytest.raises(skill_handler._UserSkillError) as exc_info:
+        skill_handler._run_promptfoo_eval(
+            tmp_path / "task",
+            {"prompts": ["bad"], "providers": ["echo"], "tests": []},
+            {"api_key": "secret-token"},
+        )
+
+    message = str(exc_info.value)
+    assert exc_info.value.code == "promptfoo_output_missing"
+    assert "exit 1" in message
+    assert "Failed to validate configuration" in message
+    assert "Node.js 20 has reached end-of-life" not in message
+    assert "\x1b" not in message
 
 
 def test_run_promptfoo_eval_rejects_invalid_json_output(tmp_path, monkeypatch):

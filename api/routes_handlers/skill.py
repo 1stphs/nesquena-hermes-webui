@@ -107,6 +107,7 @@ _USER_SKILL_TEST_RESULT_FIELDS = {
     "availability_tested_at",
 }
 _USER_SKILL_TEST_FIELD_CACHE: set[str] = set()
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _USER_SKILL_SECURITY_RULES = (
     {
         "ruleId": "prompt-injection-override",
@@ -373,6 +374,30 @@ def _redact_skill_test_text(value: str) -> str:
     return text
 
 
+def _clean_skill_test_diagnostic(value: str, *, limit: int = 1200) -> str:
+    text = _ANSI_ESCAPE_RE.sub("", _redact_skill_test_text(value))
+    lines = []
+    skip_node_warning = False
+    for raw_line in text.replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "Warning: Node.js 20 has reached end-of-life" in line:
+            skip_node_warning = True
+            continue
+        if skip_node_warning:
+            if line.startswith("(node:") or line.startswith("Failed to "):
+                skip_node_warning = False
+            else:
+                continue
+        if "ExperimentalWarning: DecompressInterceptor is experimental" in line:
+            continue
+        if "Use `node --trace-warnings" in line:
+            continue
+        lines.append(line)
+    return _clean_profile_installed_skill_text(" ".join(lines), limit=limit)
+
+
 def _skill_test_snippet(line: str) -> str:
     snippet = " ".join(_redact_skill_test_text(line).split())
     if len(snippet) <= _USER_SKILL_SNIPPET_LIMIT:
@@ -423,6 +448,7 @@ def _iter_user_skill_security_scan_files(skill_dir: Path) -> tuple[list[Path], l
 def _scan_user_skill_security(skill_dir: Path) -> dict:
     scan_files, skipped_files = _iter_user_skill_security_scan_files(skill_dir)
     issues: list[dict] = []
+    checked_file_paths: list[str] = []
     checked_files = 0
 
     for path in scan_files:
@@ -437,6 +463,7 @@ def _scan_user_skill_security(skill_dir: Path) -> dict:
             continue
 
         checked_files += 1
+        checked_file_paths.append(relative_path)
         for line_number, line in enumerate(text.splitlines(), start=1):
             for rule in _USER_SKILL_SECURITY_RULES:
                 if any(re.search(pattern, line) for pattern in rule["patterns"]):
@@ -467,6 +494,7 @@ def _scan_user_skill_security(skill_dir: Path) -> dict:
         "highestSeverity": highest_severity,
         "issues": issues,
         "checkedFiles": checked_files,
+        "checkedFilePaths": checked_file_paths,
         "skippedFiles": skipped_files,
     }
 
@@ -693,7 +721,7 @@ def _build_promptfoo_config(skill_content: str, provider: dict) -> dict:
         "description": "Hermes user skill built-in availability evaluation",
         "prompts": [
             "你正在验证一个 Hermes Skill 是否可用。请严格依据下面的 Skill 说明回答，"
-            "不要执行系统命令，不要泄露凭据。\\n\\nSkill 说明：\\n{{skill}}\\n\\n测试请求：\\n{{task}}"
+            "不要执行系统命令，不要泄露凭据。\n\nSkill 说明：\n{{skill}}\n\n测试请求：\n{{task}}"
         ],
         "providers": [_build_promptfoo_http_provider(provider)],
         "tests": _builtin_promptfoo_skill_tests(skill_content),
@@ -773,12 +801,9 @@ def _run_promptfoo_eval(task_dir: Path, config: dict, provider: dict) -> dict:
         timeout=_USER_SKILL_EVAL_TIMEOUT_SECONDS,
     )
     if not output_path.is_file():
-        stderr = _clean_profile_installed_skill_text(
-            _redact_skill_test_text(completed.stderr or completed.stdout),
-            limit=500,
-        )
+        stderr = _clean_skill_test_diagnostic(completed.stderr or completed.stdout, limit=1200)
         raise _UserSkillError(
-            f"Promptfoo did not produce JSON output: {stderr}",
+            f"Promptfoo did not produce JSON output (exit {completed.returncode}): {stderr}",
             status=502,
             code="promptfoo_output_missing",
         )
