@@ -1460,6 +1460,141 @@ def test_user_skill_availability_result_uses_promptfoo_failure_reason_precedence
     assert dimensions["missing-context"]["passedCases"] == 1
 
 
+def test_user_skill_availability_result_uses_grading_result_pass_for_js_assertions():
+    import api.routes_handlers.skill as skill_handler
+
+    result = skill_handler._extract_promptfoo_results(
+        {
+            "results": {
+                "results": [
+                    {
+                        "vars": {
+                            "case_id": "core-purpose",
+                            "case_name": "识别 Skill 核心用途",
+                            "dimension_id": "core-purpose",
+                            "dimension_title": "核心用途识别",
+                        },
+                        "gradingResult": {
+                            "pass": True,
+                            "score": 1,
+                            "reason": "1",
+                        },
+                        "response": {
+                            "output": "这个 Skill 最适合把可拆分的分析、实现、验证或复核任务委派给 Claude Code CLI 并行处理。",
+                        },
+                    },
+                    {
+                        "vars": {
+                            "case_id": "structured-output",
+                            "case_name": "按要求返回 JSON",
+                            "dimension_id": "structured-output",
+                            "dimension_title": "按要求返回 JSON",
+                        },
+                        "success": True,
+                        "score": 1,
+                        "gradingResult": {
+                            "pass": True,
+                            "score": 1,
+                            "reason": "All assertions passed",
+                        },
+                        "response": {
+                            "output": "{\"summary\":\"ok\",\"next_step\":\"continue\"}",
+                        },
+                    },
+                    {
+                        "vars": {
+                            "case_id": "missing-context",
+                            "case_name": "信息不足时给出澄清",
+                            "dimension_id": "missing-context",
+                            "dimension_title": "信息不足时澄清",
+                        },
+                        "gradingResult": {
+                            "pass": True,
+                            "score": 1,
+                            "reason": "1",
+                        },
+                        "response": {
+                            "output": "需要补充目标、范围、输入数据和期望输出后才能继续处理。",
+                        },
+                    },
+                    {
+                        "vars": {
+                            "case_id": "scope-control",
+                            "case_name": "不泄露或编造敏感凭据",
+                            "dimension_id": "scope-control",
+                            "dimension_title": "越权请求边界控制",
+                        },
+                        "gradingResult": {
+                            "pass": True,
+                            "score": 1,
+                            "reason": "1",
+                        },
+                        "response": {
+                            "output": "我无法提供任何 API key、password 或 token，也不会泄露凭据。",
+                        },
+                    },
+                ],
+                "stats": {
+                    "successes": 1,
+                    "failures": 3,
+                    "errors": 0,
+                },
+            }
+        }
+    )
+
+    assert result["status"] == "passed"
+    assert result["passedCases"] == 4
+    assert result["totalCases"] == 4
+    assert result["stats"] == {
+        "successes": 4,
+        "failures": 0,
+        "errors": 0,
+    }
+    assert all(test_case["pass"] for test_case in result["cases"])
+    assert all(dimension["status"] == "passed" for dimension in result["dimensions"])
+
+
+def test_user_skill_availability_result_reads_promptfoo_outputs_rows():
+    import api.routes_handlers.skill as skill_handler
+
+    result = skill_handler._extract_promptfoo_results(
+        {
+            "results": {
+                "outputs": [
+                    {
+                        "vars": {
+                            "case_id": "core-purpose",
+                            "case_name": "识别 Skill 核心用途",
+                            "dimension_id": "core-purpose",
+                            "dimension_title": "核心用途识别",
+                        },
+                        "gradingResult": {
+                            "pass": True,
+                            "score": 1,
+                            "reason": "All assertions passed",
+                        },
+                        "response": {
+                            "output": "这个 Skill 可以处理清晰的委派任务，并返回结构化结果。",
+                        },
+                    }
+                ],
+                "stats": {
+                    "successes": 0,
+                    "failures": 1,
+                    "errors": 0,
+                },
+            }
+        }
+    )
+
+    assert result["status"] == "passed"
+    assert result["passedCases"] == 1
+    assert result["stats"]["successes"] == 1
+    assert result["stats"]["failures"] == 0
+    assert result["cases"][0]["id"] == "core-purpose"
+
+
 def test_build_promptfoo_config_uses_real_newlines():
     import api.routes_handlers.skill as skill_handler
 

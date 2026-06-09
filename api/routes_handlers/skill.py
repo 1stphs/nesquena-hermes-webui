@@ -655,8 +655,62 @@ def _safe_int(value, default: int = 0) -> int:
         return default
 
 
-def _promptfoo_failure_reason(row: dict, response: dict, output, *, success: bool) -> str:
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_promptfoo_bool(value) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "pass", "passed", "success", "1"}:
+            return True
+        if normalized in {"false", "fail", "failed", "error", "0"}:
+            return False
+    return None
+
+
+def _promptfoo_row_grading_result(row: dict) -> dict:
     grading_result = row.get("gradingResult") if isinstance(row.get("gradingResult"), dict) else {}
+    if not grading_result:
+        grading_result = row.get("grading_result") if isinstance(row.get("grading_result"), dict) else {}
+    return grading_result
+
+
+def _promptfoo_row_success(row: dict, grading_result: dict) -> bool:
+    for candidate in (
+        grading_result.get("pass"),
+        grading_result.get("passed"),
+        row.get("success"),
+        row.get("pass"),
+        row.get("passed"),
+    ):
+        parsed = _coerce_promptfoo_bool(candidate)
+        if parsed is not None:
+            return parsed
+
+    score_value = row.get("score")
+    if score_value is None:
+        score_value = grading_result.get("score")
+    score = _safe_float(score_value, default=0.0)
+    return score > 0
+
+
+def _promptfoo_row_score(row: dict, grading_result: dict, *, success: bool) -> float:
+    score_value = row.get("score")
+    if score_value is None:
+        score_value = grading_result.get("score")
+    return _safe_float(score_value, default=1.0 if success else 0.0)
+
+
+def _promptfoo_failure_reason(row: dict, response: dict, output, *, success: bool) -> str:
+    grading_result = _promptfoo_row_grading_result(row)
     candidates = (
         row.get("failureReason"),
         grading_result.get("reason"),
@@ -677,6 +731,8 @@ def _extract_promptfoo_results(raw_payload: dict) -> dict:
     payload = raw_payload if isinstance(raw_payload, dict) else {}
     result_root = payload.get("results") if isinstance(payload.get("results"), dict) else payload
     rows = result_root.get("results") if isinstance(result_root.get("results"), list) else []
+    if not rows and isinstance(result_root.get("outputs"), list):
+        rows = result_root.get("outputs")
     stats = result_root.get("stats") if isinstance(result_root.get("stats"), dict) else {}
     cases: list[dict] = []
     dimensions_by_id: dict[str, dict] = {}
@@ -686,12 +742,9 @@ def _extract_promptfoo_results(raw_payload: dict) -> dict:
         vars_payload = row.get("vars") if isinstance(row.get("vars"), dict) else {}
         response = row.get("response") if isinstance(row.get("response"), dict) else {}
         output = response.get("output") if response else row.get("output")
-        success = bool(row.get("success"))
-        score_value = row.get("score")
-        try:
-            score = float(score_value)
-        except (TypeError, ValueError):
-            score = 1.0 if success else 0.0
+        grading_result = _promptfoo_row_grading_result(row)
+        success = _promptfoo_row_success(row, grading_result)
+        score = _promptfoo_row_score(row, grading_result, success=success)
 
         case_id = str(vars_payload.get("case_id") or f"case-{index}").strip()
         case_name = str(vars_payload.get("case_name") or f"Case {index}").strip()
@@ -753,12 +806,8 @@ def _extract_promptfoo_results(raw_payload: dict) -> dict:
     if cases:
         passed_cases = sum(1 for case in cases if case.get("pass"))
         total_cases = len(cases)
-        computed_failures = max(0, total_cases - passed_cases - errors)
-        if not stats:
-            successes = passed_cases
-            failures = computed_failures
-        elif failures == 0 and computed_failures:
-            failures = computed_failures
+        successes = passed_cases
+        failures = max(0, total_cases - passed_cases - errors)
     else:
         total_cases = successes + failures + errors
         passed_cases = successes
