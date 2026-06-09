@@ -1,5 +1,6 @@
 """Skill endpoint handlers re-exported by api.routes."""
 
+import ast
 import io
 import json
 import logging
@@ -93,6 +94,148 @@ _USER_SKILL_SECURITY_SEVERITY_RANK = {
     "critical": 4,
 }
 _USER_SKILL_SNIPPET_LIMIT = 180
+_USER_SKILL_SECURITY_DOC_PATH_PARTS = {
+    "doc",
+    "docs",
+    "reference",
+    "references",
+    "example",
+    "examples",
+    "tutorial",
+    "tutorials",
+    "guide",
+    "guides",
+    "fixture",
+    "fixtures",
+    "sample",
+    "samples",
+    "demo",
+    "demos",
+    "test",
+    "tests",
+}
+_USER_SKILL_SECURITY_SCRIPT_SUFFIXES = {".py", ".js", ".ts", ".sh", ".ps1"}
+_USER_SKILL_SECURITY_KNOWN_INSTALLER_DOMAINS = {
+    "astral.sh",
+    "bun.sh",
+    "deno.land",
+    "get.docker.com",
+    "get.pnpm.io",
+    "get.sdkman.io",
+    "install.python-poetry.org",
+    "mise.jdx.dev",
+    "nixos.org",
+    "proto.moonrepo.app",
+    "pyenv.run",
+    "raw.githubusercontent.com/nvm-sh",
+    "sh.rustup.rs",
+    "taskfile.dev",
+}
+_USER_SKILL_SECURITY_SENSITIVE_HIDDEN_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".npmrc",
+    ".netrc",
+    ".pypirc",
+    ".yarnrc",
+    "credentials",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_rsa",
+}
+_USER_SKILL_SECURITY_SENSITIVE_HIDDEN_PARTS = {
+    ".aws",
+    ".azure",
+    ".docker",
+    ".gnupg",
+    ".gpg",
+    ".kube",
+    ".ssh",
+}
+_USER_SKILL_SECURITY_RULE_METADATA = {
+    "prompt-injection-override": {
+        "category": "prompt_injection",
+        "remediation": "移除要求覆盖系统、开发者或上文指令的内容，改为说明正常任务边界。",
+    },
+    "destructive-system-operation": {
+        "category": "command_injection",
+        "remediation": "删除破坏性命令，或改成只读检查并要求用户显式确认。",
+    },
+    "unsafe-shell-capability": {
+        "category": "unauthorized_tool_use",
+        "remediation": "收窄 shell/terminal 能力描述，明确需要用户授权和最小权限。",
+    },
+    "autonomy-approval-bypass": {
+        "category": "autonomy_abuse",
+        "remediation": "移除自动批准、绕过权限或无确认执行的指令。",
+    },
+    "obfuscated-execution": {
+        "category": "obfuscation",
+        "remediation": "避免使用编码、混淆或隐藏执行链路；改为可审计的显式命令。",
+    },
+    "external-download-execution": {
+        "category": "supply_chain_attack",
+        "remediation": "不要下载后直接执行外部脚本；固定版本并校验 checksum/signature。",
+    },
+    "downloaded-file-execution": {
+        "category": "supply_chain_attack",
+        "remediation": "下载文件后执行前必须固定来源、版本并进行完整性校验。",
+    },
+    "credential-exfiltration": {
+        "category": "data_exfiltration",
+        "remediation": "移除读取、打印、保存或上传凭据的要求。",
+    },
+    "python-sensitive-file-read": {
+        "category": "data_exfiltration",
+        "remediation": "不要读取 .env、SSH key、云凭据或 kubeconfig 等敏感文件。",
+    },
+    "hardcoded-secret": {
+        "category": "hardcoded_secrets",
+        "remediation": "删除硬编码密钥，改用运行时环境变量或安全凭据管理。",
+    },
+    "sensitive-hidden-file": {
+        "category": "hardcoded_secrets",
+        "remediation": "不要把 .env、SSH key、云凭据等敏感隐藏文件打包进 Skill。",
+    },
+    "third-party-content-exposure": {
+        "category": "data_exfiltration",
+        "remediation": "明确第三方传输边界，避免发送用户文件、对话或工作区内容。",
+    },
+    "unverifiable-dependency": {
+        "category": "supply_chain_attack",
+        "remediation": "固定依赖版本，避免 latest、未校验 URL 或不可验证二进制。",
+    },
+    "direct-money-access": {
+        "category": "policy_violation",
+        "remediation": "资金相关操作必须要求用户显式确认，不得自动执行。",
+    },
+    "modifying-system-services": {
+        "category": "persistence",
+        "remediation": "不要创建或修改系统服务、启动项、计划任务或持久化机制。",
+    },
+    "python-eval-exec": {
+        "category": "command_injection",
+        "remediation": "避免 eval/exec，改用显式解析和白名单操作。",
+    },
+    "python-shell-execution": {
+        "category": "command_injection",
+        "remediation": "避免 shell=True；使用参数数组并限制可执行命令。",
+    },
+}
+_USER_SKILL_SECURITY_TEMP_CLEANUP_RE = re.compile(
+    r"""(?ix)
+    \brm\s+-[^\n]*r[^\n]*f\b
+    \s+
+    (?:
+        ["']?\$\{?(?:temp|tmp|temp_dir|tmp_dir|cleanup_temp|build_dir|dist_dir)\}?["']?
+        |
+        ["']?(?:/tmp|/var/tmp|tmp|temp|build|dist)/[A-Za-z0-9._${}/-]+["']?
+    )
+    \s*$
+    """
+)
 _USER_SKILL_EVAL_TASK_DIR = STATE_DIR / "skill-test-tasks"
 _USER_SKILL_EVAL_POLL_TTL_SECONDS = 60 * 60
 _USER_SKILL_EVAL_TIMEOUT_SECONDS = _positive_int_env("HERMES_USER_SKILL_EVAL_TIMEOUT_SECONDS", 180)
@@ -137,7 +280,8 @@ _USER_SKILL_SECURITY_CHECKS = (
                 "title": "疑似破坏性系统命令",
                 "patterns": (
                     r"(?i)\brm\s+-[^\n]*r[^\n]*f\b",
-                    r"(?i)\b(format|mkfs|diskpart)\b",
+                    r"(?i)(^|[;&|]\s*)(format|mkfs|diskpart)\b",
+                    r"(?i)\b(powershell|pwsh|cmd(?:\.exe)?|sudo)\b.{0,120}\b(format|mkfs|diskpart)\b",
                     r"(?i)\b(chmod|chown)\b.{0,80}\b(/etc|/usr|/bin|/sbin|/var|/System|C:\\\\Windows)\b",
                     r"(?i)\bsudo\b.{0,120}\b(rm|chmod|chown|mkfs|format)\b",
                     r"(?i)\b(fork\s*bomb|reverse\s*shell|keylogger|ransomware)\b",
@@ -151,6 +295,39 @@ _USER_SKILL_SECURITY_CHECKS = (
                     r"(?i)\b(shell|terminal|command)\b.{0,80}\b(anything|without\s+asking|no\s+confirmation|unrestricted)\b",
                     r"(?i)\bdisable\b.{0,80}\b(safety|guardrail|permission|approval)s?\b",
                 ),
+            },
+            {
+                "ruleId": "autonomy-approval-bypass",
+                "severity": "medium",
+                "title": "疑似绕过权限或审批边界",
+                "patterns": (
+                    r"(?i)\b(auto[- ]?approve|approval[_ -]?mode\s*[:=]\s*['\"]?never|yolo\s+mode)\b",
+                    r"(?i)\b(permission[-_ ]mode\s+)?bypasspermissions\b",
+                    r"(?i)\b(without\s+(permission|approval|confirmation)|no\s+(permission|approval|confirmation))\b"
+                    r".{0,80}\b(run|execute|modify|delete|write)\b",
+                ),
+            },
+            {
+                "ruleId": "obfuscated-execution",
+                "severity": "high",
+                "title": "疑似混淆后执行命令",
+                "patterns": (
+                    r"(?i)\b(base64|openssl\s+enc)\b.{0,120}(\||;|&&)\s*(bash|sh|zsh|python|python3|node)\b",
+                    r"(?i)\b(eval|exec)\s*\(.{0,120}\b(base64|decode|fromCharCode|atob)\b",
+                    r"(?i)\bpowershell\b.{0,120}\b(encodedcommand|-enc)\b",
+                ),
+            },
+            {
+                "ruleId": "python-eval-exec",
+                "severity": "high",
+                "title": "Python 脚本包含 eval/exec 动态执行",
+                "patterns": (),
+            },
+            {
+                "ruleId": "python-shell-execution",
+                "severity": "high",
+                "title": "Python 脚本使用 shell=True 执行命令",
+                "patterns": (),
             },
         ),
     },
@@ -171,6 +348,12 @@ _USER_SKILL_SECURITY_CHECKS = (
                     r"(bash|sh|powershell|pwsh|iex|chmod\s+\+x)\b",
                 ),
             },
+            {
+                "ruleId": "downloaded-file-execution",
+                "severity": "high",
+                "title": "疑似下载文件后执行",
+                "patterns": (),
+            },
         ),
     },
     {
@@ -188,6 +371,12 @@ _USER_SKILL_SECURITY_CHECKS = (
                     r".{0,80}\b(print|show|reveal|dump|send|upload|exfiltrate|store|save)\b",
                 ),
             },
+            {
+                "ruleId": "python-sensitive-file-read",
+                "severity": "high",
+                "title": "Python 脚本疑似读取敏感文件",
+                "patterns": (),
+            },
         ),
     },
     {
@@ -203,6 +392,12 @@ _USER_SKILL_SECURITY_CHECKS = (
                     r"\bsk-[A-Za-z0-9_-]{20,}\b",
                     r"-----BEGIN\s+(RSA\s+|EC\s+|OPENSSH\s+)?PRIVATE\s+KEY-----",
                 ),
+            },
+            {
+                "ruleId": "sensitive-hidden-file",
+                "severity": "high",
+                "title": "疑似打包敏感隐藏文件",
+                "patterns": (),
             },
         ),
     },
@@ -465,6 +660,72 @@ def _iter_user_skill_security_rules():
             yield check, rule
 
 
+def _user_skill_security_rule(rule_id: str) -> tuple[dict, dict]:
+    normalized_rule_id = str(rule_id or "").strip()
+    for check, rule in _iter_user_skill_security_rules():
+        if str(rule.get("ruleId") or "").strip() == normalized_rule_id:
+            return check, rule
+    return (
+        {"id": "policy_violation", "title": "Policy Violation", "rules": ()},
+        {
+            "ruleId": normalized_rule_id,
+            "severity": "medium",
+            "title": normalized_rule_id,
+            "patterns": (),
+        },
+    )
+
+
+def _security_rule_metadata(rule_id: str) -> dict:
+    return _USER_SKILL_SECURITY_RULE_METADATA.get(str(rule_id or "").strip(), {})
+
+
+def _security_issue_confidence(severity: str, *, analyzer: str = "pattern") -> str:
+    normalized_severity = str(severity or "").strip().lower()
+    if analyzer in {"python_ast", "pipeline", "structure"}:
+        return "high"
+    if normalized_severity in {"critical", "high"}:
+        return "medium"
+    return "low"
+
+
+def _security_issue(
+    check: dict,
+    rule: dict,
+    *,
+    path: str,
+    line: int | None,
+    snippet: str,
+    analyzer: str = "pattern",
+    severity: str | None = None,
+    title: str | None = None,
+    category: str | None = None,
+    remediation: str | None = None,
+    confidence: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    rule_id = str(rule.get("ruleId") or "").strip()
+    issue_severity = str(severity or rule.get("severity") or "low").strip().lower()
+    rule_metadata = _security_rule_metadata(rule_id)
+    return {
+        "checkId": str(check.get("id") or "").strip(),
+        "checkTitle": str(check.get("title") or "").strip(),
+        "ruleId": rule_id,
+        "severity": issue_severity,
+        "title": str(title or rule.get("title") or rule_id).strip(),
+        "path": path,
+        "line": int(line) if line else None,
+        "snippet": _skill_test_snippet(snippet),
+        "analyzer": analyzer,
+        "category": str(category or rule_metadata.get("category") or "policy_violation").strip(),
+        "confidence": str(
+            confidence or _security_issue_confidence(issue_severity, analyzer=analyzer)
+        ).strip(),
+        "remediation": str(remediation or rule_metadata.get("remediation") or "").strip(),
+        "metadata": metadata or {},
+    }
+
+
 def _security_check_status(issues: list[dict]) -> str:
     if not issues:
         return "passed"
@@ -517,6 +778,301 @@ def _redact_skill_test_text(value: str) -> str:
         text,
     )
     return text
+
+
+def _user_skill_security_path_parts(relative_path: str) -> set[str]:
+    return {part.lower() for part in Path(str(relative_path or "")).parts if part}
+
+
+def _is_user_skill_security_doc_path(relative_path: str) -> bool:
+    return bool(_user_skill_security_path_parts(relative_path) & _USER_SKILL_SECURITY_DOC_PATH_PARTS)
+
+
+def _is_user_skill_security_script_path(relative_path: str) -> bool:
+    return Path(str(relative_path or "")).suffix.lower() in _USER_SKILL_SECURITY_SCRIPT_SUFFIXES
+
+
+def _effective_security_rule_severity(rule: dict, relative_path: str) -> str:
+    severity = str(rule.get("severity") or "low").strip().lower()
+    if (
+        severity in _USER_SKILL_SECURITY_FAIL_SEVERITIES
+        and _is_user_skill_security_doc_path(relative_path)
+        and not _is_user_skill_security_script_path(relative_path)
+    ):
+        return "medium"
+    return severity
+
+
+def _extract_security_urls(text: str) -> list[str]:
+    return re.findall(r"https?://[^\s'\"`<>)]*", str(text or ""))
+
+
+def _security_url_host(url: str) -> str:
+    try:
+        return (urllib.parse.urlparse(str(url or "")).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _is_known_security_installer_line(line: str) -> bool:
+    for url in _extract_security_urls(line):
+        normalized_url = url.lower()
+        host = _security_url_host(url)
+        if any(
+            normalized_url.startswith(f"https://{domain}")
+            or normalized_url.startswith(f"http://{domain}")
+            or bool(host and (host == domain or host.endswith(f".{domain}")))
+            for domain in _USER_SKILL_SECURITY_KNOWN_INSTALLER_DOMAINS
+        ):
+            return True
+    return False
+
+
+def _effective_security_pattern_severity(rule: dict, relative_path: str, line: str) -> str:
+    severity = _effective_security_rule_severity(rule, relative_path)
+    rule_id = str(rule.get("ruleId") or "").strip()
+    if rule_id == "destructive-system-operation" and _USER_SKILL_SECURITY_TEMP_CLEANUP_RE.search(line):
+        return "medium"
+    if rule_id == "external-download-execution":
+        if _is_known_security_installer_line(line):
+            return "low"
+    return severity
+
+
+def _is_sensitive_hidden_skill_path(relative_path: str) -> bool:
+    parts = _user_skill_security_path_parts(relative_path)
+    if not parts:
+        return False
+    name = Path(str(relative_path or "")).name.lower()
+    if name in _USER_SKILL_SECURITY_SENSITIVE_HIDDEN_NAMES:
+        return True
+    if parts & _USER_SKILL_SECURITY_SENSITIVE_HIDDEN_PARTS:
+        return True
+    return False
+
+
+def _security_structure_issues(relative_path: str) -> list[dict]:
+    if not _is_sensitive_hidden_skill_path(relative_path):
+        return []
+    check, rule = _user_skill_security_rule("sensitive-hidden-file")
+    return [
+        _security_issue(
+            check,
+            rule,
+            path=relative_path,
+            line=None,
+            snippet=f"Sensitive hidden file packaged in skill: {relative_path}",
+            analyzer="structure",
+            severity="high",
+            title="疑似打包敏感隐藏文件",
+        )
+    ]
+
+
+def _literal_ast_string(node: ast.AST) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+        return "".join(parts)
+    return ""
+
+
+def _ast_call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _ast_call_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def _ast_call_has_shell_true(node: ast.Call) -> bool:
+    for keyword in node.keywords:
+        if keyword.arg == "shell" and isinstance(keyword.value, ast.Constant):
+            return keyword.value.value is True
+    return False
+
+
+def _ast_call_string_arguments(node: ast.Call) -> str:
+    parts = []
+    for arg in node.args:
+        literal = _literal_ast_string(arg)
+        if literal:
+            parts.append(literal)
+    for keyword in node.keywords:
+        literal = _literal_ast_string(keyword.value)
+        if literal:
+            parts.append(literal)
+    return " ".join(parts)
+
+
+def _looks_like_sensitive_file_path(value: str) -> bool:
+    normalized = str(value or "").replace("\\", "/").lower()
+    sensitive_tokens = (
+        ".env",
+        ".ssh/",
+        "id_rsa",
+        "id_ed25519",
+        ".aws/credentials",
+        ".azure/",
+        ".docker/config.json",
+        ".kube/config",
+        "api_key",
+        "apikey",
+        "token",
+        "secret",
+        "password",
+    )
+    return any(token in normalized for token in sensitive_tokens)
+
+
+def _looks_like_dangerous_command(value: str) -> str:
+    text = str(value or "")
+    if re.search(r"(?i)\brm\s+-[^\n]*r[^\n]*f\b", text):
+        return "destructive-system-operation"
+    if re.search(r"(?i)(^|[;&|]\s*)(format|mkfs|diskpart)\b", text):
+        return "destructive-system-operation"
+    if re.search(r"(?i)\b(powershell|pwsh|cmd(?:\.exe)?|sudo)\b.{0,120}\b(format|mkfs|diskpart)\b", text):
+        return "destructive-system-operation"
+    if re.search(r"(?i)\b(systemctl|launchctl|schtasks|reg\s+add)\b.{0,120}\b(enable|load|create|add|start)\b", text):
+        return "modifying-system-services"
+    if re.search(r"(?i)\b(curl|wget)\b.{0,160}(\||;|&&)\s*(bash|sh|zsh|python|python3|node)\b", text):
+        return "external-download-execution"
+    return ""
+
+
+def _python_ast_security_issues(relative_path: str, text: str) -> list[dict]:
+    if Path(relative_path).suffix.lower() != ".py":
+        return []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        call_name = _ast_call_name(node.func)
+        line_number = getattr(node, "lineno", None)
+        arguments = _ast_call_string_arguments(node)
+
+        if call_name in {"eval", "exec"}:
+            check, rule = _user_skill_security_rule("python-eval-exec")
+            issues.append(
+                _security_issue(
+                    check,
+                    rule,
+                    path=relative_path,
+                    line=line_number,
+                    snippet=f"{call_name}(...)",
+                    analyzer="python_ast",
+                    severity="high",
+                    title="Python 脚本包含 eval/exec 动态执行",
+                )
+            )
+            continue
+
+        if call_name in {"open", "Path.open", "pathlib.Path.open"} and _looks_like_sensitive_file_path(arguments):
+            check, rule = _user_skill_security_rule("python-sensitive-file-read")
+            issues.append(
+                _security_issue(
+                    check,
+                    rule,
+                    path=relative_path,
+                    line=line_number,
+                    snippet=arguments,
+                    analyzer="python_ast",
+                    severity="high",
+                    title="Python 脚本疑似读取敏感文件",
+                )
+            )
+            continue
+
+        if call_name in {"os.system", "subprocess.run", "subprocess.call", "subprocess.Popen", "subprocess.check_call", "subprocess.check_output"}:
+            dangerous_rule_id = _looks_like_dangerous_command(arguments)
+            if _ast_call_has_shell_true(node):
+                check, rule = _user_skill_security_rule("python-shell-execution")
+                issues.append(
+                    _security_issue(
+                        check,
+                        rule,
+                        path=relative_path,
+                        line=line_number,
+                        snippet=arguments or f"{call_name}(shell=True)",
+                        analyzer="python_ast",
+                        severity="high",
+                        title="Python 脚本使用 shell=True 执行命令",
+                    )
+                )
+            if dangerous_rule_id:
+                check, rule = _user_skill_security_rule(dangerous_rule_id)
+                issues.append(
+                    _security_issue(
+                        check,
+                        rule,
+                        path=relative_path,
+                        line=line_number,
+                        snippet=arguments,
+                        analyzer="python_ast",
+                        severity=str(rule.get("severity") or "high"),
+                        title="Python 脚本疑似执行高风险命令",
+                    )
+                )
+    return issues
+
+
+def _download_target_from_line(line: str) -> str:
+    text = str(line or "")
+    match = re.search(r"(?i)\b(?:curl|wget)\b[^\n]*\s(?:-o|-O|--output-document)\s+['\"]?([^'\"\s;&|]+)", text)
+    if match:
+        return Path(match.group(1)).name
+    redirect_match = re.search(r"(?i)\b(?:curl|wget)\b[^\n]*>\s*['\"]?([^'\"\s;&|]+)", text)
+    if redirect_match:
+        return Path(redirect_match.group(1)).name
+    return ""
+
+
+def _executes_download_target(line: str, target_name: str) -> bool:
+    if not target_name:
+        return False
+    escaped_target = re.escape(target_name)
+    return bool(
+        re.search(rf"(?i)\b(bash|sh|zsh|python|python3|node|chmod\s+\+x)\b[^\n]*\b{escaped_target}\b", line)
+        or re.search(rf"(?i)(^|[;&|]\s*)\.?/[^;&|]*\b{escaped_target}\b", line)
+        or re.search(rf"(?i)(^|[;&|]\s*)\./{escaped_target}\b", line)
+    )
+
+
+def _pipeline_security_issues(relative_path: str, text: str) -> list[dict]:
+    issues: list[dict] = []
+    downloads: dict[str, tuple[int, str]] = {}
+    check, rule = _user_skill_security_rule("downloaded-file-execution")
+    for line_number, line in enumerate(str(text or "").splitlines(), start=1):
+        target = _download_target_from_line(line)
+        if target:
+            downloads[target] = (line_number, line)
+            continue
+        for target_name, (download_line, download_text) in downloads.items():
+            if _executes_download_target(line, target_name):
+                issues.append(
+                    _security_issue(
+                        check,
+                        rule,
+                        path=relative_path,
+                        line=line_number,
+                        snippet=f"{download_text.strip()} ... {line.strip()}",
+                        analyzer="pipeline",
+                        severity=_effective_security_rule_severity(rule, relative_path),
+                        title="疑似下载文件后执行",
+                        metadata={"downloadLine": download_line, "target": target_name},
+                    )
+                )
+    return issues
 
 
 def _clean_skill_test_diagnostic(value: str, *, limit: int = 1200) -> str:
@@ -583,7 +1139,10 @@ def _iter_user_skill_security_scan_files(skill_dir: Path) -> tuple[list[Path], l
         if size_bytes > _USER_SKILL_EDIT_MAX_BYTES:
             skipped.append({"path": relative_path, "reason": "too_large"})
             continue
-        if path.suffix.lower() not in _USER_SKILL_SCAN_TEXT_SUFFIXES:
+        if (
+            path.suffix.lower() not in _USER_SKILL_SCAN_TEXT_SUFFIXES
+            and not _is_sensitive_hidden_skill_path(relative_path)
+        ):
             skipped.append({"path": relative_path, "reason": "unsupported_type"})
             continue
         files.append(path)
@@ -595,9 +1154,11 @@ def _scan_user_skill_security(skill_dir: Path) -> dict:
     issues: list[dict] = []
     checked_file_paths: list[str] = []
     checked_files = 0
+    analyzers_used = {"pattern", "structure", "pipeline", "python_ast"}
 
     for path in scan_files:
         relative_path = _relative_skill_test_path(skill_dir, path)
+        issues.extend(_security_structure_issues(relative_path))
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeError:
@@ -611,19 +1172,21 @@ def _scan_user_skill_security(skill_dir: Path) -> dict:
         checked_file_paths.append(relative_path)
         for line_number, line in enumerate(text.splitlines(), start=1):
             for check, rule in _iter_user_skill_security_rules():
-                if any(re.search(pattern, line) for pattern in rule["patterns"]):
+                if any(re.search(pattern, line) for pattern in rule.get("patterns") or ()):
+                    severity = _effective_security_pattern_severity(rule, relative_path, line)
                     issues.append(
-                        {
-                            "checkId": check["id"],
-                            "checkTitle": check["title"],
-                            "ruleId": rule["ruleId"],
-                            "severity": rule["severity"],
-                            "title": rule["title"],
-                            "path": relative_path,
-                            "line": line_number,
-                            "snippet": _skill_test_snippet(line),
-                        }
+                        _security_issue(
+                            check,
+                            rule,
+                            path=relative_path,
+                            line=line_number,
+                            snippet=line,
+                            analyzer="pattern",
+                            severity=severity,
+                        )
                     )
+        issues.extend(_pipeline_security_issues(relative_path, text))
+        issues.extend(_python_ast_security_issues(relative_path, text))
 
     highest_severity = _highest_security_severity(issues)
     checks, check_summary = _build_security_check_results(issues)
@@ -645,6 +1208,7 @@ def _scan_user_skill_security(skill_dir: Path) -> dict:
         "checkedFiles": checked_files,
         "checkedFilePaths": checked_file_paths,
         "skippedFiles": skipped_files,
+        "analyzersUsed": sorted(analyzers_used),
     }
 
 
