@@ -245,7 +245,7 @@ HTTP/1.0 200 OK
 Code import check:
 
 ```bash
-docker exec -i hermes-webui python3 - <<'PY'
+docker exec -i hermes-webui /app/venv/bin/python - <<'PY'
 import api.routes as routes
 print(routes.__file__)
 print(hasattr(routes, "_requested_sessions_profile"))

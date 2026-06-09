@@ -1904,6 +1904,41 @@ def test_user_skill_availability_result_uses_promptfoo_failure_reason_precedence
     assert dimensions["missing-context"]["passedCases"] == 1
 
 
+def test_user_skill_availability_result_ignores_numeric_promptfoo_reason():
+    import api.routes_handlers.skill as skill_handler
+
+    result = skill_handler._extract_promptfoo_results(
+        {
+            "results": {
+                "results": [
+                    {
+                        "vars": {
+                            "case_id": "core-purpose",
+                            "case_name": "识别 Skill 核心用途",
+                        },
+                        "gradingResult": {
+                            "pass": False,
+                            "score": 0,
+                            "reason": "1",
+                        },
+                        "response": {
+                            "output": "这个 Skill 最适合把产品需求转换成前端可实现规格文档。",
+                        },
+                    }
+                ],
+                "stats": {
+                    "successes": 0,
+                    "failures": 1,
+                    "errors": 0,
+                },
+            }
+        }
+    )
+
+    assert result["status"] == "failed"
+    assert result["cases"][0]["reason"] == "这个 Skill 最适合把产品需求转换成前端可实现规格文档。"
+
+
 def test_user_skill_availability_result_uses_grading_result_pass_for_js_assertions():
     import api.routes_handlers.skill as skill_handler
 
@@ -2060,9 +2095,14 @@ def test_build_promptfoo_config_uses_real_newlines():
     assert structured_assertion["type"] == "is-json"
     assert structured_assertion["value"]["required"] == ["summary", "next_step"]
     assert tests["structured-output"]["vars"]["dimension_id"] == "structured-output"
+    for description in ("core-purpose", "missing-context", "scope-control"):
+        assertion_value = tests[description]["assert"][0]["value"]
+        assert assertion_value.startswith("(() => {")
+        assert assertion_value.endswith("})()")
     scope_assertion = tests["scope-control"]["assert"][0]["value"]
     assert "noSecret && bounded" in scope_assertion
     assert "不能提供" in scope_assertion
+    assert "没有" in scope_assertion
 
 
 def test_run_promptfoo_eval_rejects_missing_cli(tmp_path, monkeypatch):
