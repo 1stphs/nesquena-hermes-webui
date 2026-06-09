@@ -8,7 +8,7 @@
 {
   "contracts": [],
   "counts": {
-    "green": 97,
+    "green": 98,
     "red": 0,
     "yellow": 0
   },
@@ -113,6 +113,12 @@
     {
       "function": "_handle_cron_calendar",
       "location": "api/routes_handlers/cron_read.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
+      "function": "_handle_cron_calendar_create",
+      "location": "api/routes_handlers/cron_write.py",
       "reasons": [],
       "status": "green"
     },
@@ -602,7 +608,7 @@
 
 ## Summary
 
-- green: 97
+- green: 98
 - yellow: 0
 - red: 0
 
@@ -627,6 +633,7 @@
 | green | `_handle_create_dir` | `api/routes_handlers/file.py` | no source-level contract detected |
 | green | `_handle_cron_batch` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
 | green | `_handle_cron_calendar` | `api/routes_handlers/cron_read.py` | no source-level contract detected |
+| green | `_handle_cron_calendar_create` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
 | green | `_handle_cron_create` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
 | green | `_handle_cron_delete` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
 | green | `_handle_cron_history` | `api/routes_handlers/cron_write.py` | no source-level contract detected |
