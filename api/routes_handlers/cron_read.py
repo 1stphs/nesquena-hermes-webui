@@ -169,6 +169,7 @@ def _handle_cron_calendar(handler, body):
     except ValueError as e:
         return _routes_binding("bad")(handler, str(e))
 
+    from api.calendar_events import calendar_event_dates, calendar_event_for_api, load_calendar_events
     from api.profiles import cron_profile_context_for_home
     from cron.jobs import list_jobs
 
@@ -185,9 +186,21 @@ def _handle_cron_calendar(handler, body):
         home = _routes_binding("_profile_home_for_cron_profile_name")(profile)
         with cron_profile_context_for_home(home):
             jobs = _routes_binding("_cron_jobs_for_api")(list_jobs(include_disabled=True))
+            events = load_calendar_events()
         for job in jobs:
             entry = _routes_binding("_cron_calendar_entry")(job, profile)
             for scheduled_date in sorted(_routes_binding("_cron_calendar_dates_for_job")(job, start_date, end_date)):
+                key = scheduled_date.isoformat()
+                if key not in buckets:
+                    continue
+                buckets[key]["jobs"].append(dict(entry))
+                buckets[key]["count"] += 1
+        for event in events:
+            event_profile = str(event.get("profile") or profile).strip() or profile
+            if event_profile != profile:
+                continue
+            entry = calendar_event_for_api(event, profile)
+            for scheduled_date in sorted(calendar_event_dates(event, start_date, end_date)):
                 key = scheduled_date.isoformat()
                 if key not in buckets:
                     continue

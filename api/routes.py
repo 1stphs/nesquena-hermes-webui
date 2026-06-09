@@ -294,6 +294,7 @@ from api.routes_handlers.chat import (
 )
 from api.routes_handlers.cron_write import (
     _handle_cron_batch,
+    _handle_cron_calendar_create,
     _handle_cron_create,
     _handle_cron_delete,
     _handle_cron_history,

@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 
 def test_bridge_cronjob_handler_uses_session_profile_home(monkeypatch):
@@ -261,3 +262,108 @@ def test_cron_calendar_dates_for_job_filters_cross_month_range():
         date(2026, 6, 1),
         date(2026, 6, 2),
     }
+
+
+class _ResponseHandler:
+    def __init__(self):
+        self.status = None
+        self.headers = {}
+        self.body = b""
+        self.wfile = self
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, key, value):
+        self.headers[key] = value
+
+    def end_headers(self):
+        return None
+
+    def write(self, data):
+        self.body += data
+
+
+def _read_json(handler: _ResponseHandler) -> dict:
+    return json.loads(handler.body.decode("utf-8"))
+
+
+def test_handle_cron_calendar_create_accepts_form_style_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+
+    import api.routes as routes
+    from api.routes_handlers.cron_write import _handle_cron_calendar_create
+
+    handler = _ResponseHandler()
+    body = {
+        "title": "项目周会",
+        "date": "2026/06/09",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "type": "个人",
+        "profile": "default",
+        "remark": "腾讯会议",
+    }
+
+    _handle_cron_calendar_create(handler, body)
+
+    payload = _read_json(handler)
+    assert handler.status == 200
+    assert payload["ok"] is True
+    assert payload["event"]["title"] == "项目周会"
+    assert payload["event"]["event_type"] == "个人"
+    assert payload["event"]["description"] == "腾讯会议"
+    assert payload["event"]["start_time"].startswith("2026-06-09T09:00:00")
+    assert payload["event"]["end_time"].startswith("2026-06-09T10:00:00")
+
+
+def test_handle_cron_calendar_includes_calendar_events(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+
+    import api.routes as routes
+    from api.routes_handlers.cron_read import _handle_cron_calendar
+    from api.calendar_events import create_calendar_event
+
+    @contextmanager
+    def _passthrough_context(_home):
+        yield
+
+    monkeypatch.setattr(routes, "_normalize_cron_profile_lookup_name", lambda raw: str(raw))
+    monkeypatch.setattr(routes, "_profile_home_for_cron_profile_name", lambda _profile: tmp_path / ".hermes")
+    monkeypatch.setattr(routes, "_cron_jobs_for_api", lambda jobs: jobs)
+    monkeypatch.setattr(routes, "_cron_calendar_entry", lambda job, profile: job)
+    monkeypatch.setattr(routes, "_cron_calendar_dates_for_job", lambda job, start, end: set())
+    monkeypatch.setattr(routes, "_cron_calendar_range_days", lambda start, end: [start])
+
+    import api.profiles as profiles
+    monkeypatch.setattr(profiles, "cron_profile_context_for_home", _passthrough_context)
+
+    import cron.jobs as cron_jobs
+    monkeypatch.setattr(cron_jobs, "list_jobs", lambda include_disabled=True: [])
+
+    create_calendar_event(
+        title="设计评审",
+        date="2026-06-09",
+        start_time="13:00",
+        end_time="14:00",
+        profile="default",
+        description="评审新方案",
+    )
+
+    handler = _ResponseHandler()
+    _handle_cron_calendar(
+        handler,
+        {
+            "profiles": ["default"],
+            "start_date": "2026-06-09",
+            "end_date": "2026-06-09",
+        },
+    )
+
+    payload = _read_json(handler)
+    assert handler.status == 200
+    assert payload["days"][0]["count"] == 1
+    event = payload["days"][0]["jobs"][0]
+    assert event["type"] == "calendar_event"
+    assert event["title"] == "设计评审"
+    assert event["description"] == "评审新方案"

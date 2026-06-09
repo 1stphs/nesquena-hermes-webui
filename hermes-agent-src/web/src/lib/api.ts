@@ -113,6 +113,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(job),
     }),
+  createCalendarEvent: (event: CalendarEventCreateRequest) =>
+    fetchJSON<{ ok: boolean; event: CalendarEvent }>("/api/crons/calendar/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(event),
+    }),
   pauseCronJob: (id: string) =>
     fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}/pause`, { method: "POST" }),
   resumeCronJob: (id: string) =>
@@ -382,6 +388,38 @@ export interface CronJob {
   last_run_at?: string | null;
   next_run_at?: string | null;
   last_error?: string | null;
+}
+
+export interface CalendarEventCreateRequest {
+  title?: string;
+  name?: string;
+  date?: string;
+  start_time: string;
+  end_time?: string;
+  all_day?: boolean;
+  location?: string;
+  participants?: string[] | string;
+  description?: string;
+  remark?: string;
+  event_type?: string;
+  type?: string;
+  profile?: string;
+}
+
+export interface CalendarEvent {
+  id: string;
+  type: "calendar_event";
+  title: string;
+  name: string;
+  profile: string;
+  start_time: string;
+  end_time: string;
+  all_day: boolean;
+  location?: string | null;
+  participants: string[];
+  description: string;
+  event_type?: string | null;
+  created_at?: string | null;
 }
 
 export interface SkillInfo {
