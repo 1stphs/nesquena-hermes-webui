@@ -1728,10 +1728,7 @@ def dispatch_post(handler, parsed) -> bool:
         return _handle_cron_calendar(handler, body)
 
     if parsed.path == "/api/crons/calendar/create":
-        from api.profiles import cron_profile_context
-
-        with cron_profile_context():
-            return _handle_cron_calendar_create(handler, body)
+        return _handle_cron_calendar_create(handler, body)
 
     if parsed.path == "/api/crons/update":
         from api.profiles import cron_profile_context

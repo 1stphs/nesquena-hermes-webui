@@ -228,6 +228,30 @@ def test_parse_cron_calendar_range_accepts_start_and_end_dates():
     assert month_key is None
 
 
+def test_parse_cron_calendar_range_accepts_unix_timestamps_in_seconds():
+    from datetime import date
+
+    from api.routes_helpers.cron import _parse_cron_calendar_range
+
+    start, end, month_key = _parse_cron_calendar_range("1780272000", "1780444800", None)
+
+    assert start == date(2026, 6, 1)
+    assert end == date(2026, 6, 3)
+    assert month_key is None
+
+
+def test_parse_cron_calendar_range_accepts_unix_timestamps_in_milliseconds():
+    from datetime import date
+
+    from api.routes_helpers.cron import _parse_cron_calendar_range
+
+    start, end, month_key = _parse_cron_calendar_range("1780272000000", "1780444800000", None)
+
+    assert start == date(2026, 6, 1)
+    assert end == date(2026, 6, 3)
+    assert month_key is None
+
+
 def test_parse_cron_calendar_range_keeps_legacy_month():
     from datetime import date
 
@@ -315,6 +339,48 @@ def test_handle_cron_calendar_create_accepts_form_style_fields(tmp_path, monkeyp
     assert payload["event"]["description"] == "腾讯会议"
     assert payload["event"]["start_time"].startswith("2026-06-09T09:00:00")
     assert payload["event"]["end_time"].startswith("2026-06-09T10:00:00")
+
+
+def test_handle_cron_calendar_create_writes_to_explicit_profile_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+
+    import api.routes as routes
+    import api.profiles as profiles
+    from api.calendar_events import load_calendar_events
+    from api.routes_handlers.cron_write import _handle_cron_calendar_create
+
+    alpha_home = tmp_path / ".hermes" / "profiles" / "alpha"
+    beta_home = tmp_path / ".hermes" / "profiles" / "beta"
+
+    monkeypatch.setattr(routes, "_normalize_cron_profile_value", lambda raw: str(raw).strip() if raw else None)
+    monkeypatch.setattr(routes, "_profile_home_for_cron_profile_name", lambda profile: alpha_home if profile == "alpha" else beta_home)
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "alpha")
+
+    real_context = profiles.cron_profile_context_for_home
+    handler = _ResponseHandler()
+    body = {
+        "title": "跨 profile 测试",
+        "date": "2026-06-09",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "profile": "beta",
+    }
+
+    _handle_cron_calendar_create(handler, body)
+
+    payload = _read_json(handler)
+    assert handler.status == 200
+    assert payload["ok"] is True
+    assert payload["event"]["profile"] == "beta"
+
+    with real_context(beta_home):
+        beta_events = load_calendar_events()
+    with real_context(alpha_home):
+        alpha_events = load_calendar_events()
+
+    assert len(beta_events) == 1
+    assert beta_events[0]["title"] == "跨 profile 测试"
+    assert alpha_events == []
 
 
 def test_handle_cron_calendar_includes_calendar_events(tmp_path, monkeypatch):

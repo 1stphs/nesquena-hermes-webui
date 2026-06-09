@@ -159,12 +159,38 @@ def _parse_cron_calendar_date(value, field_name: str) -> _date:
         raise ValueError(f"{field_name} must be in yyyy-mm-dd format") from None
 
 
+def _parse_cron_calendar_timestamp(value, field_name: str) -> _date | None:
+    if value in (None, ""):
+        return None
+    raw = str(value).strip()
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?", raw):
+        return None
+    try:
+        timestamp = float(raw)
+    except ValueError:
+        return None
+    # Treat 13-digit inputs as milliseconds while keeping seconds-compatible
+    # values unchanged. This makes the API friendly to browser Date.now().
+    if abs(timestamp) >= 1e11:
+        timestamp /= 1000.0
+    try:
+        return _datetime.fromtimestamp(timestamp).date()
+    except (OverflowError, OSError, ValueError):
+        raise ValueError(
+            f"{field_name} must be a valid unix timestamp in seconds or milliseconds"
+        ) from None
+
+
 def _parse_cron_calendar_range(start_value, end_value, month_value) -> tuple[_date, _date, str | None]:
     if start_value is not None or end_value is not None:
         if start_value is None or end_value is None:
             raise ValueError("start_date and end_date are required together")
-        start = _parse_cron_calendar_date(start_value, "start_date")
-        end = _parse_cron_calendar_date(end_value, "end_date")
+        start = _parse_cron_calendar_timestamp(start_value, "start_date")
+        if start is None:
+            start = _parse_cron_calendar_date(start_value, "start_date")
+        end = _parse_cron_calendar_timestamp(end_value, "end_date")
+        if end is None:
+            end = _parse_cron_calendar_date(end_value, "end_date")
         if end < start:
             raise ValueError("end_date must be on or after start_date")
         return start, end, None

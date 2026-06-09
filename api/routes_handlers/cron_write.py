@@ -66,29 +66,30 @@ def _handle_cron_create(handler, body):
 
 def _handle_cron_calendar_create(handler, body):
     _sync_routes_bindings(globals())
-    try:
-        if not body.get("start_time"):
-            return bad(handler, "Missing required field(s): start_time")
-    except ValueError as e:
-        return bad(handler, str(e))
+    if not body.get("start_time"):
+        return bad(handler, "Missing required field(s): start_time")
     try:
         from api.calendar_events import create_calendar_event
+        from api.profiles import cron_profile_context_for_home, get_active_profile_name
 
         profile = _normalize_cron_profile_value(body.get("profile"))
-        event = create_calendar_event(
-            date=body.get("date"),
-            start_time=body.get("start_time"),
-            end_time=body.get("end_time"),
-            all_day=body.get("all_day", False),
-            location=body.get("location"),
-            participants=body.get("participants"),
-            description=body.get("description"),
-            remark=body.get("remark"),
-            title=body.get("title"),
-            name=body.get("name"),
-            event_type=body.get("event_type", body.get("type")),
-            profile=profile,
-        )
+        target_profile = profile or get_active_profile_name()
+        home = _profile_home_for_cron_profile_name(target_profile)
+        with cron_profile_context_for_home(home):
+            event = create_calendar_event(
+                date=body.get("date"),
+                start_time=body.get("start_time"),
+                end_time=body.get("end_time"),
+                all_day=body.get("all_day", False),
+                location=body.get("location"),
+                participants=body.get("participants"),
+                description=body.get("description"),
+                remark=body.get("remark"),
+                title=body.get("title"),
+                name=body.get("name"),
+                event_type=body.get("event_type", body.get("type")),
+                profile=target_profile,
+            )
         return j(handler, {"ok": True, "event": event})
     except Exception as e:
         return j(handler, {"error": str(e)}, status=400)
