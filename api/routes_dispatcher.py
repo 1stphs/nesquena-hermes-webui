@@ -821,6 +821,9 @@ self.addEventListener('fetch', () => {});
     if parsed.path == "/api/user-skills/file":
         return _handle_user_skill_file_read(handler, parsed)
 
+    if parsed.path == "/api/user-skills/test-availability/status":
+        return _handle_user_skill_test_availability_status(handler, parsed)
+
     # ── Memory API (GET) ──
     if parsed.path == "/api/memory":
         return _handle_memory_read(handler)
@@ -1821,6 +1824,12 @@ def dispatch_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/user-skills/file/update":
         return _handle_user_skill_file_update(handler, body)
+
+    if parsed.path == "/api/user-skills/test-security":
+        return _handle_user_skill_test_security(handler, body)
+
+    if parsed.path == "/api/user-skills/test-availability":
+        return _handle_user_skill_test_availability(handler, body)
 
     if parsed.path == "/api/user-skills/import/cancel":
         return _handle_user_skill_import_cancel(handler, body)

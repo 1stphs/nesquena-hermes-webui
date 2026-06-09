@@ -161,6 +161,20 @@ python -m compileall -q api
 
 `tests/conftest.py` 会为测试进程设置隔离的 `HERMES_WEBUI_STATE_DIR`、`HERMES_HOME`、`HERMES_CONFIG_PATH` 和测试端口。不要让测试读写真实 `~/.hermes`。
 
+用户 Skill 安全扫描 / 有效性评测上线前，需要先检查 NoCoBase `hermes_user_skills` 是否存在测试结果字段:
+
+```bash
+python scripts/ensure_user_skill_test_fields.py
+```
+
+缺字段时脚本默认只读退出，不会改 schema。确认生产 schema 写操作后再运行:
+
+```bash
+python scripts/ensure_user_skill_test_fields.py --apply
+```
+
+`--apply` 只创建缺失的 `security_test_result`、`security_tested_at`、`availability_test_result`、`availability_tested_at` 字段，不修改或删除已有记录；执行前仍要按生产 schema 变更流程确认。
+
 ## 10. 清理边界
 
 不要删除:
