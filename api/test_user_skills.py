@@ -77,6 +77,51 @@ description: {description}
 """
 
 
+def _zip_bytes(entries):
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as archive:
+        for entry in entries:
+            if len(entry) == 3 and entry[2] == "symlink":
+                info = zipfile.ZipInfo(entry[0])
+                info.external_attr = 0o120777 << 16
+                archive.writestr(info, entry[1])
+            else:
+                archive.writestr(entry[0], entry[1])
+    return archive_bytes.getvalue()
+
+
+def _run_import(
+    tmp_path,
+    monkeypatch,
+    skill_handler,
+    responses,
+    file_name,
+    file_bytes,
+    *,
+    english_name="mail-assistant",
+    content_length=100,
+):
+    handler = SimpleNamespace(
+        headers={
+            "Content-Type": "multipart/form-data",
+            "Content-Length": str(content_length),
+        },
+        rfile=io.BytesIO(b""),
+    )
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, tmp_path / "users")
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    monkeypatch.setattr(
+        skill_handler,
+        "parse_multipart",
+        lambda _rfile, _content_type, _content_length: (
+            {"english_name": english_name} if english_name is not None else {},
+            {"file": (file_name, file_bytes)} if file_name is not None else {},
+        ),
+    )
+    return skill_handler._handle_user_skill_import(handler)
+
+
 def _make_user_skill_record(
     *,
     user_id="user-1",
@@ -88,6 +133,8 @@ def _make_user_skill_record(
     source_type="profile",
     source_profile_name="default_367959913725953",
     source_skill_slug="email-assistant",
+    origin_type="",
+    origin_agent_id="",
     record_id="record-1",
     status="active",
 ):
@@ -102,6 +149,8 @@ def _make_user_skill_record(
         "source_type": source_type,
         "source_profile_name": source_profile_name,
         "source_skill_slug": source_skill_slug,
+        "origin_type": origin_type,
+        "origin_agent_id": origin_agent_id,
         "storage_path": f"{user_id}/my-skills/{skill_slug}",
         "skill_file_path": "SKILL.md",
         "file_count": 1,
@@ -194,6 +243,8 @@ def test_user_skills_list_reads_nocobase_records(tmp_path, monkeypatch, nocobase
     assert payload["skills"][0]["summary"] == "处理邮件草稿"
     assert payload["skills"][0]["source"] == "imported"
     assert payload["skills"][0]["sourceFilename"] == "mail.md"
+    assert payload["skills"][0]["originType"] == "imported"
+    assert payload["skills"][0]["originAgentId"] == ""
     assert payload["skills"][0]["storagePath"] == "user-1/my-skills/mail-assistant"
     assert payload["skills"][0]["status"] == "fully_tested"
 
@@ -237,12 +288,16 @@ def test_import_markdown_writes_my_skills_and_creates_nocobase_record(
     assert nocobase_user_skills.create_calls[0]["source"] == "imported"
     assert nocobase_user_skills.create_calls[0]["source_filename"] == "mail.md"
     assert nocobase_user_skills.create_calls[0]["source_type"] == "markdown"
+    assert nocobase_user_skills.create_calls[0]["origin_type"] == "imported"
+    assert nocobase_user_skills.create_calls[0]["origin_agent_id"] == ""
     assert nocobase_user_skills.create_calls[0]["storage_path"] == "user-1/my-skills/mail-assistant"
     assert nocobase_user_skills.create_calls[0]["status"] == "draft"
     status, payload = _response(responses)
     assert status == 200
     assert payload["skill"]["englishName"] == "mail-assistant"
     assert payload["skill"]["source"] == "imported"
+    assert payload["skill"]["originType"] == "imported"
+    assert payload["skill"]["originAgentId"] == ""
 
 
 def test_import_archive_writes_my_skills_and_creates_nocobase_record(
@@ -288,6 +343,8 @@ def test_import_archive_writes_my_skills_and_creates_nocobase_record(
     assert (destination / "assets" / "readme.txt").is_file()
     assert len(nocobase_user_skills.create_calls) == 1
     assert nocobase_user_skills.create_calls[0]["source_type"] == "archive"
+    assert nocobase_user_skills.create_calls[0]["origin_type"] == "imported"
+    assert nocobase_user_skills.create_calls[0]["origin_agent_id"] == ""
     assert _response(responses)[0] == 200
 
 
@@ -403,6 +460,136 @@ def test_import_cleans_up_files_when_nocobase_create_fails(tmp_path, monkeypatch
     assert _response(responses)[1]["code"] == "nocobase_request_failed"
 
 
+@pytest.mark.parametrize(
+    ("file_name", "file_bytes", "expected_code", "expected_message"),
+    [
+        (
+            "mail.txt",
+            b"hello",
+            "unsupported_skill_upload_type",
+            "仅支持上传 .md、.zip、.tar、.tar.gz、.tgz、.tar.bz2、.tbz2、.tar.xz 或 .txz 文件。",
+        ),
+        (
+            "mail.md",
+            "---\nname: 邮箱助手\n---\n".encode("utf-8"),
+            "missing_skill_description",
+            "SKILL.md 的 frontmatter 缺少 description，请补充技能描述后再导入。",
+        ),
+        (
+            "mail.md",
+            "---\nname: 邮箱助手\n".encode("utf-8"),
+            "invalid_skill_frontmatter",
+            "SKILL.md 的 frontmatter 格式无效，请确认文件开头包含合法的 --- 元数据块。",
+        ),
+        (
+            "mail.zip",
+            _zip_bytes([("bundle/readme.txt", "asset")]),
+            "missing_skill_file",
+            "压缩包内未找到 SKILL.md，请把 Skill 根目录一起打包后再导入。",
+        ),
+        (
+            "mail.zip",
+            _zip_bytes([
+                ("one/SKILL.md", _skill_markdown()),
+                ("two/SKILL.md", _skill_markdown()),
+            ]),
+            "multiple_skill_files",
+            "压缩包内包含多个 SKILL.md，目前一次只能导入一个 Skill，请拆分后重新上传。",
+        ),
+        (
+            "mail.zip",
+            b"not a zip file",
+            "invalid_archive",
+            "压缩包格式无效或无法解压，请重新压缩后再上传。",
+        ),
+        (
+            "mail.zip",
+            _zip_bytes([("../SKILL.md", _skill_markdown())]),
+            "archive_path_traversal",
+            "压缩包内包含不安全路径，无法导入。请删除包含 ../ 的路径后重新压缩。",
+        ),
+        (
+            "mail.zip",
+            _zip_bytes([
+                ("bundle/SKILL.md", _skill_markdown()),
+                ("bundle/link.txt", "SKILL.md", "symlink"),
+            ]),
+            "archive_symlink",
+            "Skill 不能包含符号链接或硬链接，请改为普通文件后再导入。",
+        ),
+    ],
+)
+def test_import_error_messages_are_actionable(
+    tmp_path,
+    monkeypatch,
+    file_name,
+    file_bytes,
+    expected_code,
+    expected_message,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    responses = []
+
+    result = _run_import(
+        tmp_path,
+        monkeypatch,
+        skill_handler,
+        responses,
+        file_name,
+        file_bytes,
+    )
+
+    assert result is True
+    status, payload = _response(responses)
+    assert status == 400
+    assert payload["code"] == expected_code
+    assert payload["error"] == expected_message
+
+
+def test_import_rejects_missing_file_with_actionable_message(tmp_path, monkeypatch):
+    import api.routes_handlers.skill as skill_handler
+
+    responses = []
+
+    result = _run_import(
+        tmp_path,
+        monkeypatch,
+        skill_handler,
+        responses,
+        None,
+        b"",
+        english_name=None,
+    )
+
+    assert result is True
+    assert _response(responses)[0] == 400
+    assert _response(responses)[1]["code"] == "missing_file"
+    assert _response(responses)[1]["error"] == "请选择要导入的 Skill 文件。"
+
+
+def test_import_rejects_existing_skill_with_actionable_message(tmp_path, monkeypatch):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    responses = []
+
+    result = _run_import(
+        tmp_path,
+        monkeypatch,
+        skill_handler,
+        responses,
+        "mail.md",
+        _skill_markdown().encode("utf-8"),
+    )
+
+    assert result is True
+    assert _response(responses)[0] == 409
+    assert _response(responses)[1]["code"] == "skill_conflict"
+    assert _response(responses)[1]["error"] == "技能工坊中已存在该英文名，请修改英文名后再重试。"
+
+
 def test_publish_from_profile_copies_skill_updates_name_and_creates_nocobase_record(
     tmp_path,
     monkeypatch,
@@ -425,6 +612,7 @@ def test_publish_from_profile_copies_skill_updates_name_and_creates_nocobase_rec
         object(),
         {
             "profile_name": profile_name,
+            "profile_id": "364194385035264",
             "skill_slug": "email-assistant",
             "english_name": "mail-assistant",
             "name": "邮箱助手",
@@ -446,6 +634,8 @@ def test_publish_from_profile_copies_skill_updates_name_and_creates_nocobase_rec
     assert nocobase_user_skills.create_calls[0]["source_type"] == "profile"
     assert nocobase_user_skills.create_calls[0]["source_profile_name"] == profile_name
     assert nocobase_user_skills.create_calls[0]["source_skill_slug"] == "email-assistant"
+    assert nocobase_user_skills.create_calls[0]["origin_type"] == "agent"
+    assert nocobase_user_skills.create_calls[0]["origin_agent_id"] == "364194385035264"
     assert nocobase_user_skills.create_calls[0]["storage_path"] == "user-1/my-skills/mail-assistant"
     assert nocobase_user_skills.create_calls[0]["status"] == "draft"
     status, payload = _response(responses)
@@ -454,6 +644,42 @@ def test_publish_from_profile_copies_skill_updates_name_and_creates_nocobase_rec
     assert payload["skill"]["englishName"] == "mail-assistant"
     assert payload["skill"]["name"] == "邮箱助手"
     assert payload["skill"]["source"] == "profile"
+    assert payload["skill"]["originType"] == "agent"
+    assert payload["skill"]["originAgentId"] == "364194385035264"
+
+
+def test_publish_from_profile_rejects_missing_origin_agent_id_before_copy(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    profile_name = "default_367959913725953"
+    profile_home = tmp_path / "profiles" / profile_name
+    user_root = tmp_path / "users"
+    _write_skill(profile_home / "skills" / "email-assistant")
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=profile_home)
+
+    result = skill_handler._handle_user_skill_publish_from_profile(
+        object(),
+        {
+            "profile_name": profile_name,
+            "skill_slug": "email-assistant",
+            "english_name": "mail-assistant",
+            "name": "邮箱助手",
+        },
+    )
+
+    assert result is True
+    assert not (user_root / "user-1" / "my-skills" / "mail-assistant").exists()
+    assert not nocobase_user_skills.create_calls
+    assert _response(responses)[0] == 400
+    assert _response(responses)[1]["code"] == "missing_origin_agent_id"
 
 
 def test_publish_from_profile_rejects_existing_english_name(tmp_path, monkeypatch):
@@ -474,6 +700,7 @@ def test_publish_from_profile_rejects_existing_english_name(tmp_path, monkeypatc
         object(),
         {
             "profile_name": profile_name,
+            "profile_id": "364194385035264",
             "skill_slug": "email-assistant",
             "english_name": "mail-assistant",
             "name": "邮箱助手",
@@ -503,6 +730,7 @@ def test_publish_from_profile_rejects_destination_lock(tmp_path, monkeypatch):
         object(),
         {
             "profile_name": profile_name,
+            "profile_id": "364194385035264",
             "skill_slug": "email-assistant",
             "english_name": "mail-assistant",
             "name": "邮箱助手",
@@ -543,6 +771,7 @@ def test_publish_from_profile_cleans_up_when_nocobase_create_fails(tmp_path, mon
         object(),
         {
             "profile_name": profile_name,
+            "profile_id": "364194385035264",
             "skill_slug": "email-assistant",
             "english_name": "mail-assistant",
             "name": "邮箱助手",
@@ -2156,6 +2385,8 @@ def test_user_skill_file_read_rejects_invalid_paths(
     assert result is True
     assert _response(responses)[0] == 400 if expected_code != "skill_file_not_found" else 404
     assert _response(responses)[1]["code"] == expected_code
+    if expected_code == "skill_file_not_found":
+        assert _response(responses)[1]["error"] == "File not found"
 
 
 def test_user_skill_file_read_rejects_non_utf8_and_large_file(
@@ -2396,6 +2627,7 @@ def test_user_skill_rejects_forbidden_profile_without_copy(tmp_path, monkeypatch
         object(),
         {
             "profile_name": profile_name,
+            "profile_id": "364194385035264",
             "skill_slug": "email-assistant",
             "english_name": "mail-assistant",
             "name": "邮箱助手",
@@ -2430,6 +2662,7 @@ def test_user_skill_rejects_symlink_in_source(tmp_path, monkeypatch):
         object(),
         {
             "profile_name": profile_name,
+            "profile_id": "364194385035264",
             "skill_slug": "email-assistant",
             "english_name": "mail-assistant",
             "name": "邮箱助手",

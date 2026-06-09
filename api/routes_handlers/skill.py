@@ -55,6 +55,13 @@ _USER_SKILL_STATUS_VALUES = {
     _USER_SKILL_STATUS_SECURITY_TESTED,
     _USER_SKILL_STATUS_FULLY_TESTED,
 }
+_USER_SKILL_ORIGIN_IMPORTED = "imported"
+_USER_SKILL_ORIGIN_AGENT = "agent"
+_USER_SKILL_ORIGIN_VALUES = {
+    "",
+    _USER_SKILL_ORIGIN_IMPORTED,
+    _USER_SKILL_ORIGIN_AGENT,
+}
 _USER_SKILL_INSTALLABLE_STATUSES = {
     _USER_SKILL_STATUS_AVAILABILITY_TESTED,
     _USER_SKILL_STATUS_SECURITY_TESTED,
@@ -250,6 +257,28 @@ _USER_SKILL_TEST_RESULT_FIELDS = {
     "availability_tested_at",
 }
 _USER_SKILL_TEST_FIELD_CACHE: set[str] = set()
+_USER_SKILL_IMPORT_ERROR_MESSAGES = {
+    "unsupported_skill_upload_type": "仅支持上传 .md、.zip、.tar、.tar.gz、.tgz、.tar.bz2、.tbz2、.tar.xz 或 .txz 文件。",
+    "missing_file": "请选择要导入的 Skill 文件。",
+    "missing_filename": "上传文件缺少文件名，请重新选择文件后再导入。",
+    "upload_too_large": f"上传文件过大，当前最大支持 {MAX_UPLOAD_BYTES // 1024 // 1024}MB。",
+    "invalid_skill_encoding": "SKILL.md 必须是 UTF-8 文本，请转换编码后再导入。",
+    "invalid_skill_frontmatter": "SKILL.md 的 frontmatter 格式无效，请确认文件开头包含合法的 --- 元数据块。",
+    "missing_skill_name": "SKILL.md 的 frontmatter 缺少 name，请补充技能名称后再导入。",
+    "missing_skill_description": "SKILL.md 的 frontmatter 缺少 description，请补充技能描述后再导入。",
+    "skill_file_not_found": "未找到可读取的 SKILL.md，请确认上传的是 Skill 文件或包含 Skill 的压缩包。",
+    "missing_skill_file": "压缩包内未找到 SKILL.md，请把 Skill 根目录一起打包后再导入。",
+    "multiple_skill_files": "压缩包内包含多个 SKILL.md，目前一次只能导入一个 Skill，请拆分后重新上传。",
+    "invalid_archive": "压缩包格式无效或无法解压，请重新压缩后再上传。",
+    "archive_too_large": "压缩包解压后超过 200MB，请删除无关文件后再导入。",
+    "invalid_archive_path": "压缩包内包含非法文件路径，请检查文件名后重新压缩。",
+    "archive_path_traversal": "压缩包内包含不安全路径，无法导入。请删除包含 ../ 的路径后重新压缩。",
+    "archive_symlink": "Skill 不能包含符号链接或硬链接，请改为普通文件后再导入。",
+    "archive_link": "Skill 不能包含符号链接或硬链接，请改为普通文件后再导入。",
+    "skill_source_symlink": "Skill 不能包含符号链接或硬链接，请改为普通文件后再导入。",
+    "skill_conflict": "技能工坊中已存在该英文名，请修改英文名后再重试。",
+    "invalid_english_name": "英文名只能以字母或数字开头，并且只能包含字母、数字、- 或 _。",
+}
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _USER_SKILL_SECURITY_CHECKS = (
     {
@@ -564,11 +593,12 @@ def _first_skill_body_summary(body: str) -> str:
     return ""
 
 
-def _user_skill_error_response(handler, exc: _UserSkillError):
+def _user_skill_error_response(handler, exc: _UserSkillError, messages: dict | None = None):
+    message = (messages or {}).get(exc.code, str(exc))
     return _routes_binding("j")(
         handler,
         {
-            "error": str(exc),
+            "error": message,
             "code": exc.code,
         },
         status=exc.status,
@@ -608,6 +638,29 @@ def _validate_user_skill_name(value) -> str:
     if len(name) > _USER_SKILL_NAME_MAX:
         raise _UserSkillError("name is too long", code="invalid_name")
     return name
+
+
+def _validate_user_skill_origin_type(value) -> str:
+    origin_type = str(value or "").strip()
+    if origin_type not in _USER_SKILL_ORIGIN_VALUES:
+        raise _UserSkillError("Invalid origin_type", code="invalid_origin_type")
+    return origin_type
+
+
+def _validate_user_skill_origin_agent_id(value, *, required: bool = False) -> str:
+    origin_agent_id = str(value or "").strip()
+    if not origin_agent_id:
+        if required:
+            raise _UserSkillError("origin_agent_id is required", code="missing_origin_agent_id")
+        return ""
+    if (
+        "/" in origin_agent_id
+        or "\\" in origin_agent_id
+        or "\x00" in origin_agent_id
+        or len(origin_agent_id) > 80
+    ):
+        raise _UserSkillError("Invalid origin_agent_id", code="invalid_origin_agent_id")
+    return origin_agent_id
 
 
 def _normalize_user_skill_status(value) -> str:
@@ -1828,6 +1881,14 @@ def _nocobase_user_skill_record_to_skill(record: dict) -> dict | None:
     name = _clean_profile_installed_skill_text(record.get("name")) or skill_slug
     description = _clean_profile_installed_skill_text(record.get("description"))
     source = _clean_profile_installed_skill_text(record.get("source")) or "user"
+    origin_type = _clean_profile_installed_skill_text(
+        record.get("origin_type") or record.get("originType")
+    )
+    if not origin_type:
+        if source == "imported":
+            origin_type = _USER_SKILL_ORIGIN_IMPORTED
+        elif source == "profile":
+            origin_type = _USER_SKILL_ORIGIN_AGENT
     return {
         "recordId": str(record.get("id") or ""),
         "id": skill_slug,
@@ -1851,6 +1912,10 @@ def _nocobase_user_skill_record_to_skill(record: dict) -> dict | None:
         ),
         "sourceSkillSlug": _clean_profile_installed_skill_text(
             record.get("source_skill_slug") or record.get("sourceSkillSlug")
+        ),
+        "originType": origin_type,
+        "originAgentId": _clean_profile_installed_skill_text(
+            record.get("origin_agent_id") or record.get("originAgentId")
         ),
         "storagePath": _clean_profile_installed_skill_text(
             record.get("storage_path") or record.get("storagePath")
@@ -2388,11 +2453,18 @@ def _user_skill_record_body(
     source_type: str,
     source_profile_name: str = "",
     source_skill_slug: str = "",
+    origin_type: str = "",
+    origin_agent_id: str = "",
     metadata: dict,
     description: str,
 ) -> dict:
     file_count, size_bytes = _collect_import_tree_stats(destination)
     name = _clean_profile_installed_skill_text(metadata.get("name")) or skill_slug
+    normalized_origin_type = _validate_user_skill_origin_type(origin_type)
+    normalized_origin_agent_id = _validate_user_skill_origin_agent_id(
+        origin_agent_id,
+        required=normalized_origin_type == _USER_SKILL_ORIGIN_AGENT,
+    )
 
     return {
         "user_id": user_id,
@@ -2404,6 +2476,8 @@ def _user_skill_record_body(
         "source_type": source_type,
         "source_profile_name": source_profile_name,
         "source_skill_slug": source_skill_slug,
+        "origin_type": normalized_origin_type,
+        "origin_agent_id": normalized_origin_agent_id,
         "storage_path": _storage_path_for_user_skill(user_id, skill_slug),
         "skill_file_path": "SKILL.md",
         "file_count": file_count,
@@ -2907,6 +2981,7 @@ def _handle_user_skill_import(handler):
             source="imported",
             source_filename=source_filename,
             source_type=source_type,
+            origin_type=_USER_SKILL_ORIGIN_IMPORTED,
             metadata=metadata,
             description=description,
         )
@@ -2922,7 +2997,7 @@ def _handle_user_skill_import(handler):
             shutil.rmtree(temp_dir, ignore_errors=True)
         if destination and destination.exists():
             shutil.rmtree(destination, ignore_errors=True)
-        return _user_skill_error_response(handler, exc)
+        return _user_skill_error_response(handler, exc, _USER_SKILL_IMPORT_ERROR_MESSAGES)
     except ValueError as exc:
         if temp_dir and temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -2931,6 +3006,7 @@ def _handle_user_skill_import(handler):
         return _user_skill_error_response(
             handler,
             _UserSkillError(str(exc) or "导入请求格式无效", code="invalid_import_request"),
+            _USER_SKILL_IMPORT_ERROR_MESSAGES,
         )
     except OSError as exc:
         logger.exception("Failed to import user skill")
@@ -2995,6 +3071,13 @@ def _handle_user_skill_publish_from_profile(handler, body):
             body.get("english_name") or body.get("englishName")
         )
         name = _validate_user_skill_name(body.get("name"))
+        origin_agent_id = _validate_user_skill_origin_agent_id(
+            body.get("origin_agent_id")
+            or body.get("originAgentId")
+            or body.get("profile_id")
+            or body.get("profileId"),
+            required=True,
+        )
         user_id = _get_current_user_id(handler)
         profile_home = _get_owned_profile_home(handler, profile_name)
         profile_skills_dir = profile_home / "skills"
@@ -3031,6 +3114,8 @@ def _handle_user_skill_publish_from_profile(handler, body):
             source_type="profile",
             source_profile_name=profile_name,
             source_skill_slug=skill_slug,
+            origin_type=_USER_SKILL_ORIGIN_AGENT,
+            origin_agent_id=origin_agent_id,
             metadata=metadata,
             description=description,
         )
