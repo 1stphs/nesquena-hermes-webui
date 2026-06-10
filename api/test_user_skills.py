@@ -2870,7 +2870,15 @@ def test_user_skill_file_update_saves_text_and_marks_draft(
     source = user_root / "user-1" / "my-skills" / "mail-assistant"
     _write_skill(source)
     (source / "notes.md").write_text("old", encoding="utf-8")
-    nocobase_user_skills.records.append(_make_user_skill_record(status="fully_tested"))
+    nocobase_user_skills.records.append(
+        _make_user_skill_record(
+            status="fully_tested",
+            security_test_result={"status": "passed", "summary": "旧安全结果"},
+            security_tested_at="2026-06-10T01:00:00Z",
+            availability_test_result={"status": "passed", "summary": "旧可用性结果"},
+            availability_tested_at="2026-06-10T02:00:00Z",
+        )
+    )
     responses = []
 
     _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
@@ -2891,8 +2899,16 @@ def test_user_skill_file_update_saves_text_and_marks_draft(
     assert status == 200
     assert (source / "notes.md").read_text(encoding="utf-8") == "new"
     assert payload["skill"]["status"] == "draft"
+    assert payload["skill"]["securityTestResult"] is None
+    assert payload["skill"]["securityTestedAt"] == ""
+    assert payload["skill"]["availabilityTestResult"] is None
+    assert payload["skill"]["availabilityTestedAt"] == ""
     update_call = nocobase_user_skills.update_calls[-1]
     assert update_call["patch"]["status"] == "draft"
+    assert update_call["patch"]["security_test_result"] is None
+    assert update_call["patch"]["security_tested_at"] is None
+    assert update_call["patch"]["availability_test_result"] is None
+    assert update_call["patch"]["availability_tested_at"] is None
     assert update_call["patch"]["file_count"] == 2
     assert update_call["patch"]["size_bytes"] >= 3
     assert "name" not in update_call["patch"]
@@ -2909,7 +2925,15 @@ def test_user_skill_file_update_skill_md_syncs_metadata(
     user_root = tmp_path / "users"
     source = user_root / "user-1" / "my-skills" / "mail-assistant"
     _write_skill(source)
-    nocobase_user_skills.records.append(_make_user_skill_record(status="security_tested"))
+    nocobase_user_skills.records.append(
+        _make_user_skill_record(
+            status="security_tested",
+            security_test_result={"status": "passed", "summary": "旧安全结果"},
+            security_tested_at="2026-06-10T01:00:00Z",
+            availability_test_result={"status": "failed", "summary": "旧可用性结果"},
+            availability_tested_at="2026-06-10T02:00:00Z",
+        )
+    )
     responses = []
 
     _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
@@ -2930,11 +2954,20 @@ def test_user_skill_file_update_skill_md_syncs_metadata(
     assert status == 200
     assert payload["skill"]["name"] == "新名字"
     assert payload["skill"]["description"] == "新简介"
+    assert payload["skill"]["status"] == "draft"
+    assert payload["skill"]["securityTestResult"] is None
+    assert payload["skill"]["securityTestedAt"] == ""
+    assert payload["skill"]["availabilityTestResult"] is None
+    assert payload["skill"]["availabilityTestedAt"] == ""
     update_call = nocobase_user_skills.update_calls[-1]
     assert update_call["patch"]["name"] == "新名字"
     assert update_call["patch"]["description"] == "新简介"
     assert update_call["patch"]["skill_file_path"] == "SKILL.md"
     assert update_call["patch"]["status"] == "draft"
+    assert update_call["patch"]["security_test_result"] is None
+    assert update_call["patch"]["security_tested_at"] is None
+    assert update_call["patch"]["availability_test_result"] is None
+    assert update_call["patch"]["availability_tested_at"] is None
 
 
 def test_user_skill_file_update_rejects_invalid_skill_md_without_write(

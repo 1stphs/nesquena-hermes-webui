@@ -2508,6 +2508,10 @@ def _build_user_skill_file_update_patch(
     file_count, size_bytes = _collect_import_tree_stats(skill_dir)
     patch = {
         "status": _USER_SKILL_STATUS_DRAFT,
+        "security_test_result": None,
+        "security_tested_at": None,
+        "availability_test_result": None,
+        "availability_tested_at": None,
         "file_count": file_count,
         "size_bytes": size_bytes,
     }
