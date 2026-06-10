@@ -815,6 +815,12 @@ self.addEventListener('fetch', () => {});
     if parsed.path == "/api/user-skills":
         return _handle_user_skills_list(handler, parsed)
 
+    if parsed.path == "/api/skill-templates":
+        return _handle_skill_template_list(handler, parsed)
+
+    if parsed.path == "/api/skill-templates/review-list":
+        return _handle_skill_template_review_list(handler, parsed)
+
     if parsed.path == "/api/user-skills/files":
         return _handle_user_skill_files_list(handler, parsed)
 

@@ -224,6 +224,8 @@ def nocobase_skill_templates(monkeypatch):
         records=[],
         create_calls=[],
         update_calls=[],
+        market_list_calls=[],
+        review_list_calls=[],
         users=[{"id": "user-1", "role": "admin"}],
     )
 
@@ -240,6 +242,78 @@ def nocobase_skill_templates(monkeypatch):
             (record for record in state.users if str(record.get("id") or "") == str(user_id)),
             None,
         )
+
+    def fake_list_review_records(*, page=1, page_size=12, category="", keyword=""):
+        state.review_list_calls.append(
+            {
+                "page": page,
+                "page_size": page_size,
+                "category": category,
+                "keyword": keyword,
+            }
+        )
+        normalized_category = str(category or "").strip()
+        normalized_keyword = str(keyword or "").strip()
+        records = [
+            record
+            for record in state.records
+            if record.get("market_review_status") == "pending"
+            and (
+                not normalized_category
+                or normalized_category in str(record.get("categories") or "")
+            )
+            and (
+                not normalized_keyword
+                or normalized_keyword in str(record.get("title") or "")
+                or normalized_keyword in str(record.get("title_cn") or "")
+                or normalized_keyword in str(record.get("summary") or "")
+            )
+        ]
+        return {
+            "data": records,
+            "meta": {
+                "count": len(records),
+                "page": int(page),
+                "pageSize": int(page_size),
+                "totalPage": 1 if records else 0,
+            },
+        }
+
+    def fake_list_market_records(*, page=1, page_size=12, category="", keyword=""):
+        state.market_list_calls.append(
+            {
+                "page": page,
+                "page_size": page_size,
+                "category": category,
+                "keyword": keyword,
+            }
+        )
+        normalized_category = str(category or "").strip()
+        normalized_keyword = str(keyword or "").strip()
+        records = [
+            record
+            for record in state.records
+            if record.get("market_review_status") in ("", None, "approved")
+            and (
+                not normalized_category
+                or normalized_category in str(record.get("categories") or "")
+            )
+            and (
+                not normalized_keyword
+                or normalized_keyword in str(record.get("title") or "")
+                or normalized_keyword in str(record.get("title_cn") or "")
+                or normalized_keyword in str(record.get("summary") or "")
+            )
+        ]
+        return {
+            "data": records,
+            "meta": {
+                "count": len(records),
+                "page": int(page),
+                "pageSize": int(page_size),
+                "totalPage": 1 if records else 0,
+            },
+        }
 
     def fake_create_record(record):
         state.create_calls.append(record.copy())
@@ -264,6 +338,16 @@ def nocobase_skill_templates(monkeypatch):
         )
 
     monkeypatch.setattr(skill_handler, "_nocobase_list_skill_template_records", fake_list_records)
+    monkeypatch.setattr(
+        skill_handler,
+        "_nocobase_list_skill_template_review_records",
+        fake_list_review_records,
+    )
+    monkeypatch.setattr(
+        skill_handler,
+        "_nocobase_list_skill_template_market_records",
+        fake_list_market_records,
+    )
     monkeypatch.setattr(skill_handler, "_nocobase_create_skill_template_record", fake_create_record)
     monkeypatch.setattr(skill_handler, "_nocobase_update_skill_template_record", fake_update_record)
     monkeypatch.setattr(skill_handler, "_nocobase_get_hermes_user_record", fake_get_user_record)
@@ -1039,6 +1123,141 @@ def test_skill_template_approve_rejects_non_admin(tmp_path, monkeypatch, nocobas
 
     assert result is True
     assert not nocobase_skill_templates.update_calls
+    status, payload = _response(responses)
+    assert status == 403
+    assert payload["code"] == "skill_template_approve_forbidden"
+
+
+def test_skill_template_list_returns_approved_market_records(
+    tmp_path,
+    monkeypatch,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.records.extend(
+        [
+            {
+                "id": "template-1",
+                "title": "mail-assistant",
+                "categories": "productivity",
+                "market_review_status": "approved",
+            },
+            {
+                "id": "template-legacy",
+                "title": "legacy-skill",
+                "categories": "productivity",
+                "market_review_status": "",
+            },
+            {
+                "id": "template-pending",
+                "title": "pending-skill",
+                "categories": "productivity",
+                "market_review_status": "pending",
+            },
+        ]
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_list(
+        object(),
+        SimpleNamespace(query="page=1&pageSize=12&category=productivity"),
+    )
+
+    assert result is True
+    assert nocobase_skill_templates.market_list_calls == [
+        {
+            "page": "1",
+            "page_size": "12",
+            "category": "productivity",
+            "keyword": "",
+        }
+    ]
+    status, payload = _response(responses)
+    assert status == 200
+    assert [record["id"] for record in payload["data"]] == ["template-1", "template-legacy"]
+
+
+def test_skill_template_review_list_requires_admin_with_roles_field(
+    tmp_path,
+    monkeypatch,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.users = [{"id": "user-1", "roles": ["admin"]}]
+    nocobase_skill_templates.records.extend(
+        [
+            {
+                "id": "template-1",
+                "title": "mail-assistant",
+                "title_cn": "邮箱助手",
+                "categories": "productivity",
+                "market_review_status": "pending",
+            },
+            {
+                "id": "template-2",
+                "title": "approved-skill",
+                "categories": "productivity",
+                "market_review_status": "approved",
+            },
+        ]
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_review_list(
+        object(),
+        SimpleNamespace(query="page=2&pageSize=5&category=productivity&keyword=mail"),
+    )
+
+    assert result is True
+    assert nocobase_skill_templates.review_list_calls == [
+        {
+            "page": "2",
+            "page_size": "5",
+            "category": "productivity",
+            "keyword": "mail",
+        }
+    ]
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["meta"]["count"] == 1
+    assert payload["data"][0]["id"] == "template-1"
+
+
+def test_skill_template_review_list_rejects_non_admin(
+    tmp_path,
+    monkeypatch,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.users = [{"id": "user-1", "roles": ["user"]}]
+    nocobase_skill_templates.records.append(
+        {
+            "id": "template-1",
+            "title": "mail-assistant",
+            "market_review_status": "pending",
+        }
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_review_list(
+        object(),
+        SimpleNamespace(query="page=1&pageSize=12"),
+    )
+
+    assert result is True
+    assert not nocobase_skill_templates.review_list_calls
     status, payload = _response(responses)
     assert status == 403
     assert payload["code"] == "skill_template_approve_forbidden"

@@ -263,6 +263,8 @@ _SKILL_TEMPLATE_REVIEW_STATUS_PENDING = "pending"
 _SKILL_TEMPLATE_REVIEW_STATUS_APPROVED = "approved"
 _SKILL_TEMPLATE_TYPE_INNOSTAR = "innostar"
 _SKILL_TEMPLATE_APPROVER_ROLES = {"admin"}
+_SKILL_TEMPLATE_LIST_DEFAULT_PAGE_SIZE = 12
+_SKILL_TEMPLATE_LIST_MAX_PAGE_SIZE = 100
 _SKILL_TEMPLATE_CATEGORY_VALUES = {
     "software_development",
     "creative",
@@ -2053,20 +2055,135 @@ def _nocobase_list_skill_template_records(*, title: str = "", path: str = "") ->
     return records if isinstance(records, list) else []
 
 
+def _normalize_skill_template_review_list_int(value, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        number = int(str(value or "").strip() or str(default))
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(maximum, number))
+
+
+def _skill_template_review_status_filter(review_status: str) -> dict:
+    if review_status == _SKILL_TEMPLATE_REVIEW_STATUS_APPROVED:
+        return {
+            "$or": [
+                {"market_review_status.$eq": _SKILL_TEMPLATE_REVIEW_STATUS_APPROVED},
+                {"market_review_status.$is": None},
+                {"market_review_status.$empty": True},
+            ]
+        }
+    return {"market_review_status.$eq": _SKILL_TEMPLATE_REVIEW_STATUS_PENDING}
+
+
+def _nocobase_list_skill_template_page_records(
+    *,
+    review_status: str,
+    page: int = 1,
+    page_size: int = _SKILL_TEMPLATE_LIST_DEFAULT_PAGE_SIZE,
+    category: str = "",
+    keyword: str = "",
+) -> dict:
+    normalized_page = _normalize_skill_template_review_list_int(
+        page,
+        1,
+        minimum=1,
+        maximum=100000,
+    )
+    normalized_page_size = _normalize_skill_template_review_list_int(
+        page_size,
+        _SKILL_TEMPLATE_LIST_DEFAULT_PAGE_SIZE,
+        minimum=1,
+        maximum=_SKILL_TEMPLATE_LIST_MAX_PAGE_SIZE,
+    )
+    normalized_category = str(category or "").strip()
+    normalized_keyword = str(keyword or "").strip()
+    filter_conditions: list[dict] = [
+        _skill_template_review_status_filter(review_status),
+    ]
+
+    if normalized_category:
+        filter_conditions.append({"categories.$includes": normalized_category})
+
+    if normalized_keyword:
+        filter_conditions.append(
+            {
+                "$or": [
+                    {"title_cn.$includes": normalized_keyword},
+                    {"title.$includes": normalized_keyword},
+                    {"summary.$includes": normalized_keyword},
+                ]
+            }
+        )
+
+    filter_payload = filter_conditions[0] if len(filter_conditions) == 1 else {"$and": filter_conditions}
+    params = [
+        ("page", str(normalized_page)),
+        ("pageSize", str(normalized_page_size)),
+        ("except", "content"),
+        ("filter", json.dumps(filter_payload, ensure_ascii=False)),
+    ]
+    query = urllib.parse.urlencode(params)
+    return _nocobase_request(f"/{_SKILL_TEMPLATES_COLLECTION_NAME}:list?{query}")
+
+
+def _nocobase_list_skill_template_market_records(
+    *,
+    page: int = 1,
+    page_size: int = _SKILL_TEMPLATE_LIST_DEFAULT_PAGE_SIZE,
+    category: str = "",
+    keyword: str = "",
+) -> dict:
+    return _nocobase_list_skill_template_page_records(
+        review_status=_SKILL_TEMPLATE_REVIEW_STATUS_APPROVED,
+        page=page,
+        page_size=page_size,
+        category=category,
+        keyword=keyword,
+    )
+
+
+def _nocobase_list_skill_template_review_records(
+    *,
+    page: int = 1,
+    page_size: int = _SKILL_TEMPLATE_LIST_DEFAULT_PAGE_SIZE,
+    category: str = "",
+    keyword: str = "",
+) -> dict:
+    return _nocobase_list_skill_template_page_records(
+        review_status=_SKILL_TEMPLATE_REVIEW_STATUS_PENDING,
+        page=page,
+        page_size=page_size,
+        category=category,
+        keyword=keyword,
+    )
+
+
 def _nocobase_get_hermes_user_record(user_id: str) -> dict | None:
     normalized_user_id = _validate_user_skill_segment(user_id, "user_id", max_length=128)
-    query = urllib.parse.urlencode(
-        [
+    last_error = None
+    field_options = ("id,role,roles", "id,role", "")
+
+    for fields in field_options:
+        params = [
             ("paginate", "false"),
-            ("fields", "id,role"),
             ("filter[id]", normalized_user_id),
         ]
-    )
-    payload = _nocobase_request(f"/{_HERMES_USERS_COLLECTION_NAME}:list?{query}")
-    records = payload.get("data")
-    if not isinstance(records, list):
-        return None
-    return records[0] if records else None
+        if fields:
+            params.insert(1, ("fields", fields))
+        query = urllib.parse.urlencode(params)
+        try:
+            payload = _nocobase_request(f"/{_HERMES_USERS_COLLECTION_NAME}:list?{query}")
+        except _NocobaseSkillError as exc:
+            last_error = exc
+            continue
+        records = payload.get("data")
+        if not isinstance(records, list):
+            return None
+        return records[0] if records else None
+
+    if last_error:
+        raise last_error
+    return None
 
 
 def _nocobase_create_skill_template_record(record: dict) -> dict:
@@ -2629,12 +2746,49 @@ def _innostar_skills_root(*, create: bool = False) -> Path:
     return root
 
 
+def _collect_hermes_user_role_values(value) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, (list, tuple, set)):
+        roles: set[str] = set()
+        for item in value:
+            roles.update(_collect_hermes_user_role_values(item))
+        return roles
+    if isinstance(value, dict):
+        roles: set[str] = set()
+        for item in value.values():
+            roles.update(_collect_hermes_user_role_values(item))
+        return roles
+
+    text = str(value or "").strip()
+    if not text:
+        return set()
+
+    if (text.startswith("[") and text.endswith("]")) or (
+        text.startswith("{") and text.endswith("}")
+    ):
+        try:
+            return _collect_hermes_user_role_values(json.loads(text))
+        except json.JSONDecodeError:
+            pass
+
+    return {item.strip().lower() for item in re.split(r"[,，;；、\s]+", text) if item.strip()}
+
+
+def _get_hermes_user_role_values(user_record: dict | None) -> set[str]:
+    if not isinstance(user_record, dict):
+        return set()
+    roles = _collect_hermes_user_role_values(user_record.get("role"))
+    roles.update(_collect_hermes_user_role_values(user_record.get("roles")))
+    return roles
+
+
 def _ensure_skill_template_approver(handler) -> str:
     user_id = _get_current_user_id(handler)
     user_record = _nocobase_get_hermes_user_record(user_id)
-    role = str((user_record or {}).get("role") or "").strip().lower()
+    roles = _get_hermes_user_role_values(user_record)
 
-    if role not in _SKILL_TEMPLATE_APPROVER_ROLES:
+    if not roles.intersection(_SKILL_TEMPLATE_APPROVER_ROLES):
         raise _UserSkillError(
             "Skill template review requires admin role",
             status=403,
@@ -3411,6 +3565,45 @@ def _handle_user_skill_publish_to_market_review(handler, body):
             "template": template_record,
         },
     )
+
+
+def _handle_skill_template_review_list(handler, parsed):
+    try:
+        _ensure_skill_template_approver(handler)
+        params = urllib.parse.parse_qs(parsed.query)
+        page = params.get("page", ["1"])[0]
+        page_size = params.get("pageSize", params.get("page_size", ["12"]))[0]
+        category = params.get("category", [""])[0]
+        keyword = params.get("keyword", [""])[0]
+        payload = _nocobase_list_skill_template_review_records(
+            page=page,
+            page_size=page_size,
+            category=category,
+            keyword=keyword,
+        )
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+
+    return _routes_binding("j")(handler, payload)
+
+
+def _handle_skill_template_list(handler, parsed):
+    try:
+        params = urllib.parse.parse_qs(parsed.query)
+        page = params.get("page", ["1"])[0]
+        page_size = params.get("pageSize", params.get("page_size", ["12"]))[0]
+        category = params.get("category", [""])[0]
+        keyword = params.get("keyword", [""])[0]
+        payload = _nocobase_list_skill_template_market_records(
+            page=page,
+            page_size=page_size,
+            category=category,
+            keyword=keyword,
+        )
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+
+    return _routes_binding("j")(handler, payload)
 
 
 def _handle_skill_template_approve(handler, body):
