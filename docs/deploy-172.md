@@ -15,7 +15,24 @@ Do not write SSH passwords, service passwords, `hermes_session` cookies,
 long-lived API tokens, or provider API keys into this repository. Enter secrets
 interactively or load them from a local password manager.
 
-If you keep a private local deployment helper, commit only blank secret fields:
+## SSH Access
+
+Standard deploys should use key-based SSH:
+
+```bash
+ssh -o BatchMode=yes root@172.234.237.195 'hostname; whoami'
+```
+
+As of 2026-06-10, the server root account includes the local ED25519 public key
+with this fingerprint:
+
+```text
+SHA256:6PwXVCDoAouUICtY99Fgd/LXxEe3hPkvlDPBjpq9nw8 less@lesslindeMacBook-Air.local-github-20260605
+```
+
+Password SSH is only a recovery path for reinstalling or rotating public keys.
+Do not commit passwords. If you keep a private local deployment helper, commit
+only blank secret fields:
 
 ```bash
 SSH_HOST="172.234.237.195"
@@ -144,58 +161,67 @@ only `sha256:<hex>` token hashes.
 
 ## Deploy From Local Machine
 
-On the local development machine, commit and push the API service changes:
+Use this as the normal path after code review and local verification.
+
+On the local development machine, commit and push the API service changes from
+the current checkout:
 
 ```bash
-cd '/Users/mac/Documents/ljl-project/nesquena:hermes-webui'
-git status --short
+cd /Users/less/Documents/work/nesquena-hermes-webui
+git status --short --branch
+git log --oneline -1
 git push origin master
 ```
 
-Then SSH into the server:
+Confirm key-based SSH before touching the server working tree:
 
 ```bash
-ssh root@172.234.237.195
+ssh -o BatchMode=yes root@172.234.237.195 'hostname; whoami'
 ```
 
-All remaining commands in this section run on the server.
-
-First confirm the active container and compose ownership:
+Then confirm the active container and compose ownership:
 
 ```bash
-docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}'
-docker inspect hermes-webui --format 'project={{ index .Config.Labels "com.docker.compose.project" }} service={{ index .Config.Labels "com.docker.compose.service" }} config_files={{ index .Config.Labels "com.docker.compose.project.config_files" }} working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
-docker inspect hermes-webui --format '{{range .Mounts}}{{println .Source "=>" .Destination "(" .Mode ")"}}{{end}}'
+ssh -o BatchMode=yes root@172.234.237.195 '
+  docker ps --format "{{.Names}}|{{.Image}}|{{.Ports}}|{{.Status}}" | grep -E "^(hermes-webui|hermes)\\|"
+  docker inspect hermes-webui --format "project={{ index .Config.Labels \"com.docker.compose.project\" }} service={{ index .Config.Labels \"com.docker.compose.service\" }} config_files={{ index .Config.Labels \"com.docker.compose.project.config_files\" }} working_dir={{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}"
+'
 ```
 
 Avoid dumping `.Config.Env` unless you are specifically debugging environment
 inheritance; it may contain deployment secrets.
 
-Update the server source:
+Update the server source and build only the WebUI API service:
 
 ```bash
+ssh -o BatchMode=yes root@172.234.237.195 '
+set -e
 cd /var/www/nesquena-hermes-webui
 git fetch origin master
 git status --short
 git log --oneline -1 HEAD
 git log --oneline -1 origin/master
 git pull --ff-only origin master
-```
-
-Build and recreate only the WebUI API service:
-
-```bash
-cd /var/www/nesquena-hermes-webui
 docker compose up -d --build hermes-webui
+'
 ```
 
 This preserves the existing service name, container name, port mapping, and
 mounted state volumes.
 
+If GitHub SSH fetch fails with a protocol/framing error such as
+`expected flush after ref listing`, retry the fetch once with:
+
+```bash
+GIT_PROTOCOL=version=1 git fetch origin master
+```
+
 Confirm the compose owner after deploy:
 
 ```bash
-docker inspect hermes-webui --format 'project={{ index .Config.Labels "com.docker.compose.project" }} service={{ index .Config.Labels "com.docker.compose.service" }} config_files={{ index .Config.Labels "com.docker.compose.project.config_files" }} working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
+ssh -o BatchMode=yes root@172.234.237.195 '
+  docker inspect hermes-webui --format "project={{ index .Config.Labels \"com.docker.compose.project\" }} service={{ index .Config.Labels \"com.docker.compose.service\" }} config_files={{ index .Config.Labels \"com.docker.compose.project.config_files\" }} working_dir={{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}"
+'
 ```
 
 Expected:
@@ -229,20 +255,23 @@ means the command was run from the wrong compose project.
 
 ## Smoke Test
 
-Run these checks on the server after deploy.
+Run the minimum smoke checks after every deploy.
 
 Container and health:
 
 ```bash
 docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep hermes-webui
-curl -i http://127.0.0.1:8787/health
+docker inspect hermes-webui --format 'health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
+curl -sS --max-time 8 -o /tmp/hermes-health.json -w 'health_http=%{http_code}\n' http://127.0.0.1:8787/health
+python3 -m json.tool /tmp/hermes-health.json | head -20
 ```
 
 Expected:
 
 ```text
 hermes-webui|hermes-webui-token-login:latest|Up ... (healthy)
-HTTP/1.0 200 OK
+health=healthy
+health_http=200
 ```
 
 Code import check:
@@ -250,8 +279,9 @@ Code import check:
 ```bash
 docker exec -i hermes-webui /app/venv/bin/python - <<'PY'
 import api.routes as routes
+import api.routes_handlers.skill as skill
 print(routes.__file__)
-print(hasattr(routes, "_requested_sessions_profile"))
+print(hasattr(skill, "_build_user_skill_file_update_patch"))
 PY
 ```
 
@@ -279,6 +309,9 @@ Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS
 Access-Control-Allow-Headers: Content-Type, Authorization
 Vary: Origin
 ```
+
+The token-login and protected profile checks are full smoke tests. Run them when
+auth, cookie, profile, CORS, or token-login behavior changed.
 
 Token login without printing the token:
 
@@ -324,7 +357,8 @@ profiles_http=200
 Public smoke test from the local development machine:
 
 ```bash
-curl -i --max-time 8 http://172.234.237.195:8787/health
+curl -sS --max-time 8 -o /tmp/hermes-public-health.json -w 'public_health_http=%{http_code}\n' http://172.234.237.195:8787/health
+python3 -m json.tool /tmp/hermes-public-health.json | head -20
 curl -i --max-time 8 -X OPTIONS http://172.234.237.195:8787/api/auth/token-login \
   -H 'Origin: http://localhost:5173' \
   -H 'Access-Control-Request-Method: POST'
@@ -333,7 +367,7 @@ curl -i --max-time 8 -X OPTIONS http://172.234.237.195:8787/api/auth/token-login
 Expected:
 
 ```text
-HTTP/1.0 200 OK
+public_health_http=200
 HTTP/1.0 204 No Content
 Access-Control-Allow-Credentials: true
 ```

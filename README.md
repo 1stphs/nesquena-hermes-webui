@@ -47,14 +47,27 @@ python3 bootstrap.py
 
 ## 3. Docker 与部署
 
-当前生产部署以仓库内 `docker-compose.yml` 为准。172 服务器部署 runbook 位置:
+当前生产部署以仓库内 `docker-compose.yml` 和服务器实际 compose
+label 为准。172 服务器部署 runbook 位置:
 
-- `docs/deploy-172.md`: 从本地电脑提交/push、SSH 到服务器拉取代码、`docker compose` 重建、服务器路径、容器关系和 smoke test 步骤。
+- `docs/deploy-172.md`: 当前部署事实源，覆盖 SSH key 登录、服务器路径、容器关系、只重建 `hermes-webui`、smoke test 和 rollback。
+
+标准部署流程:
+
+1. 本地 review、验证、commit、push。
+2. 用 key 登录 `root@172.234.237.195`。
+3. 在 `/var/www/nesquena-hermes-webui` 执行 `git pull --ff-only origin master`。
+4. 只运行 `docker compose up -d --build hermes-webui`。
+5. 跑容器 health、本机 `127.0.0.1:8787/health`、公网 health 和 CORS preflight。
+
+截至 2026-06-10，本机 ED25519 公钥已写入服务器 root 的
+`authorized_keys`，后续部署优先使用 key 登录；密码只作为恢复或换 key
+时的临时路径，不写入仓库。
 
 其他保留文档:
 
-- `docs/docker.md`: Docker 通用说明。
-- `docs/supervisor.md`: process supervisor 说明。
+- `docs/docker.md`: Docker 通用说明，适合本地或非 172 环境。
+- `docs/supervisor.md`: process supervisor 说明，当前 172 生产部署不以它为主。
 - `docs/troubleshooting.md`: 常见故障排查。
 - `docs/api-docs.md`: API 说明。
 
