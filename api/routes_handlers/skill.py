@@ -45,7 +45,8 @@ _SKILL_TEMPLATES_COLLECTION_NAME = "hermes_skills_templates"
 _HERMES_USERS_COLLECTION_NAME = "hermes_users"
 _USER_SKILL_NAME_MAX = 64
 _USER_SKILL_SLUG_MAX = 150
-_USER_SKILL_ENGLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+_USER_SKILL_SLUG_SUFFIX_LENGTH = 10
+_USER_SKILL_ENGLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,149}$")
 _USER_SKILL_STATUS_DRAFT = "draft"
 _USER_SKILL_STATUS_AVAILABILITY_TESTED = "availability_tested"
 _USER_SKILL_STATUS_SECURITY_TESTED = "security_tested"
@@ -306,8 +307,9 @@ _USER_SKILL_IMPORT_ERROR_MESSAGES = {
     "archive_symlink": "Skill 不能包含符号链接或硬链接，请改为普通文件后再导入。",
     "archive_link": "Skill 不能包含符号链接或硬链接，请改为普通文件后再导入。",
     "skill_source_symlink": "Skill 不能包含符号链接或硬链接，请改为普通文件后再导入。",
-    "skill_conflict": "技能工坊中已存在该英文名，请修改英文名后再重试。",
-    "invalid_english_name": "英文名只能以字母或数字开头，并且只能包含字母、数字、- 或 _。",
+    "skill_conflict": "技能工坊中已存在同名技能，请稍后重试。",
+    "invalid_skill_slug": "技能标识只能以字母或数字开头，并且只能包含字母、数字、- 或 _。",
+    "skill_slug_generation_failed": "生成技能标识失败，请稍后重试。",
 }
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _USER_SKILL_SECURITY_CHECKS = (
@@ -652,13 +654,56 @@ def _validate_user_skill_segment(value, field: str, *, max_length: int = _USER_S
 
 
 def _validate_user_skill_english_name(value) -> str:
-    english_name = _validate_user_skill_segment(value, "english_name", max_length=80)
+    english_name = _validate_user_skill_segment(value, "skill_slug", max_length=_USER_SKILL_SLUG_MAX)
     if not _USER_SKILL_ENGLISH_NAME_RE.fullmatch(english_name):
         raise _UserSkillError(
-            "english_name must start with a letter or digit and contain only letters, digits, '-' or '_'",
-            code="invalid_english_name",
+            "技能标识只能以字母或数字开头，并且只能包含字母、数字、- 或 _。",
+            code="invalid_skill_slug",
         )
     return english_name
+
+
+def _user_skill_short_uuid() -> str:
+    return uuid.uuid4().hex[:_USER_SKILL_SLUG_SUFFIX_LENGTH]
+
+
+def _normalize_user_skill_slug_base(name: str) -> str:
+    normalized_name = _clean_profile_installed_skill_text(name).lower()
+    if not normalized_name or not normalized_name.isascii():
+        return ""
+    base = re.sub(r"[^a-z0-9]+", "-", normalized_name)
+    base = re.sub(r"-+", "-", base).strip("-")
+    if not base:
+        return ""
+    max_base_length = max(1, _USER_SKILL_SLUG_MAX - _USER_SKILL_SLUG_SUFFIX_LENGTH - 1)
+    return base[:max_base_length].rstrip("-")
+
+
+def _generate_user_skill_slug(name: str) -> str:
+    base = _normalize_user_skill_slug_base(name)
+    short_uuid = _user_skill_short_uuid()
+    if base:
+        return f"{base}-{short_uuid}"
+    return f"skill-{short_uuid}"
+
+
+def _generate_unique_user_skill_slug(user_id: str, name: str, root: Path) -> str:
+    root_path = Path(root).expanduser().resolve(strict=False)
+    for _attempt in range(32):
+        skill_slug = _generate_user_skill_slug(name)
+        destination = _safe_skill_child_dir(root_path, skill_slug)
+        temp_dir = _safe_skill_child_dir(root_path, f".{skill_slug}.uploading")
+        if (
+            not destination.exists()
+            and not temp_dir.exists()
+            and not _nocobase_get_user_skill_record(user_id, skill_slug)
+        ):
+            return skill_slug
+    raise _UserSkillError(
+        "Failed to generate unique skill slug",
+        status=500,
+        code="skill_slug_generation_failed",
+    )
 
 
 def _validate_user_skill_name(value) -> str:
@@ -707,6 +752,42 @@ def _validate_user_skill_status(value) -> str:
     if status not in _USER_SKILL_STATUS_VALUES:
         raise _UserSkillError("Invalid user skill status", code="invalid_status")
     return status
+
+
+def _coerce_user_skill_reset_test_results(value) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+    return None
+
+
+def _read_user_skill_reset_test_results(body: dict, *, default: bool) -> bool:
+    if "reset_test_results" in body:
+        parsed = _coerce_user_skill_reset_test_results(body.get("reset_test_results"))
+        if parsed is not None:
+            return parsed
+    if "resetTestResults" in body:
+        parsed = _coerce_user_skill_reset_test_results(body.get("resetTestResults"))
+        if parsed is not None:
+            return parsed
+    return default
+
+
+def _user_skill_reset_test_results_patch() -> dict:
+    return {
+        "status": _USER_SKILL_STATUS_DRAFT,
+        "security_test_result": {"status": "not_tested"},
+        "security_tested_at": None,
+        "availability_test_result": {"status": "not_tested"},
+        "availability_tested_at": None,
+    }
 
 
 def _utc_now_iso() -> str:
@@ -2621,17 +2702,16 @@ def _build_user_skill_file_update_patch(
     skill_dir: Path,
     relative_path: str,
     existing_record: dict,
+    reset_test_results: bool = True,
 ) -> dict:
     file_count, size_bytes = _collect_import_tree_stats(skill_dir)
     patch = {
-        "status": _USER_SKILL_STATUS_DRAFT,
-        "security_test_result": None,
-        "security_tested_at": None,
-        "availability_test_result": None,
-        "availability_tested_at": None,
         "file_count": file_count,
         "size_bytes": size_bytes,
     }
+
+    if reset_test_results:
+        patch.update(_user_skill_reset_test_results_patch())
 
     if relative_path == "SKILL.md":
         metadata, description = _read_user_skill_record_metadata(skill_dir)
@@ -3296,7 +3376,7 @@ def _handle_user_skill_import(handler):
         if content_length > MAX_UPLOAD_BYTES:
             raise _UserSkillError("上传文件过大", status=413, code="upload_too_large")
 
-        fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        _fields, files = parse_multipart(handler.rfile, content_type, content_length)
         if "file" not in files:
             raise _UserSkillError("请选择要导入的 Skill 文件", code="missing_file")
 
@@ -3307,21 +3387,10 @@ def _handle_user_skill_import(handler):
 
         source_type = _get_upload_source_type(source_filename)
         user_id = _get_current_user_id(handler)
-        skill_slug = _validate_user_skill_english_name(
-            fields.get("english_name")
-            or fields.get("englishName")
-            or fields.get("skill_slug")
-            or fields.get("skillSlug")
-        )
         my_skills_dir = _user_my_skills_dir(user_id, create=True)
         if my_skills_dir.is_symlink():
             raise _UserSkillError("My skills directory cannot be a symlink", code="my_skills_dir_symlink")
-        destination = _safe_skill_child_dir(my_skills_dir, skill_slug)
-        temp_dir = _safe_skill_child_dir(my_skills_dir, f".{skill_slug}.uploading")
-
-        if destination.exists() or temp_dir.exists():
-            raise _UserSkillError("Skill already exists", status=409, code="skill_conflict")
-
+        temp_dir = _safe_skill_child_dir(my_skills_dir, f".uploading-{uuid.uuid4().hex}")
         temp_dir.mkdir(parents=True)
         if source_type == "markdown":
             metadata, description, _skill_file_bytes = _write_markdown_import(temp_dir, file_bytes)
@@ -3331,6 +3400,12 @@ def _handle_user_skill_import(handler):
                 file_bytes,
                 source_filename,
             )
+        display_name = _clean_profile_installed_skill_text(metadata.get("name"))
+        skill_slug = _generate_unique_user_skill_slug(user_id, display_name, my_skills_dir)
+        destination = _safe_skill_child_dir(my_skills_dir, skill_slug)
+
+        if destination.exists():
+            raise _UserSkillError("Skill already exists", status=409, code="skill_conflict")
 
         _assert_no_symlink_tree(temp_dir)
         if not (temp_dir / "SKILL.md").is_file():
@@ -3431,10 +3506,6 @@ def _handle_user_skill_publish_from_profile(handler, body):
     try:
         profile_name = str(body.get("profile_name") or body.get("profileName") or "").strip()
         skill_slug = _validate_user_skill_segment(body.get("skill_slug") or body.get("skillSlug"), "skill_slug")
-        english_name = _validate_user_skill_english_name(
-            body.get("english_name") or body.get("englishName")
-        )
-        name = _validate_user_skill_name(body.get("name"))
         origin_agent_id = _validate_user_skill_origin_agent_id(
             body.get("origin_agent_id")
             or body.get("originAgentId")
@@ -3447,21 +3518,16 @@ def _handle_user_skill_publish_from_profile(handler, body):
         profile_skills_dir = profile_home / "skills"
         source_dir = _safe_skill_child_dir(profile_skills_dir, skill_slug)
         my_skills_dir = _user_my_skills_dir(user_id, create=True)
-        destination = _resolve_inside(my_skills_dir, english_name)
 
         if profile_skills_dir.exists() and profile_skills_dir.is_symlink():
             raise _UserSkillError("Profile skills directory cannot be a symlink", code="profile_skills_symlink")
 
+        metadata, description = _read_user_skill_record_metadata(source_dir)
+        display_name = _clean_profile_installed_skill_text(metadata.get("name"))
+        publish_skill_slug = _generate_unique_user_skill_slug(user_id, display_name, my_skills_dir)
+        destination = _resolve_inside(my_skills_dir, publish_skill_slug)
+
         _copy_skill_tree_atomic(source_dir, destination)
-        try:
-            _update_skill_frontmatter_name(destination / "SKILL.md", name)
-        except _UserSkillError:
-            try:
-                if destination.exists():
-                    shutil.rmtree(destination)
-            except OSError:
-                pass
-            raise
         skill = _read_user_skill(destination, my_skills_dir)
         if not skill:
             raise _UserSkillError(
@@ -3469,10 +3535,9 @@ def _handle_user_skill_publish_from_profile(handler, body):
                 status=500,
                 code="published_skill_unreadable",
             )
-        metadata, description = _read_user_skill_record_metadata(destination)
         record_body = _user_skill_record_body(
             user_id=user_id,
-            skill_slug=english_name,
+            skill_slug=publish_skill_slug,
             destination=destination,
             source="profile",
             source_type="profile",
@@ -3685,6 +3750,7 @@ def _handle_user_skill_file_update(handler, body):
         )
         relative_path = _normalize_user_skill_file_path(body.get("path"))
         next_content = _validate_user_skill_text_content(body.get("content"))
+        should_reset_test_results = _read_user_skill_reset_test_results(body, default=True)
         user_id = _get_current_user_id(handler)
         _my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
         target = _resolve_user_skill_file(skill_dir, relative_path)
@@ -3710,6 +3776,7 @@ def _handle_user_skill_file_update(handler, body):
             skill_dir=skill_dir,
             relative_path=relative_path,
             existing_record=record,
+            reset_test_results=should_reset_test_results,
         )
         updated_record = _nocobase_update_user_skill_record(user_id, skill_slug, update_patch)
         payload = _user_skill_response_payload(updated_record)
@@ -4042,31 +4109,53 @@ def _handle_user_skill_update(handler, body):
             body.get("skill_slug") or body.get("skillSlug")
         )
         user_id = _get_current_user_id(handler)
+        should_reset_test_results = _read_user_skill_reset_test_results(body, default=False)
+        raw_name = body.get("name")
+        if raw_name is None:
+            raw_name = body.get("title_cn")
+        if raw_name is None:
+            raw_name = body.get("titleCn")
+        english_name = str(body.get("english_name") or body.get("englishName") or "").strip()
+        has_name_or_rename = raw_name is not None or bool(english_name)
 
-        if "status" in body:
-            next_status = _validate_user_skill_status(body.get("status"))
-            record = _nocobase_update_user_skill_record(user_id, skill_slug, {"status": next_status})
-            payload = _user_skill_response_payload(record)
-            return _routes_binding("j")(handler, payload)
+        if not has_name_or_rename:
+            if should_reset_test_results:
+                record = _nocobase_update_user_skill_record(
+                    user_id,
+                    skill_slug,
+                    _user_skill_reset_test_results_patch(),
+                )
+                payload = _user_skill_response_payload(record)
+                return _routes_binding("j")(handler, payload)
 
-        english_name = _validate_user_skill_english_name(
-            body.get("english_name") or body.get("englishName")
-        )
-        name = _validate_user_skill_name(body.get("name"))
+            if "status" in body:
+                next_status = _validate_user_skill_status(body.get("status"))
+                record = _nocobase_update_user_skill_record(
+                    user_id,
+                    skill_slug,
+                    {"status": next_status},
+                )
+                payload = _user_skill_response_payload(record)
+                return _routes_binding("j")(handler, payload)
+
+        name = _validate_user_skill_name(raw_name)
         my_skills_dir = _user_my_skills_dir(user_id)
         source_dir = _safe_skill_child_dir(my_skills_dir, skill_slug)
-        destination = _resolve_inside(my_skills_dir, english_name)
+        destination = None
 
         if not source_dir.is_dir() or not (source_dir / "SKILL.md").is_file():
             raise _UserSkillError("Skill not found", status=404, code="skill_not_found")
         _assert_no_symlink_tree(source_dir)
         original_content = (source_dir / "SKILL.md").read_text(encoding="utf-8")
 
-        if source_dir == destination:
+        if english_name:
+            destination = _resolve_inside(my_skills_dir, _validate_user_skill_english_name(english_name))
+
+        if not english_name or destination == source_dir:
             _update_skill_frontmatter_name(source_dir / "SKILL.md", name)
             updated_dir = source_dir
         else:
-            with _skill_destination_lock(my_skills_dir, english_name):
+            with _skill_destination_lock(my_skills_dir, destination.name):
                 if destination.exists():
                     raise _UserSkillError("Skill already exists", status=409, code="skill_conflict")
                 try:
@@ -4099,7 +4188,7 @@ def _handle_user_skill_update(handler, body):
         metadata, description = _read_user_skill_record_metadata(updated_dir)
         record_body = _user_skill_record_body(
             user_id=user_id,
-            skill_slug=english_name,
+            skill_slug=destination.name if destination else skill_slug,
             destination=updated_dir,
             source="",
             source_type="",
@@ -4115,6 +4204,13 @@ def _handle_user_skill_update(handler, body):
             "file_count": record_body["file_count"],
             "size_bytes": record_body["size_bytes"],
         }
+        if "status" in body:
+            if should_reset_test_results:
+                update_patch.update(_user_skill_reset_test_results_patch())
+            else:
+                update_patch["status"] = _validate_user_skill_status(body.get("status"))
+        elif should_reset_test_results:
+            update_patch.update(_user_skill_reset_test_results_patch())
         record = _nocobase_update_user_skill_record(user_id, skill_slug, update_patch)
         payload = _user_skill_response_payload(record)
     except _UserSkillError as exc:
