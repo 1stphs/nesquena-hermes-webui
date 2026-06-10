@@ -1819,6 +1819,12 @@ def dispatch_post(handler, parsed) -> bool:
     if parsed.path == "/api/user-skills/publish-from-profile":
         return _handle_user_skill_publish_from_profile(handler, body)
 
+    if parsed.path == "/api/user-skills/publish-to-market-review":
+        return _handle_user_skill_publish_to_market_review(handler, body)
+
+    if parsed.path == "/api/skill-templates/approve":
+        return _handle_skill_template_approve(handler, body)
+
     if parsed.path == "/api/user-skills/install-to-profile":
         return _handle_user_skill_install_to_profile(handler, body)
 

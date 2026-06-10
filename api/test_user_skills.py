@@ -137,6 +137,10 @@ def _make_user_skill_record(
     origin_agent_id="",
     record_id="record-1",
     status="active",
+    security_test_result=None,
+    security_tested_at="",
+    availability_test_result=None,
+    availability_tested_at="",
 ):
     return {
         "id": record_id,
@@ -156,6 +160,10 @@ def _make_user_skill_record(
         "file_count": 1,
         "size_bytes": 128,
         "status": status,
+        "security_test_result": security_test_result,
+        "security_tested_at": security_tested_at,
+        "availability_test_result": availability_test_result,
+        "availability_tested_at": availability_tested_at,
     }
 
 
@@ -205,6 +213,60 @@ def nocobase_user_skills(monkeypatch):
     monkeypatch.setattr(skill_handler, "_nocobase_create_user_skill_record", fake_create_record)
     monkeypatch.setattr(skill_handler, "_nocobase_update_user_skill_record", fake_update_record)
     monkeypatch.setattr(skill_handler, "_ensure_user_skill_test_fields", lambda: None)
+    return state
+
+
+@pytest.fixture(autouse=True)
+def nocobase_skill_templates(monkeypatch):
+    import api.routes_handlers.skill as skill_handler
+
+    state = SimpleNamespace(
+        records=[],
+        create_calls=[],
+        update_calls=[],
+        users=[{"id": "user-1", "role": "admin"}],
+    )
+
+    def fake_list_records(*, title="", path=""):
+        return [
+            record
+            for record in state.records
+            if (title and record.get("title") == title)
+            or (path and record.get("path") == path)
+        ]
+
+    def fake_get_user_record(user_id):
+        return next(
+            (record for record in state.users if str(record.get("id") or "") == str(user_id)),
+            None,
+        )
+
+    def fake_create_record(record):
+        state.create_calls.append(record.copy())
+        created = {
+            **record,
+            "id": f"template-{len(state.records) + 1}",
+        }
+        state.records.insert(0, created)
+        return created
+
+    def fake_update_record(template_id, patch):
+        state.update_calls.append({"template_id": template_id, "patch": patch.copy()})
+        for index, record in enumerate(state.records):
+            if str(record.get("id") or "") == str(template_id):
+                updated = {**record, **patch}
+                state.records[index] = updated
+                return updated
+        raise skill_handler._NocobaseSkillError(
+            "Skill template not found",
+            status=404,
+            code="skill_template_not_found",
+        )
+
+    monkeypatch.setattr(skill_handler, "_nocobase_list_skill_template_records", fake_list_records)
+    monkeypatch.setattr(skill_handler, "_nocobase_create_skill_template_record", fake_create_record)
+    monkeypatch.setattr(skill_handler, "_nocobase_update_skill_template_record", fake_update_record)
+    monkeypatch.setattr(skill_handler, "_nocobase_get_hermes_user_record", fake_get_user_record)
     return state
 
 
@@ -646,6 +708,340 @@ def test_publish_from_profile_copies_skill_updates_name_and_creates_nocobase_rec
     assert payload["skill"]["source"] == "profile"
     assert payload["skill"]["originType"] == "agent"
     assert payload["skill"]["originAgentId"] == "364194385035264"
+
+
+def test_publish_to_market_review_copies_skill_and_creates_pending_template(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
+    source = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(source)
+    nocobase_user_skills.records.append(
+        _make_user_skill_record(
+            status="fully_tested",
+            security_test_result={"status": "passed", "summary": "安全通过"},
+            security_tested_at="2026-06-10T01:00:00Z",
+            availability_test_result={"status": "passed", "summary": "有效性通过"},
+            availability_tested_at="2026-06-10T02:00:00Z",
+        )
+    )
+    responses = []
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {
+            "skill_slug": "mail-assistant",
+            "categories": "productivity",
+        },
+    )
+
+    destination = innostar_root / "mail-assistant"
+    assert result is True
+    assert destination.is_dir()
+    assert (destination / "SKILL.md").read_text(encoding="utf-8") == (
+        source / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert len(nocobase_skill_templates.create_calls) == 1
+    create_call = nocobase_skill_templates.create_calls[0]
+    assert create_call["title"] == "mail-assistant"
+    assert create_call["title_cn"] == "邮箱助手"
+    assert create_call["summary"] == "处理邮件草稿"
+    assert create_call["type"] == "innostar"
+    assert create_call["categories"] == "productivity"
+    assert create_call["market_review_status"] == "pending"
+    assert create_call["path"] == str(destination.resolve(strict=False))
+    assert create_call["content"].startswith("---\nname: 原始助手")
+    assert create_call["security_test_result"] == {"status": "passed", "summary": "安全通过"}
+    assert create_call["security_tested_at"] == "2026-06-10T01:00:00Z"
+    assert create_call["availability_test_result"] == {
+        "status": "passed",
+        "summary": "有效性通过",
+    }
+    assert create_call["availability_tested_at"] == "2026-06-10T02:00:00Z"
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["template"]["id"] == "template-1"
+
+
+def test_publish_to_market_review_rejects_existing_target_dir(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    _write_skill(innostar_root / "mail-assistant")
+    nocobase_user_skills.records.append(_make_user_skill_record())
+    responses = []
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {"skill_slug": "mail-assistant", "categories": "productivity"},
+    )
+
+    assert result is True
+    assert _response(responses)[0] == 409
+    assert _response(responses)[1]["code"] == "skill_template_conflict"
+    assert not nocobase_skill_templates.create_calls
+
+
+def test_publish_to_market_review_rejects_existing_template(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    destination = innostar_root / "mail-assistant"
+    nocobase_user_skills.records.append(_make_user_skill_record())
+    nocobase_skill_templates.records.append(
+        {
+            "id": "template-existing",
+            "title": "mail-assistant",
+            "path": str(destination.resolve(strict=False)),
+        }
+    )
+    responses = []
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {"skill_slug": "mail-assistant", "categories": "productivity"},
+    )
+
+    assert result is True
+    assert not destination.exists()
+    assert _response(responses)[0] == 409
+    assert _response(responses)[1]["code"] == "skill_template_conflict"
+    assert not nocobase_skill_templates.create_calls
+
+
+def test_publish_to_market_review_rolls_back_when_template_create_fails(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    nocobase_user_skills.records.append(_make_user_skill_record())
+    responses = []
+
+    def fail_create(_record):
+        raise skill_handler._NocobaseSkillError(
+            "NoCoBase request failed",
+            status=502,
+            code="nocobase_request_failed",
+        )
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
+    monkeypatch.setattr(skill_handler, "_nocobase_create_skill_template_record", fail_create)
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {"skill_slug": "mail-assistant", "categories": "productivity"},
+    )
+
+    assert result is True
+    assert not (innostar_root / "mail-assistant").exists()
+    assert _response(responses)[0] == 502
+    assert _response(responses)[1]["code"] == "nocobase_request_failed"
+
+
+def test_publish_to_market_review_allows_missing_reports(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    nocobase_user_skills.records.append(_make_user_skill_record(status="draft"))
+    responses = []
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {"skill_slug": "mail-assistant", "categories": "productivity"},
+    )
+
+    assert result is True
+    create_call = nocobase_skill_templates.create_calls[0]
+    assert create_call["security_test_result"] is None
+    assert create_call["security_tested_at"] == ""
+    assert create_call["availability_test_result"] is None
+    assert create_call["availability_tested_at"] == ""
+    assert _response(responses)[0] == 200
+
+
+def test_publish_to_market_review_rejects_missing_current_user_skill(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    nocobase_user_skills.records.append(_make_user_skill_record(user_id="user-2"))
+    responses = []
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {"skill_slug": "mail-assistant", "categories": "productivity"},
+    )
+
+    assert result is True
+    assert not (innostar_root / "mail-assistant").exists()
+    assert not nocobase_skill_templates.create_calls
+    assert _response(responses)[0] == 404
+    assert _response(responses)[1]["code"] == "skill_record_not_found"
+
+
+def test_publish_to_market_review_rejects_symlink_innostar_root(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    real_root = tmp_path / "real-innostar"
+    symlink_root = tmp_path / "hub" / "hermes-innostar-skills"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    real_root.mkdir(parents=True)
+    symlink_root.parent.mkdir(parents=True)
+    try:
+        symlink_root.symlink_to(real_root, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    nocobase_user_skills.records.append(_make_user_skill_record())
+    responses = []
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(symlink_root))
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {"skill_slug": "mail-assistant", "categories": "productivity"},
+    )
+
+    assert result is True
+    assert not (real_root / "mail-assistant").exists()
+    assert not nocobase_skill_templates.create_calls
+    assert _response(responses)[0] == 400
+    assert _response(responses)[1]["code"] == "innostar_skills_dir_symlink"
+
+
+def test_skill_template_approve_sets_review_status(tmp_path, monkeypatch, nocobase_skill_templates):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.records.append(
+        {
+            "id": "template-1",
+            "title": "mail-assistant",
+            "market_review_status": "pending",
+        }
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_approve(
+        object(),
+        {"template_id": "template-1"},
+    )
+
+    assert result is True
+    assert nocobase_skill_templates.update_calls == [
+        {
+            "template_id": "template-1",
+            "patch": {"market_review_status": "approved"},
+        }
+    ]
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["template"]["market_review_status"] == "approved"
+
+
+def test_skill_template_approve_rejects_non_admin(tmp_path, monkeypatch, nocobase_skill_templates):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.users = [{"id": "user-1", "role": "user"}]
+    nocobase_skill_templates.records.append(
+        {
+            "id": "template-1",
+            "title": "mail-assistant",
+            "market_review_status": "pending",
+        }
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_approve(
+        object(),
+        {"template_id": "template-1"},
+    )
+
+    assert result is True
+    assert not nocobase_skill_templates.update_calls
+    status, payload = _response(responses)
+    assert status == 403
+    assert payload["code"] == "skill_template_approve_forbidden"
 
 
 def test_publish_from_profile_rejects_missing_origin_agent_id_before_copy(

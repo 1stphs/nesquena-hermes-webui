@@ -85,6 +85,8 @@ Current important mounts:
 /var/www/hermes-agent/.hermes:/.hermes
 /var/www/nesquena-hermes-webui/hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent
 /var/www/hermes_skills_hub:/var/www/hermes_skills_hub:ro
+/var/www/hermes_skills_hub/hermes-innostar-skills:/var/www/hermes_skills_hub/hermes-innostar-skills:rw
+/var/www/hermes_skills_hub/hermes_talent_market:/var/www/hermes_skills_hub/hermes_talent_market:rw
 ```
 
 Current important environment:
@@ -102,6 +104,7 @@ HERMES_COMMUNITY_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-community-skills
 HERMES_BUILT_IN_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-built-in-skills
 HERMES_OPTIONAL_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-optional-skills
 HERMES_BIOCLAW_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-bioclaw-skills
+HERMES_INNOSTAR_SKILLS_DIR=/var/www/hermes_skills_hub/hermes-innostar-skills
 HERMES_TALENT_MARKET_DIR=/var/www/hermes_skills_hub/hermes_talent_market
 HERMES_WEBUI_CORS_ALLOW_ALL=1
 ```

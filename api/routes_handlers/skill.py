@@ -41,6 +41,8 @@ _PROFILE_INSTALLED_SKILL_TEXT_LIMIT = 280
 USER_SKILLS_ROOT = Path("/home/hermeswebui/.hermes/webui-mvp/users")
 _USER_MY_SKILLS_DIR_NAME = "my-skills"
 _USER_SKILLS_COLLECTION_NAME = "hermes_user_skills"
+_SKILL_TEMPLATES_COLLECTION_NAME = "hermes_skills_templates"
+_HERMES_USERS_COLLECTION_NAME = "hermes_users"
 _USER_SKILL_NAME_MAX = 64
 _USER_SKILL_SLUG_MAX = 150
 _USER_SKILL_ENGLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
@@ -255,6 +257,32 @@ _USER_SKILL_TEST_RESULT_FIELDS = {
     "security_tested_at",
     "availability_test_result",
     "availability_tested_at",
+}
+_SKILL_TEMPLATE_REPORT_FIELDS = _USER_SKILL_TEST_RESULT_FIELDS
+_SKILL_TEMPLATE_REVIEW_STATUS_PENDING = "pending"
+_SKILL_TEMPLATE_REVIEW_STATUS_APPROVED = "approved"
+_SKILL_TEMPLATE_TYPE_INNOSTAR = "innostar"
+_SKILL_TEMPLATE_APPROVER_ROLES = {"admin"}
+_SKILL_TEMPLATE_CATEGORY_VALUES = {
+    "software_development",
+    "creative",
+    "mlops",
+    "research",
+    "productivity",
+    "finance",
+    "health",
+    "media",
+    "social_media",
+    "ai_agent",
+    "devops",
+    "github",
+    "security",
+    "copywriting",
+    "apple",
+    "translation",
+    "gaming",
+    "other",
+    "bioclaw_skills_hub",
 }
 _USER_SKILL_TEST_FIELD_CACHE: set[str] = set()
 _USER_SKILL_IMPORT_ERROR_MESSAGES = {
@@ -2009,6 +2037,80 @@ def _nocobase_update_user_skill_record(user_id: str, original_skill_slug: str, p
     return updated if isinstance(updated, dict) and updated else {**record, **patch}
 
 
+def _nocobase_list_skill_template_records(*, title: str = "", path: str = "") -> list[dict]:
+    params = [("paginate", "false")]
+    normalized_title = str(title or "").strip()
+    normalized_path = str(path or "").strip()
+
+    if normalized_title:
+        params.append(("filter[$or][0][title]", normalized_title))
+    if normalized_path:
+        params.append(("filter[$or][1][path]", normalized_path))
+
+    query = urllib.parse.urlencode(params)
+    payload = _nocobase_request(f"/{_SKILL_TEMPLATES_COLLECTION_NAME}:list?{query}")
+    records = payload.get("data")
+    return records if isinstance(records, list) else []
+
+
+def _nocobase_get_hermes_user_record(user_id: str) -> dict | None:
+    normalized_user_id = _validate_user_skill_segment(user_id, "user_id", max_length=128)
+    query = urllib.parse.urlencode(
+        [
+            ("paginate", "false"),
+            ("fields", "id,role"),
+            ("filter[id]", normalized_user_id),
+        ]
+    )
+    payload = _nocobase_request(f"/{_HERMES_USERS_COLLECTION_NAME}:list?{query}")
+    records = payload.get("data")
+    if not isinstance(records, list):
+        return None
+    return records[0] if records else None
+
+
+def _nocobase_create_skill_template_record(record: dict) -> dict:
+    payload = _nocobase_request(
+        f"/{_SKILL_TEMPLATES_COLLECTION_NAME}:create",
+        method="POST",
+        body=record,
+    )
+    data = payload.get("data")
+    if isinstance(data, list):
+        created = data[0] if data else {}
+    elif isinstance(data, dict):
+        created = data
+    else:
+        created = payload
+    return created if isinstance(created, dict) and created else record
+
+
+def _nocobase_update_skill_template_record(template_id: str, patch: dict) -> dict:
+    normalized_template_id = _validate_user_skill_segment(
+        template_id,
+        "template_id",
+        max_length=80,
+    )
+    params = urllib.parse.urlencode([("filterByTk", normalized_template_id)])
+    payload = _nocobase_request(
+        f"/{_SKILL_TEMPLATES_COLLECTION_NAME}:update?{params}",
+        method="POST",
+        body=patch,
+    )
+    data = payload.get("data")
+    if isinstance(data, list):
+        updated = data[0] if data else {}
+    elif isinstance(data, dict):
+        updated = data
+    else:
+        updated = payload
+    return (
+        updated
+        if isinstance(updated, dict) and updated
+        else {"id": normalized_template_id, **patch}
+    )
+
+
 def _nocobase_user_skill_field_names() -> set[str]:
     payload = _nocobase_request(
         f"/collections:get?filterByTk={_USER_SKILLS_COLLECTION_NAME}&appends=fields"
@@ -2488,6 +2590,106 @@ def _user_skill_record_body(
         "size_bytes": size_bytes,
         "status": _USER_SKILL_STATUS_DRAFT,
     }
+
+
+def _validate_skill_template_category(value) -> str:
+    category = str(value or "").strip()
+    if not category:
+        raise _UserSkillError("categories is required", code="missing_categories")
+    if category not in _SKILL_TEMPLATE_CATEGORY_VALUES:
+        raise _UserSkillError("Invalid categories", code="invalid_categories")
+    return category
+
+
+def _innostar_skills_root(*, create: bool = False) -> Path:
+    raw = os.getenv("HERMES_INNOSTAR_SKILLS_DIR", "").strip()
+    if raw:
+        configured_root = Path(raw).expanduser()
+    else:
+        hub_root = os.getenv("HERMES_SKILLS_HUB_DIR", "").strip()
+        if hub_root:
+            configured_root = Path(hub_root).expanduser() / "hermes-innostar-skills"
+        else:
+            configured_root = Path("/var/www/hermes_skills_hub/hermes-innostar-skills")
+
+    if configured_root.is_symlink():
+        raise _UserSkillError(
+            "Innostar skills directory cannot be a symlink",
+            code="innostar_skills_dir_symlink",
+        )
+
+    root = configured_root.resolve(strict=False)
+
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _ensure_skill_template_approver(handler) -> str:
+    user_id = _get_current_user_id(handler)
+    user_record = _nocobase_get_hermes_user_record(user_id)
+    role = str((user_record or {}).get("role") or "").strip().lower()
+
+    if role not in _SKILL_TEMPLATE_APPROVER_ROLES:
+        raise _UserSkillError(
+            "Skill template review requires admin role",
+            status=403,
+            code="skill_template_approve_forbidden",
+        )
+
+    return user_id
+
+
+def _read_user_skill_market_content(skill_dir: Path) -> tuple[dict, str, str]:
+    skill_file = skill_dir / "SKILL.md"
+    metadata, description, _skill_file_bytes = _read_import_skill_file(skill_file)
+    try:
+        content = skill_file.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise _UserSkillError("SKILL.md 必须是 UTF-8 文本", code="invalid_skill_encoding") from exc
+    except OSError as exc:
+        raise _UserSkillError(
+            "读取 SKILL.md 失败",
+            status=500,
+            code="skill_file_read_failed",
+        ) from exc
+    return metadata, description, content
+
+
+def _skill_template_review_record_body(
+    *,
+    skill_slug: str,
+    destination: Path,
+    category: str,
+    user_skill_record: dict,
+    metadata: dict,
+    description: str,
+    content: str,
+) -> dict:
+    name = _clean_profile_installed_skill_text(
+        user_skill_record.get("name")
+        or user_skill_record.get("title_cn")
+        or user_skill_record.get("titleCn")
+        or metadata.get("name")
+    )
+    summary = _clean_profile_installed_skill_text(
+        user_skill_record.get("description")
+        or user_skill_record.get("summary")
+        or description
+    )
+    record = {
+        "title": skill_slug,
+        "title_cn": name or skill_slug,
+        "summary": summary,
+        "content": content,
+        "path": str(Path(destination).resolve(strict=False)),
+        "type": _SKILL_TEMPLATE_TYPE_INNOSTAR,
+        "categories": category,
+        "market_review_status": _SKILL_TEMPLATE_REVIEW_STATUS_PENDING,
+    }
+    for field_name in _SKILL_TEMPLATE_REPORT_FIELDS:
+        record[field_name] = user_skill_record.get(field_name)
+    return record
 
 
 def _user_skill_response_payload(record: dict) -> dict:
@@ -3137,6 +3339,98 @@ def _handle_user_skill_publish_from_profile(handler, body):
         return _user_skill_error_response(handler, exc)
 
     return _routes_binding("j")(handler, payload)
+
+
+def _handle_user_skill_publish_to_market_review(handler, body):
+    destination = None
+    try:
+        skill_slug = _validate_user_skill_english_name(
+            body.get("skill_slug") or body.get("skillSlug")
+        )
+        category = _validate_skill_template_category(
+            body.get("categories") or body.get("category")
+        )
+        user_id = _get_current_user_id(handler)
+        _my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
+        metadata, description, content = _read_user_skill_market_content(skill_dir)
+        innostar_root = _innostar_skills_root(create=True)
+        destination = _safe_skill_child_dir(innostar_root, skill_slug)
+        destination_path = str(destination.resolve(strict=False))
+
+        if destination.exists():
+            raise _UserSkillError(
+                "Skill template already exists",
+                status=409,
+                code="skill_template_conflict",
+            )
+        if _nocobase_list_skill_template_records(title=skill_slug, path=destination_path):
+            raise _UserSkillError(
+                "Skill template already exists",
+                status=409,
+                code="skill_template_conflict",
+            )
+
+        _copy_skill_tree_atomic(skill_dir, destination)
+        template_body = _skill_template_review_record_body(
+            skill_slug=skill_slug,
+            destination=destination,
+            category=category,
+            user_skill_record=record,
+            metadata=metadata,
+            description=description,
+            content=content,
+        )
+        try:
+            template_record = _nocobase_create_skill_template_record(template_body)
+        except _UserSkillError:
+            if destination.exists():
+                shutil.rmtree(destination, ignore_errors=True)
+            raise
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+    except OSError as exc:
+        logger.exception("Failed to publish user skill to market review")
+        if destination and destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        return _routes_binding("bad")(
+            handler,
+            _routes_binding("_sanitize_error")(exc),
+            500,
+        )
+
+    return _routes_binding("j")(
+        handler,
+        {
+            "ok": True,
+            "skillSlug": skill_slug,
+            "path": str(destination.resolve(strict=False)),
+            "template": template_record,
+        },
+    )
+
+
+def _handle_skill_template_approve(handler, body):
+    try:
+        _ensure_skill_template_approver(handler)
+        template_id = (
+            body.get("template_id")
+            or body.get("templateId")
+            or body.get("id")
+        )
+        updated_record = _nocobase_update_skill_template_record(
+            str(template_id or "").strip(),
+            {"market_review_status": _SKILL_TEMPLATE_REVIEW_STATUS_APPROVED},
+        )
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+
+    return _routes_binding("j")(
+        handler,
+        {
+            "ok": True,
+            "template": updated_record,
+        },
+    )
 
 
 def _handle_user_skill_install_to_profile(handler, body):

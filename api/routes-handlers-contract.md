@@ -8,7 +8,7 @@
 {
   "contracts": [],
   "counts": {
-    "green": 98,
+    "green": 100,
     "red": 0,
     "yellow": 0
   },
@@ -459,6 +459,12 @@
       "status": "green"
     },
     {
+      "function": "_handle_skill_template_approve",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
       "function": "_handle_skill_uninstall_profile",
       "location": "api/routes_handlers/skill.py",
       "reasons": [],
@@ -543,6 +549,12 @@
       "status": "green"
     },
     {
+      "function": "_handle_user_skill_publish_to_market_review",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
       "function": "_handle_user_skill_test_availability",
       "location": "api/routes_handlers/skill.py",
       "reasons": [],
@@ -608,7 +620,7 @@
 
 ## Summary
 
-- green: 98
+- green: 100
 - yellow: 0
 - red: 0
 
@@ -690,6 +702,7 @@
 | green | `_handle_skill_delete` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_skill_install_community` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_skill_save` | `api/routes.py` | no source-level contract detected |
+| green | `_handle_skill_template_approve` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_skill_uninstall_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_sse_stream` | `api/routes_handlers/streaming.py` | no source-level contract detected |
 | green | `_handle_terminal_close` | `api/routes_handlers/terminal.py` | no source-level contract detected |
@@ -704,6 +717,7 @@
 | green | `_handle_user_skill_import_cancel` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_install_to_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_publish_from_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
+| green | `_handle_user_skill_publish_to_market_review` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_test_availability` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_test_availability_status` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_test_security` | `api/routes_handlers/skill.py` | no source-level contract detected |
