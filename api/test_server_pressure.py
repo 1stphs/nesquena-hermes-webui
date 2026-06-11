@@ -7,6 +7,7 @@ from api.routes_helpers import server_pressure
 
 class _FakeHandler:
     headers = {}
+    close_connection = False
 
 
 class _FakeSession:
@@ -129,6 +130,7 @@ def test_session_new_pressure_short_circuits_before_body_read(monkeypatch):
         captured["payload"] = payload
         captured["status"] = status
         captured["extra_headers"] = extra_headers
+        captured["handler_close_connection"] = _handler.close_connection
         return True
 
     monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
@@ -157,7 +159,11 @@ def test_session_new_pressure_short_circuits_before_body_read(monkeypatch):
             "code": server_pressure.SERVER_MEMORY_PRESSURE_CODE,
         },
         "status": 503,
-        "extra_headers": {"Retry-After": server_pressure.SERVER_MEMORY_PRESSURE_RETRY_AFTER},
+        "extra_headers": {
+            "Retry-After": server_pressure.SERVER_MEMORY_PRESSURE_RETRY_AFTER,
+            "Connection": "close",
+        },
+        "handler_close_connection": True,
     }
 
 
@@ -168,6 +174,7 @@ def test_chat_start_pressure_short_circuits_before_handler(monkeypatch):
         captured["payload"] = payload
         captured["status"] = status
         captured["extra_headers"] = extra_headers
+        captured["handler_close_connection"] = _handler.close_connection
         return True
 
     monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
@@ -193,7 +200,11 @@ def test_chat_start_pressure_short_circuits_before_handler(monkeypatch):
     assert captured["status"] == 503
     assert captured["payload"]["error"] == server_pressure.SERVER_MEMORY_PRESSURE_MESSAGE
     assert captured["payload"]["code"] == server_pressure.SERVER_MEMORY_PRESSURE_CODE
-    assert captured["extra_headers"] == {"Retry-After": server_pressure.SERVER_MEMORY_PRESSURE_RETRY_AFTER}
+    assert captured["extra_headers"] == {
+        "Retry-After": server_pressure.SERVER_MEMORY_PRESSURE_RETRY_AFTER,
+        "Connection": "close",
+    }
+    assert captured["handler_close_connection"] is True
 
 
 def test_session_new_without_pressure_keeps_existing_flow(monkeypatch):

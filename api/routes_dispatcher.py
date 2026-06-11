@@ -1096,6 +1096,8 @@ def dispatch_post(handler, parsed) -> bool:
         return handle_transcribe(handler)
 
     if parsed.path in ("/api/session/new", "/api/chat/start") and _is_server_memory_pressure_exceeded():
+        # 读 body 前短路时关闭连接，避免未消费请求体污染后续请求。
+        handler.close_connection = True
         return j(
             handler,
             {
@@ -1103,7 +1105,10 @@ def dispatch_post(handler, parsed) -> bool:
                 "code": SERVER_MEMORY_PRESSURE_CODE,
             },
             status=503,
-            extra_headers={"Retry-After": SERVER_MEMORY_PRESSURE_RETRY_AFTER},
+            extra_headers={
+                "Retry-After": SERVER_MEMORY_PRESSURE_RETRY_AFTER,
+                "Connection": "close",
+            },
         )
 
     body = read_body(handler)
