@@ -374,6 +374,7 @@ from api.routes_handlers.skill import (
     _handle_user_skill_publish_to_market_review,
     _handle_skill_template_approve,
     _handle_skill_template_list,
+    _handle_skill_template_reject,
     _handle_skill_template_review_list,
     _handle_user_skill_test_availability,
     _handle_user_skill_test_availability_status,

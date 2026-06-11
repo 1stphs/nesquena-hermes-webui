@@ -8,7 +8,7 @@
 {
   "contracts": [],
   "counts": {
-    "green": 102,
+    "green": 103,
     "red": 0,
     "yellow": 0
   },
@@ -471,6 +471,12 @@
       "status": "green"
     },
     {
+      "function": "_handle_skill_template_reject",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
       "function": "_handle_skill_template_review_list",
       "location": "api/routes_handlers/skill.py",
       "reasons": [],
@@ -632,7 +638,7 @@
 
 ## Summary
 
-- green: 102
+- green: 103
 - yellow: 0
 - red: 0
 
@@ -716,6 +722,7 @@
 | green | `_handle_skill_save` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_skill_template_approve` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_skill_template_list` | `api/routes_handlers/skill.py` | no source-level contract detected |
+| green | `_handle_skill_template_reject` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_skill_template_review_list` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_skill_uninstall_profile` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_sse_stream` | `api/routes_handlers/streaming.py` | no source-level contract detected |

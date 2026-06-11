@@ -188,7 +188,7 @@ python scripts/ensure_user_skill_test_fields.py --apply
 
 `--apply` 只创建缺失的 `security_test_result`、`security_tested_at`、`availability_test_result`、`availability_tested_at` 字段，不修改或删除已有记录；执行前仍要按生产 schema 变更流程确认。
 
-技能工坊提交技能市场审核前，还需要检查 NoCoBase `hermes_skills_templates` 是否存在审核报告快照字段:
+技能工坊提交技能市场审核前，还需要检查 NoCoBase `hermes_skills_templates` 是否存在审核报告快照字段和驳回原因字段:
 
 ```bash
 python scripts/ensure_skill_template_review_fields.py
@@ -200,7 +200,8 @@ python scripts/ensure_skill_template_review_fields.py
 python scripts/ensure_skill_template_review_fields.py --apply
 ```
 
-`--apply` 只创建缺失的报告快照字段，不修改或删除已有模板记录。
+`--apply` 只创建缺失的报告快照字段和 `market_reject_reason` 字段，不修改或删除已有模板记录。
+`market_review_status` 还需要支持 `pending`、`approved`、`rejected` 三个值。
 
 ## 10. 清理边界
 

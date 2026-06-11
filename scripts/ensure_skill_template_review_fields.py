@@ -23,6 +23,7 @@ REQUIRED_FIELDS = (
     "security_tested_at",
     "availability_test_result",
     "availability_tested_at",
+    "market_reject_reason",
 )
 ENV_FILES = (
     ".env.webui.local",
@@ -197,6 +198,17 @@ def _field_payloads() -> dict[str, dict[str, Any]]:
             },
             "description": "Submitted user Skill Promptfoo completion time",
         },
+        "market_reject_reason": {
+            "name": "market_reject_reason",
+            "type": "text",
+            "interface": "textarea",
+            "uiSchema": {
+                "type": "string",
+                "x-component": "Input.TextArea",
+                "title": "驳回原因",
+            },
+            "description": "Skill market review rejection reason",
+        },
     }
 
 
@@ -244,6 +256,8 @@ def _print_summary(*, existing: set[str], missing: list[str], apply_changes: boo
             )
     else:
         print("  - none")
+    print("Review status values:")
+    print("  - market_review_status should allow pending, approved, and rejected.")
     if missing and not apply_changes:
         print("Dry-run only. Re-run with --apply after schema change approval.")
 

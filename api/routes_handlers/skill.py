@@ -262,6 +262,9 @@ _USER_SKILL_TEST_RESULT_FIELDS = {
 _SKILL_TEMPLATE_REPORT_FIELDS = _USER_SKILL_TEST_RESULT_FIELDS
 _SKILL_TEMPLATE_REVIEW_STATUS_PENDING = "pending"
 _SKILL_TEMPLATE_REVIEW_STATUS_APPROVED = "approved"
+_SKILL_TEMPLATE_REVIEW_STATUS_REJECTED = "rejected"
+_SKILL_TEMPLATE_REJECT_REASON_FIELD = "market_reject_reason"
+_SKILL_TEMPLATE_REJECT_REASON_MAX_LENGTH = 1000
 _SKILL_TEMPLATE_TYPE_INNOSTAR = "innostar"
 _SKILL_TEMPLATE_APPROVER_ROLES = {"admin"}
 _SKILL_TEMPLATE_LIST_DEFAULT_PAGE_SIZE = 12
@@ -556,6 +559,26 @@ def _clean_profile_installed_skill_text(
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _normalize_skill_template_reject_reason(value) -> str:
+    text = (
+        str(value if value is not None else "")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .strip()
+    )
+    if not text:
+        raise _UserSkillError(
+            "Skill template reject reason is required",
+            code="skill_template_reject_reason_required",
+        )
+    if len(text) > _SKILL_TEMPLATE_REJECT_REASON_MAX_LENGTH:
+        raise _UserSkillError(
+            "Skill template reject reason is too long",
+            code="skill_template_reject_reason_too_long",
+        )
+    return text
 
 
 def _split_skill_frontmatter(text: str) -> tuple[dict, str]:
@@ -2896,6 +2919,7 @@ def _read_user_skill_market_content(skill_dir: Path) -> tuple[dict, str, str]:
 
 def _skill_template_review_record_body(
     *,
+    user_id: str,
     skill_slug: str,
     destination: Path,
     category: str,
@@ -2924,6 +2948,7 @@ def _skill_template_review_record_body(
         "type": _SKILL_TEMPLATE_TYPE_INNOSTAR,
         "categories": category,
         "market_review_status": _SKILL_TEMPLATE_REVIEW_STATUS_PENDING,
+        "user_id": user_id,
     }
     for field_name in _SKILL_TEMPLATE_REPORT_FIELDS:
         record[field_name] = user_skill_record.get(field_name)
@@ -3641,6 +3666,7 @@ def _handle_user_skill_publish_to_market_review(handler, body):
 
         _copy_skill_tree_atomic(skill_dir, destination)
         template_body = _skill_template_review_record_body(
+            user_id=user_id,
             skill_slug=skill_slug,
             destination=destination,
             category=category,
@@ -3728,6 +3754,34 @@ def _handle_skill_template_approve(handler, body):
         updated_record = _nocobase_update_skill_template_record(
             str(template_id or "").strip(),
             {"market_review_status": _SKILL_TEMPLATE_REVIEW_STATUS_APPROVED},
+        )
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+
+    return _routes_binding("j")(
+        handler,
+        {
+            "ok": True,
+            "template": updated_record,
+        },
+    )
+
+
+def _handle_skill_template_reject(handler, body):
+    try:
+        _ensure_skill_template_approver(handler)
+        template_id = (
+            body.get("template_id")
+            or body.get("templateId")
+            or body.get("id")
+        )
+        reject_reason = _normalize_skill_template_reject_reason(body.get("reason"))
+        updated_record = _nocobase_update_skill_template_record(
+            str(template_id or "").strip(),
+            {
+                "market_review_status": _SKILL_TEMPLATE_REVIEW_STATUS_REJECTED,
+                _SKILL_TEMPLATE_REJECT_REASON_FIELD: reject_reason,
+            },
         )
     except _UserSkillError as exc:
         return _user_skill_error_response(handler, exc)

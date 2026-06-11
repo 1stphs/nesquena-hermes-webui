@@ -1205,6 +1205,157 @@ def test_skill_template_approve_rejects_non_admin(tmp_path, monkeypatch, nocobas
     assert payload["code"] == "skill_template_approve_forbidden"
 
 
+def test_skill_template_reject_sets_review_status_and_reason(
+    tmp_path,
+    monkeypatch,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.records.append(
+        {
+            "id": "template-1",
+            "title": "mail-assistant",
+            "market_review_status": "pending",
+        }
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_reject(
+        object(),
+        {"template_id": "template-1", "reason": "  质量不足\r\n需要补报告  "},
+    )
+
+    assert result is True
+    assert nocobase_skill_templates.update_calls == [
+        {
+            "template_id": "template-1",
+            "patch": {
+                "market_review_status": "rejected",
+                "market_reject_reason": "质量不足\n需要补报告",
+            },
+        }
+    ]
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["template"]["market_review_status"] == "rejected"
+    assert payload["template"]["market_reject_reason"] == "质量不足\n需要补报告"
+
+
+def test_skill_template_reject_rejects_non_admin(tmp_path, monkeypatch, nocobase_skill_templates):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.users = [{"id": "user-1", "role": "user"}]
+    nocobase_skill_templates.records.append(
+        {
+            "id": "template-1",
+            "title": "mail-assistant",
+            "market_review_status": "pending",
+        }
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_reject(
+        object(),
+        {"template_id": "template-1", "reason": "质量不足"},
+    )
+
+    assert result is True
+    assert not nocobase_skill_templates.update_calls
+    status, payload = _response(responses)
+    assert status == 403
+    assert payload["code"] == "skill_template_approve_forbidden"
+
+
+def test_skill_template_reject_requires_reason(tmp_path, monkeypatch, nocobase_skill_templates):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.records.append(
+        {
+            "id": "template-1",
+            "title": "mail-assistant",
+            "market_review_status": "pending",
+        }
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_reject(
+        object(),
+        {"template_id": "template-1", "reason": " \r\n "},
+    )
+
+    assert result is True
+    assert not nocobase_skill_templates.update_calls
+    status, payload = _response(responses)
+    assert status == 400
+    assert payload["code"] == "skill_template_reject_reason_required"
+
+
+def test_skill_template_reject_rejects_long_reason(
+    tmp_path,
+    monkeypatch,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    nocobase_skill_templates.records.append(
+        {
+            "id": "template-1",
+            "title": "mail-assistant",
+            "market_review_status": "pending",
+        }
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_skill_template_reject(
+        object(),
+        {"template_id": "template-1", "reason": "长" * 1001},
+    )
+
+    assert result is True
+    assert not nocobase_skill_templates.update_calls
+    status, payload = _response(responses)
+    assert status == 400
+    assert payload["code"] == "skill_template_reject_reason_too_long"
+
+
+def test_skill_template_reject_route_dispatches(monkeypatch):
+    import api.routes as routes
+    import api.routes_dispatcher as dispatcher
+
+    body = {"template_id": "template-1", "reason": "质量不足"}
+    calls = []
+    handler = object()
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr(routes, "read_body", lambda _handler: body)
+    monkeypatch.setattr(
+        routes,
+        "_handle_skill_template_reject",
+        lambda next_handler, next_body: calls.append((next_handler, next_body)) or True,
+    )
+
+    result = dispatcher.dispatch_post(
+        handler,
+        SimpleNamespace(path="/api/skill-templates/reject"),
+    )
+
+    assert result is True
+    assert calls == [(handler, body)]
+
+
 def test_skill_template_list_returns_approved_market_records(
     tmp_path,
     monkeypatch,
@@ -1231,6 +1382,12 @@ def test_skill_template_list_returns_approved_market_records(
                 "title": "pending-skill",
                 "categories": "productivity",
                 "market_review_status": "pending",
+            },
+            {
+                "id": "template-rejected",
+                "title": "rejected-skill",
+                "categories": "productivity",
+                "market_review_status": "rejected",
             },
         ]
     )
@@ -1280,6 +1437,12 @@ def test_skill_template_review_list_requires_admin_with_roles_field(
                 "title": "approved-skill",
                 "categories": "productivity",
                 "market_review_status": "approved",
+            },
+            {
+                "id": "template-rejected",
+                "title": "rejected-skill",
+                "categories": "productivity",
+                "market_review_status": "rejected",
             },
         ]
     )
