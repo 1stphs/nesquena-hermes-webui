@@ -8,6 +8,10 @@ letting api/routes.py stay as the stable public entrypoint.
 import urllib.parse
 
 
+SESSION_PAGE_SIZE_DEFAULT = 20
+SESSION_PAGE_SIZE_MAX = 100
+
+
 def _sync_routes_bindings() -> None:
     import api.routes as routes
 
@@ -16,6 +20,56 @@ def _sync_routes_bindings() -> None:
         if name.startswith("__") and name.endswith("__"):
             continue
         current[name] = value
+
+
+def _parse_positive_int(value: str, field_name: str) -> int:
+    try:
+        parsed = int(str(value or "").strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return parsed
+
+
+def _parse_sessions_pagination(parsed):
+    params = urllib.parse.parse_qs(parsed.query or "")
+    has_page = "page" in params
+    has_page_size = "page_size" in params
+    if not has_page and not has_page_size:
+        return None
+
+    page = _parse_positive_int(params.get("page", ["1"])[0], "page")
+    page_size = _parse_positive_int(
+        params.get("page_size", [str(SESSION_PAGE_SIZE_DEFAULT)])[0],
+        "page_size",
+    )
+    if page_size > SESSION_PAGE_SIZE_MAX:
+        raise ValueError(f"page_size must be between 1 and {SESSION_PAGE_SIZE_MAX}")
+
+    return {
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+def _paginate_sessions(sessions, pagination_request):
+    total = len(sessions)
+    page = pagination_request["page"]
+    page_size = pagination_request["page_size"]
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    start = (page - 1) * page_size
+    end = start + page_size
+    has_more = page < total_pages
+
+    return sessions[start:end], {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+        "has_more": has_more,
+        "next_page": page + 1 if has_more else None,
+    }
 
 
 def dispatch_get(handler, parsed) -> bool:
@@ -456,6 +510,10 @@ self.addEventListener('fetch', () => {});
         return j(handler, {"results": get_results(sid)})
 
     if parsed.path == "/api/sessions":
+        try:
+            pagination_request = _parse_sessions_pagination(parsed)
+        except ValueError as e:
+            return bad(handler, str(e), 400)
         webui_sessions = all_sessions()
         settings = load_settings()
         show_cli_sessions = bool(settings.get("show_cli_sessions"))
@@ -519,13 +577,17 @@ self.addEventListener('fetch', () => {});
         scoped = _keep_latest_messaging_session_per_source(scoped)
         if show_cli_sessions:
             scoped = _cap_recent_cli_sessions(scoped, cli_cap=CLI_VISIBLE_SESSION_CAP)
+        if pagination_request is not None:
+            scoped, pagination = _paginate_sessions(scoped, pagination_request)
+        else:
+            pagination = None
         safe_merged = []
         for s in scoped:
             item = dict(s)
             if isinstance(item.get("title"), str):
                 item["title"] = _redact_text(item["title"])
             safe_merged.append(item)
-        return j(handler, {
+        payload = {
             "sessions": safe_merged,
             "cli_count": len(deduped_cli),
             "all_profiles": all_profiles,
@@ -533,7 +595,10 @@ self.addEventListener('fetch', () => {});
             "other_profile_count": other_profile_count,
             "server_time": time.time(),
             "server_tz": time.strftime("%z"),
-        })
+        }
+        if pagination is not None:
+            payload["pagination"] = pagination
+        return j(handler, payload)
 
     if parsed.path == "/api/projects":
         # ── Profile scoping (#1614) ────────────────────────────────────────
