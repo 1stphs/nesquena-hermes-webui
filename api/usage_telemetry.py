@@ -32,7 +32,8 @@ class UsageTelemetryError(RuntimeError):
 
 
 def is_usage_telemetry_enabled() -> bool:
-    return os.getenv(USAGE_TELEMETRY_ENABLED_ENV, "").strip() == "1"
+    raw_value = os.getenv(USAGE_TELEMETRY_ENABLED_ENV, "").strip().lower()
+    return raw_value not in {"0", "false", "no", "off", "disabled"}
 
 
 def _normalize_nocobase_api_base_url() -> str:

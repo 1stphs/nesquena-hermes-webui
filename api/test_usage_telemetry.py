@@ -195,8 +195,8 @@ def test_build_chat_usage_done_event_skips_missing_user_id():
     assert usage_telemetry.build_chat_usage_done_event(**_usage_kwargs(user_id="")) is None
 
 
-def test_record_chat_usage_disabled_does_not_open_url(monkeypatch):
-    monkeypatch.delenv("HERMES_USAGE_TELEMETRY_ENABLED", raising=False)
+def test_record_chat_usage_explicitly_disabled_does_not_open_url(monkeypatch):
+    monkeypatch.setenv("HERMES_USAGE_TELEMETRY_ENABLED", "0")
 
     def fail_urlopen(*_args, **_kwargs):
         raise AssertionError("urlopen must not run when telemetry is disabled")
@@ -209,7 +209,7 @@ def test_record_chat_usage_disabled_does_not_open_url(monkeypatch):
 
 def test_nocobase_create_uses_api_base_url_and_bearer_authorization(monkeypatch):
     captured = {}
-    monkeypatch.setenv("HERMES_USAGE_TELEMETRY_ENABLED", "1")
+    monkeypatch.delenv("HERMES_USAGE_TELEMETRY_ENABLED", raising=False)
     monkeypatch.setenv("NOCOBASE_API_BASE_URL", "https://nocobase.example/api")
     monkeypatch.setenv("NOCOBASE_AUTHORIZATION", "secret-token")
 
@@ -235,7 +235,6 @@ def test_nocobase_create_uses_api_base_url_and_bearer_authorization(monkeypatch)
 def test_nocobase_base_url_fallback_adds_api_suffix_and_preserves_bearer(monkeypatch):
     captured = {}
     monkeypatch.delenv("NOCOBASE_API_BASE_URL", raising=False)
-    monkeypatch.setenv("HERMES_USAGE_TELEMETRY_ENABLED", "1")
     monkeypatch.setenv("NOCOBASE_BASE_URL", "https://nocobase.example")
     monkeypatch.setenv("NOCOBASE_AUTHORIZATION", "Bearer ready-token")
 
