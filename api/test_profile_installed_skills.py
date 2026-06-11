@@ -214,7 +214,7 @@ def test_profile_installed_skills_missing_skills_dir_returns_empty(tmp_path, mon
     )
 
 
-def test_profile_installed_skills_ignores_nested_and_missing_skill_files(tmp_path, monkeypatch):
+def test_profile_installed_skills_returns_nested_and_skips_missing_skill_files(tmp_path, monkeypatch):
     import api.routes_handlers.skill as skill_handler
 
     profile_name = "default_367959913725953"
@@ -234,7 +234,7 @@ Direct body summary.
         profile_home / "skills" / "category" / "nested-skill",
         """---
 name: nested-skill
-description: Nested should not be returned
+description: Nested should be returned
 ---
 """,
     )
@@ -251,9 +251,27 @@ description: Nested should not be returned
 
     assert result is True
     assert responses[0][0] == 200
-    assert responses[0][1]["count"] == 1
-    assert responses[0][1]["skills"][0]["id"] == "direct-skill"
-    assert responses[0][1]["skills"][0]["description"] == "Direct body summary."
+    assert responses[0][1]["count"] == 2
+    assert responses[0][1]["skills"] == [
+        {
+            "id": "nested-skill",
+            "name": "nested-skill",
+            "title": "nested-skill",
+            "description": "Nested should be returned",
+            "summary": "Nested should be returned",
+            "path": "category/nested-skill",
+            "skill_file": "category/nested-skill/SKILL.md",
+        },
+        {
+            "id": "direct-skill",
+            "name": "direct-skill",
+            "title": "direct-skill",
+            "description": "Direct body summary.",
+            "summary": "Direct body summary.",
+            "path": "direct-skill",
+            "skill_file": "direct-skill/SKILL.md",
+        },
+    ]
 
 
 def test_profile_installed_skills_skips_bad_frontmatter(tmp_path, monkeypatch):

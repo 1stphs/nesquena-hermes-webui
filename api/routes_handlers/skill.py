@@ -3152,15 +3152,64 @@ def _get_owned_profile_home(handler, profile_name: str) -> Path:
         ) from exc
 
 
+def _profile_installed_skill_relative_path(skill_dir: Path, skills_dir: Path) -> str | None:
+    try:
+        skill_dir.resolve().relative_to(skills_dir.resolve())
+        relative_path = skill_dir.relative_to(skills_dir)
+    except (OSError, ValueError):
+        return None
+
+    parts = relative_path.parts
+    if not parts:
+        return None
+    for part in parts:
+        if (
+            not part
+            or part in (".", "..")
+            or "/" in part
+            or "\\" in part
+            or ".." in part
+        ):
+            return None
+    return relative_path.as_posix()
+
+
+def _iter_profile_installed_skill_dirs(skills_dir: Path) -> list[Path]:
+    found: list[tuple[str, Path]] = []
+    pending = [skills_dir]
+
+    while pending:
+        current_dir = pending.pop()
+        try:
+            children = sorted(current_dir.iterdir(), key=lambda item: item.name.lower())
+        except OSError:
+            logger.debug("Skipping unreadable profile skills directory: %s", current_dir)
+            continue
+
+        for child in children:
+            if child.is_symlink() or not child.is_dir():
+                continue
+            relative_path = _profile_installed_skill_relative_path(child, skills_dir)
+            if not relative_path:
+                continue
+
+            skill_file = child / "SKILL.md"
+            if skill_file.is_file() and not skill_file.is_symlink():
+                found.append((relative_path.lower(), child))
+                continue
+
+            pending.append(child)
+
+    return [
+        skill_dir
+        for _sort_key, skill_dir in sorted(found, key=lambda item: item[0])
+    ]
+
+
 def _read_profile_installed_skill(skill_dir: Path, skills_dir: Path) -> dict | None:
     skill_name = skill_dir.name
-    if (
-        not skill_name
-        or skill_name in (".", "..")
-        or "/" in skill_name
-        or "\\" in skill_name
-        or ".." in skill_name
-    ):
+    skill_path = _profile_installed_skill_relative_path(skill_dir, skills_dir)
+    if not skill_path:
         return None
     if not skill_dir.is_dir() or skill_dir.is_symlink():
         return None
@@ -3194,8 +3243,8 @@ def _read_profile_installed_skill(skill_dir: Path, skills_dir: Path) -> dict | N
         "title": title,
         "description": description,
         "summary": description,
-        "path": skill_name,
-        "skill_file": f"{skill_name}/SKILL.md",
+        "path": skill_path,
+        "skill_file": f"{skill_path}/SKILL.md",
     }
 
 
@@ -3238,10 +3287,7 @@ def _handle_profile_installed_skills(handler, parsed):
         skills_dir = profile_home / "skills"
         skills = []
         if skills_dir.is_dir():
-            for skill_dir in sorted(
-                skills_dir.iterdir(),
-                key=lambda item: item.name.lower(),
-            ):
+            for skill_dir in _iter_profile_installed_skill_dirs(skills_dir):
                 skill = _read_profile_installed_skill(skill_dir, skills_dir)
                 if skill:
                     skills.append(skill)
