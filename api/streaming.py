@@ -392,6 +392,32 @@ def _extract_gateway_routing_metadata(agent, result, requested_model=None, reque
     return None
 
 
+def _record_chat_usage_telemetry(
+    *,
+    session_id,
+    stream_id,
+    user_id,
+    profile_name,
+    model,
+    model_provider,
+    usage,
+):
+    try:
+        from api.usage_telemetry import record_chat_usage_done_async
+
+        record_chat_usage_done_async(
+            session_id=session_id,
+            stream_id=stream_id,
+            user_id=user_id,
+            profile_name=profile_name,
+            model=model,
+            model_provider=model_provider,
+            usage=usage,
+        )
+    except Exception:
+        logger.debug("Failed to schedule chat usage telemetry", exc_info=True)
+
+
 def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, session_id: str, profile_home: str) -> dict:
     """Build thread-local agent env with per-run values overriding profile defaults.
 
@@ -3150,6 +3176,15 @@ def _run_agent_streaming(
             except Exception:
                 logger.debug("Failed to drain pending steer for session %s", session_id)
             raw_session = s.compact() | {'messages': s.messages, 'tool_calls': tool_calls}
+            _record_chat_usage_telemetry(
+                session_id=s.session_id,
+                stream_id=stream_id,
+                user_id=user_id,
+                profile_name=getattr(s, 'profile', None),
+                model=getattr(agent, 'model', None) or resolved_model or model,
+                model_provider=resolved_provider or getattr(s, 'model_provider', None) or model_provider,
+                usage=usage,
+            )
             put('done', {'session': redact_session_data(raw_session), 'usage': usage})
             # Emit one last metering packet for the live message-header TPS label.
             meter_stats = meter().get_stats()
