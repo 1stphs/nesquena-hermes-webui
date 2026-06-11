@@ -1095,6 +1095,17 @@ def dispatch_post(handler, parsed) -> bool:
     if parsed.path == "/api/transcribe":
         return handle_transcribe(handler)
 
+    if parsed.path in ("/api/session/new", "/api/chat/start") and _is_server_memory_pressure_exceeded():
+        return j(
+            handler,
+            {
+                "error": SERVER_MEMORY_PRESSURE_MESSAGE,
+                "code": SERVER_MEMORY_PRESSURE_CODE,
+            },
+            status=503,
+            extra_headers={"Retry-After": SERVER_MEMORY_PRESSURE_RETRY_AFTER},
+        )
+
     body = read_body(handler)
 
     if parsed.path.startswith("/api/kanban/"):
