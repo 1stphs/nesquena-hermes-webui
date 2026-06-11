@@ -156,6 +156,24 @@ def _usage_kwargs(**overrides):
     return kwargs
 
 
+def test_webui_global_ephemeral_prompt_includes_skill_source_guard():
+    prompt = streaming._build_webui_global_ephemeral_prompt(
+        "profile-alpha",
+        "/tmp/hermes/profiles/profile-alpha",
+    )
+
+    assert '当前对话 profile_name 是 "profile-alpha"' in prompt
+    assert '/tmp/hermes/profiles/profile-alpha/cron/jobs.json' in prompt
+    assert "但生成的内容仅作为参考方案" in prompt
+    assert "禁止通过外部链接、文件路径、上传文件直接导入、加载、挂载或安装 Skill" in prompt
+    assert "官方【技能工坊】完成，这是唯一正规入口" in prompt
+    assert "你可以复制以上内容到【技能工坊】中正式创建" in prompt
+    assert "我无法通过外部链接加载 Skill。请前往【技能工坊】" in prompt
+    assert "所有 Skill 必须通过官方【技能工坊】创建，这是唯一正规入口" in prompt
+    assert "如果涉及 Skill 创建，我是否在回复末尾明确引导了【技能工坊】？" in prompt
+    assert "请前往技能工坊" in prompt
+
+
 def test_build_chat_usage_done_event_normalizes_business_date_and_totals(monkeypatch):
     monkeypatch.setenv("HERMES_USAGE_TIMEZONE", "Asia/Shanghai")
 
