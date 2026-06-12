@@ -729,6 +729,33 @@ def _generate_unique_user_skill_slug(user_id: str, name: str, root: Path) -> str
     )
 
 
+def _generate_unique_skill_template_slug(requested_slug: str, root: Path) -> tuple[str, Path]:
+    root_path = Path(root).expanduser().resolve(strict=False)
+    max_base_length = max(1, _USER_SKILL_SLUG_MAX - _USER_SKILL_SLUG_SUFFIX_LENGTH - 1)
+
+    for attempt in range(32):
+        if attempt == 0:
+            skill_slug = requested_slug
+        else:
+            base = requested_slug[:max_base_length].rstrip("-_")
+            skill_slug = f"{base}-{_user_skill_short_uuid()}"
+
+        skill_slug = _validate_user_skill_english_name(skill_slug)
+        destination = _safe_skill_child_dir(root_path, skill_slug)
+        destination_path = str(destination.resolve(strict=False))
+        if not destination.exists() and not _nocobase_list_skill_template_records(
+            title=skill_slug,
+            path=destination_path,
+        ):
+            return skill_slug, destination
+
+    raise _UserSkillError(
+        "Failed to generate unique skill slug",
+        status=500,
+        code="skill_slug_generation_failed",
+    )
+
+
 def _validate_user_skill_name(value) -> str:
     name = str(value or "").strip()
     if not name:
@@ -3648,26 +3675,12 @@ def _handle_user_skill_publish_to_market_review(handler, body):
         _my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
         metadata, description, content = _read_user_skill_market_content(skill_dir)
         innostar_root = _innostar_skills_root(create=True)
-        destination = _safe_skill_child_dir(innostar_root, skill_slug)
-        destination_path = str(destination.resolve(strict=False))
-
-        if destination.exists():
-            raise _UserSkillError(
-                "Skill template already exists",
-                status=409,
-                code="skill_template_conflict",
-            )
-        if _nocobase_list_skill_template_records(title=skill_slug, path=destination_path):
-            raise _UserSkillError(
-                "Skill template already exists",
-                status=409,
-                code="skill_template_conflict",
-            )
+        market_skill_slug, destination = _generate_unique_skill_template_slug(skill_slug, innostar_root)
 
         _copy_skill_tree_atomic(skill_dir, destination)
         template_body = _skill_template_review_record_body(
             user_id=user_id,
-            skill_slug=skill_slug,
+            skill_slug=market_skill_slug,
             destination=destination,
             category=category,
             user_skill_record=record,
@@ -3697,7 +3710,7 @@ def _handle_user_skill_publish_to_market_review(handler, body):
         handler,
         {
             "ok": True,
-            "skillSlug": skill_slug,
+            "skillSlug": market_skill_slug,
             "path": str(destination.resolve(strict=False)),
             "template": template_record,
         },

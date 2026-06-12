@@ -933,10 +933,12 @@ def test_publish_to_market_review_copies_skill_and_creates_pending_template(
     status, payload = _response(responses)
     assert status == 200
     assert payload["ok"] is True
+    assert payload["skillSlug"] == "mail-assistant"
+    assert payload["path"] == str(destination.resolve(strict=False))
     assert payload["template"]["id"] == "template-1"
 
 
-def test_publish_to_market_review_rejects_existing_target_dir(
+def test_publish_to_market_review_generates_unique_slug_for_existing_target_dir(
     tmp_path,
     monkeypatch,
     nocobase_user_skills,
@@ -946,8 +948,13 @@ def test_publish_to_market_review_rejects_existing_target_dir(
 
     user_root = tmp_path / "users"
     innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
-    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
-    _write_skill(innostar_root / "mail-assistant")
+    source = user_root / "user-1" / "my-skills" / "mail-assistant"
+    existing_destination = innostar_root / "mail-assistant"
+    _write_skill(source)
+    _write_skill(
+        existing_destination,
+        content=_skill_markdown(name="已存在助手", description="已存在简介"),
+    )
     nocobase_user_skills.records.append(_make_user_skill_record())
     responses = []
 
@@ -955,19 +962,31 @@ def test_publish_to_market_review_rejects_existing_target_dir(
     _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
     _patch_user_root(monkeypatch, skill_handler, user_root)
     _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    _patch_skill_slug_suffix(monkeypatch, skill_handler, "abc123def0")
 
     result = skill_handler._handle_user_skill_publish_to_market_review(
         object(),
         {"skill_slug": "mail-assistant", "categories": "productivity"},
     )
 
+    destination = innostar_root / "mail-assistant-abc123def0"
     assert result is True
-    assert _response(responses)[0] == 409
-    assert _response(responses)[1]["code"] == "skill_template_conflict"
-    assert not nocobase_skill_templates.create_calls
+    assert existing_destination.is_dir()
+    assert destination.is_dir()
+    assert (destination / "SKILL.md").read_text(encoding="utf-8") == (
+        source / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert len(nocobase_skill_templates.create_calls) == 1
+    create_call = nocobase_skill_templates.create_calls[0]
+    assert create_call["title"] == "mail-assistant-abc123def0"
+    assert create_call["path"] == str(destination.resolve(strict=False))
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["skillSlug"] == "mail-assistant-abc123def0"
+    assert payload["path"] == str(destination.resolve(strict=False))
 
 
-def test_publish_to_market_review_rejects_existing_template(
+def test_publish_to_market_review_generates_unique_slug_for_existing_template(
     tmp_path,
     monkeypatch,
     nocobase_user_skills,
@@ -977,14 +996,15 @@ def test_publish_to_market_review_rejects_existing_template(
 
     user_root = tmp_path / "users"
     innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
-    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
-    destination = innostar_root / "mail-assistant"
+    source = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(source)
+    original_destination = innostar_root / "mail-assistant"
     nocobase_user_skills.records.append(_make_user_skill_record())
     nocobase_skill_templates.records.append(
         {
             "id": "template-existing",
             "title": "mail-assistant",
-            "path": str(destination.resolve(strict=False)),
+            "path": str(original_destination.resolve(strict=False)),
         }
     )
     responses = []
@@ -993,17 +1013,28 @@ def test_publish_to_market_review_rejects_existing_template(
     _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
     _patch_user_root(monkeypatch, skill_handler, user_root)
     _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    _patch_skill_slug_suffix(monkeypatch, skill_handler, "abc123def0")
 
     result = skill_handler._handle_user_skill_publish_to_market_review(
         object(),
         {"skill_slug": "mail-assistant", "categories": "productivity"},
     )
 
+    destination = innostar_root / "mail-assistant-abc123def0"
     assert result is True
-    assert not destination.exists()
-    assert _response(responses)[0] == 409
-    assert _response(responses)[1]["code"] == "skill_template_conflict"
-    assert not nocobase_skill_templates.create_calls
+    assert not original_destination.exists()
+    assert destination.is_dir()
+    assert (destination / "SKILL.md").read_text(encoding="utf-8") == (
+        source / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert len(nocobase_skill_templates.create_calls) == 1
+    create_call = nocobase_skill_templates.create_calls[0]
+    assert create_call["title"] == "mail-assistant-abc123def0"
+    assert create_call["path"] == str(destination.resolve(strict=False))
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["skillSlug"] == "mail-assistant-abc123def0"
+    assert payload["path"] == str(destination.resolve(strict=False))
 
 
 def test_publish_to_market_review_rolls_back_when_template_create_fails(
