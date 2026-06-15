@@ -921,6 +921,7 @@ def test_publish_to_market_review_copies_skill_and_creates_pending_template(
     assert create_call["type"] == "innostar"
     assert create_call["categories"] == "productivity"
     assert create_call["market_review_status"] == "pending"
+    assert create_call["user_id"] == "user-1"
     assert create_call["path"] == str(destination.resolve(strict=False))
     assert create_call["content"].startswith("---\nname: 原始助手")
     assert create_call["security_test_result"] == {"status": "passed", "summary": "安全通过"}

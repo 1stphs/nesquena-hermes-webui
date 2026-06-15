@@ -19,6 +19,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COLLECTION_NAME = "hermes_skills_templates"
 REQUIRED_FIELDS = (
+    "user_id",
     "security_test_result",
     "security_tested_at",
     "availability_test_result",
@@ -138,6 +139,17 @@ def _request(
 
 def _field_payloads() -> dict[str, dict[str, Any]]:
     return {
+        "user_id": {
+            "name": "user_id",
+            "type": "string",
+            "interface": "input",
+            "uiSchema": {
+                "type": "string",
+                "x-component": "Input",
+                "title": "提交用户 ID",
+            },
+            "description": "User id that submitted the Skill for market review",
+        },
         "security_test_result": {
             "name": "security_test_result",
             "type": "json",
