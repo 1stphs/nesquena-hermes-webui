@@ -52,6 +52,7 @@ _USER_SKILL_STATUS_AVAILABILITY_TESTED = "availability_tested"
 _USER_SKILL_STATUS_SECURITY_TESTED = "security_tested"
 _USER_SKILL_STATUS_FULLY_TESTED = "fully_tested"
 _USER_SKILL_STATUS_LEGACY_ACTIVE = "active"
+_USER_SKILL_FULLY_TESTED_PASS_THRESHOLD = 10
 _USER_SKILL_STATUS_VALUES = {
     _USER_SKILL_STATUS_DRAFT,
     _USER_SKILL_STATUS_AVAILABILITY_TESTED,
@@ -844,17 +845,94 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _merge_user_skill_test_status(current_status: str, test_type: str) -> str:
+def _user_skill_security_passed_node_count(result) -> int:
+    if not isinstance(result, dict):
+        return 0
+    check_summary = result.get("checkSummary")
+    if isinstance(check_summary, dict):
+        return _safe_int(check_summary.get("passed"))
+    checks = result.get("checks")
+    if isinstance(checks, list):
+        return sum(
+            1
+            for check in checks
+            if isinstance(check, dict)
+            and (
+                str(check.get("status") or "").strip() == "passed"
+                or check.get("passed") is True
+            )
+        )
+    return 0
+
+
+def _user_skill_availability_passed_node_count(result) -> int:
+    if not isinstance(result, dict):
+        return 0
+    if "passedCases" in result:
+        return _safe_int(result.get("passedCases"))
+    cases = result.get("cases")
+    if isinstance(cases, list):
+        return sum(1 for case in cases if isinstance(case, dict) and case.get("pass") is True)
+    dimensions = result.get("dimensions")
+    if isinstance(dimensions, list):
+        return sum(
+            1
+            for dimension in dimensions
+            if isinstance(dimension, dict)
+            and (
+                str(dimension.get("status") or "").strip() == "passed"
+                or dimension.get("passed") is True
+            )
+        )
+    return 0
+
+
+def _user_skill_security_test_ran(result) -> bool:
+    if not isinstance(result, dict):
+        return False
+    check_summary = result.get("checkSummary")
+    if isinstance(check_summary, dict) and _safe_int(check_summary.get("total")) > 0:
+        return True
+    checks = result.get("checks")
+    return isinstance(checks, list) and len(checks) > 0
+
+
+def _user_skill_availability_test_ran(result) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if _safe_int(result.get("totalCases")) > 0:
+        return True
+    cases = result.get("cases")
+    if isinstance(cases, list) and cases:
+        return True
+    dimensions = result.get("dimensions")
+    return isinstance(dimensions, list) and len(dimensions) > 0
+
+
+def _merge_user_skill_test_status(
+    current_status: str,
+    test_type: str,
+    *,
+    security_result=None,
+    availability_result=None,
+) -> str:
     status = _normalize_user_skill_status(current_status)
-    if status == _USER_SKILL_STATUS_FULLY_TESTED:
-        return status
-    if test_type == "security":
-        if status == _USER_SKILL_STATUS_AVAILABILITY_TESTED:
-            return _USER_SKILL_STATUS_FULLY_TESTED
+    passed_nodes = _user_skill_security_passed_node_count(
+        security_result
+    ) + _user_skill_availability_passed_node_count(availability_result)
+    if passed_nodes >= _USER_SKILL_FULLY_TESTED_PASS_THRESHOLD:
+        return _USER_SKILL_STATUS_FULLY_TESTED
+
+    security_ran = _user_skill_security_test_ran(security_result)
+    availability_ran = _user_skill_availability_test_ran(availability_result)
+
+    if test_type == "security" and security_ran:
         return _USER_SKILL_STATUS_SECURITY_TESTED
-    if test_type == "availability":
-        if status == _USER_SKILL_STATUS_SECURITY_TESTED:
-            return _USER_SKILL_STATUS_FULLY_TESTED
+    if test_type == "availability" and availability_ran:
+        return _USER_SKILL_STATUS_AVAILABILITY_TESTED
+    if security_ran:
+        return _USER_SKILL_STATUS_SECURITY_TESTED
+    if availability_ran:
         return _USER_SKILL_STATUS_AVAILABILITY_TESTED
     return status
 
@@ -3822,7 +3900,7 @@ def _handle_user_skill_install_to_profile(handler, body):
 
         if skill_status not in _USER_SKILL_INSTALLABLE_STATUSES:
             raise _UserSkillError(
-                "Skill must pass availability or security testing before installation",
+                "Skill must run availability or security testing before installation",
                 code="user_skill_not_tested",
             )
 
@@ -3939,8 +4017,12 @@ def _handle_user_skill_test_security(handler, body):
             "security_test_result": result,
             "security_tested_at": completed_at,
         }
-        if result.get("status") == "passed":
-            patch["status"] = _merge_user_skill_test_status(record.get("status"), "security")
+        patch["status"] = _merge_user_skill_test_status(
+            record.get("status"),
+            "security",
+            security_result=result,
+            availability_result=record.get("availability_test_result"),
+        )
         updated_record = _nocobase_update_user_skill_record(user_id, skill_slug, patch)
         payload = _user_skill_response_payload(updated_record)
     except _UserSkillError as exc:
@@ -4095,8 +4177,12 @@ def _run_user_skill_availability_task(task_id: str) -> None:
                 "availability_test_result": result,
                 "availability_tested_at": completed_at,
             }
-            if result.get("status") == "passed":
-                patch["status"] = _merge_user_skill_test_status(record.get("status"), "availability")
+            patch["status"] = _merge_user_skill_test_status(
+                record.get("status"),
+                "availability",
+                security_result=record.get("security_test_result"),
+                availability_result=result,
+            )
             updated_record = _nocobase_update_user_skill_record(user_id, skill_slug, patch)
             skill = _user_skill_response_payload(updated_record).get("skill")
             _set_user_skill_availability_task(

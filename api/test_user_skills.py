@@ -2054,7 +2054,23 @@ def test_user_skill_security_test_passes_and_promotes_status(
 
     user_root = tmp_path / "users"
     _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
-    nocobase_user_skills.records.append(_make_user_skill_record(status="availability_tested"))
+    nocobase_user_skills.records.append(
+        _make_user_skill_record(
+            status="availability_tested",
+            availability_test_result={
+                "status": "failed",
+                "passedCases": 1,
+                "totalCases": 4,
+                "cases": [
+                    {"id": "core-purpose", "pass": True},
+                    {"id": "structured-output", "pass": False},
+                    {"id": "missing-context", "pass": False},
+                    {"id": "scope-control", "pass": False},
+                ],
+            },
+            availability_tested_at="2026-06-10T02:00:00Z",
+        )
+    )
     responses = []
 
     _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
@@ -2087,7 +2103,7 @@ def test_user_skill_security_test_passes_and_promotes_status(
     assert payload["skill"]["status"] == "fully_tested"
 
 
-def test_user_skill_security_test_fails_without_status_change(
+def test_user_skill_security_test_failure_marks_security_tested(
     tmp_path,
     monkeypatch,
     nocobase_user_skills,
@@ -2119,7 +2135,7 @@ description: 风险简介
 
     assert result is True
     update_call = nocobase_user_skills.update_calls[-1]
-    assert "status" not in update_call["patch"]
+    assert update_call["patch"]["status"] == "security_tested"
     assert update_call["patch"]["security_test_result"]["status"] == "failed"
     assert update_call["patch"]["security_test_result"]["highestSeverity"] == "high"
     issues = update_call["patch"]["security_test_result"]["issues"]
@@ -2133,7 +2149,7 @@ description: 风险简介
     status, payload = _response(responses)
     assert status == 200
     assert payload["status"] == "failed"
-    assert payload["skill"]["status"] == "draft"
+    assert payload["skill"]["status"] == "security_tested"
 
 
 def test_user_skill_security_scan_returns_all_security_check_nodes(tmp_path):
@@ -2607,7 +2623,26 @@ def test_user_skill_availability_task_passes_and_promotes_status(
     skill_dir = user_root / "user-1" / "my-skills" / "mail-assistant"
     _write_skill(skill_dir)
     skill_content = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
-    nocobase_user_skills.records.append(_make_user_skill_record(status="security_tested"))
+    nocobase_user_skills.records.append(
+        _make_user_skill_record(
+            status="security_tested",
+            security_test_result={
+                "status": "failed",
+                "checkSummary": {"total": 9, "passed": 6, "warning": 0, "failed": 3},
+                "checks": [
+                    *[
+                        {"id": f"passed-{index}", "status": "passed", "passed": True}
+                        for index in range(6)
+                    ],
+                    *[
+                        {"id": f"failed-{index}", "status": "failed", "passed": False}
+                        for index in range(3)
+                    ],
+                ],
+            },
+            security_tested_at="2026-06-10T01:00:00Z",
+        )
+    )
     monkeypatch.setattr(skill_handler, "_USER_SKILL_EVAL_TASK_DIR", tmp_path / "tasks")
     monkeypatch.setattr(
         skill_handler,
@@ -2662,6 +2697,79 @@ def test_user_skill_availability_task_passes_and_promotes_status(
         task = skill_handler._USER_SKILL_AVAILABILITY_TASKS[task_id]
     assert task["status"] == "passed"
     assert task["skill"]["status"] == "fully_tested"
+
+
+def test_user_skill_availability_task_failure_marks_availability_tested(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    skill_dir = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(skill_dir)
+    skill_content = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    nocobase_user_skills.records.append(_make_user_skill_record(status="draft"))
+    monkeypatch.setattr(skill_handler, "_USER_SKILL_EVAL_TASK_DIR", tmp_path / "tasks")
+    monkeypatch.setattr(
+        skill_handler,
+        "_load_default_skill_eval_provider",
+        lambda _user_id: {
+            "base_url": "https://api.example.com",
+            "api_mode": "chat_completions",
+            "model_name": "test-model",
+            "api_key": "secret-token",
+        },
+    )
+    monkeypatch.setattr(
+        skill_handler,
+        "_run_promptfoo_eval",
+        lambda _task_dir, _config, _provider: {
+            "ok": False,
+            "status": "failed",
+            "summary": "not all cases passed",
+            "score": 0.5,
+            "passedCases": 2,
+            "totalCases": 4,
+            "cases": [
+                {"id": "core-purpose", "pass": True},
+                {"id": "structured-output", "pass": True},
+                {"id": "missing-context", "pass": False},
+                {"id": "scope-control", "pass": False},
+            ],
+            "stats": {"successes": 2, "failures": 2, "errors": 0},
+        },
+    )
+
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    task_id = "task-failed"
+    with skill_handler._USER_SKILL_AVAILABILITY_TASKS_LOCK:
+        skill_handler._USER_SKILL_AVAILABILITY_TASKS.clear()
+        skill_handler._USER_SKILL_AVAILABILITY_TASKS[task_id] = {
+            "task_id": task_id,
+            "user_id": "user-1",
+            "skill_slug": "mail-assistant",
+            "skill_content": skill_content,
+            "skill_hash": "",
+            "task_dir": str(tmp_path / "tasks" / task_id),
+            "status": "queued",
+            "created_at": "2026-06-09T00:00:00Z",
+            "updated_at": "2026-06-09T00:00:00Z",
+            "created_monotonic": 0,
+        }
+
+    skill_handler._run_user_skill_availability_task(task_id)
+
+    update_call = nocobase_user_skills.update_calls[-1]
+    assert update_call["patch"]["status"] == "availability_tested"
+    assert update_call["patch"]["availability_test_result"]["status"] == "failed"
+    assert update_call["patch"]["availability_tested_at"]
+    with skill_handler._USER_SKILL_AVAILABILITY_TASKS_LOCK:
+        task = skill_handler._USER_SKILL_AVAILABILITY_TASKS[task_id]
+    assert task["status"] == "failed"
+    assert task["skill"]["status"] == "availability_tested"
 
 
 def test_user_skill_availability_task_error_writes_result_without_status(
