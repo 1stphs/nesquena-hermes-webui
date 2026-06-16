@@ -163,15 +163,22 @@ only `sha256:<hex>` token hashes.
 
 Use this as the normal path after code review and local verification.
 
-On the local development machine, commit and push the API service changes from
-the current checkout:
+Preferred one-liner from the local checkout:
 
 ```bash
 cd /Users/less/Documents/work/nesquena-hermes-webui
 git status --short --branch
 git log --oneline -1
 git push origin master
+./scripts/deploy-172.sh
 ```
+
+`./scripts/deploy-172.sh` wraps the SSH pull/build flow below, waits for
+container health on the server, and runs the minimum smoke checks from
+`127.0.0.1:8787` plus the public `:8787` endpoint, including health and CORS
+preflight checks. It stops before rebuilding if the server checkout has
+uncommitted or unignored files. Use the manual steps in this section when you
+need to inspect compose labels, handle conflicts, or rollback.
 
 Confirm key-based SSH before touching the server working tree:
 

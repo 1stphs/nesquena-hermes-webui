@@ -55,10 +55,10 @@ label 为准。172 服务器部署 runbook 位置:
 标准部署流程:
 
 1. 本地 review、验证、commit、push。
-2. 用 key 登录 `root@172.234.237.195`。
-3. 在 `/var/www/nesquena-hermes-webui` 执行 `git pull --ff-only origin master`。
-4. 只运行 `docker compose up -d --build hermes-webui`。
-5. 跑容器 health、本机 `127.0.0.1:8787/health`、公网 health 和 CORS preflight。
+2. 在仓库根目录执行 `./scripts/deploy-172.sh`（封装 pull、只重建 `hermes-webui`、等待健康、health 与 CORS smoke check）。
+3. 需要手工排障、回滚或核对 compose label 时，再读 `docs/deploy-172.md` 逐步执行。
+
+`deploy-172.sh` 等价于在 `root@172.234.237.195:/var/www/nesquena-hermes-webui` 执行 `git pull --ff-only origin master` 与 `docker compose up -d --build hermes-webui`，并在重建前拒绝服务器未提交或未忽略改动，部署后复核本机 / 公网 health 与 CORS preflight。
 
 截至 2026-06-10，本机 ED25519 公钥已写入服务器 root 的
 `authorized_keys`，后续部署优先使用 key 登录；密码只作为恢复或换 key
