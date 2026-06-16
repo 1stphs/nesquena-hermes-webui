@@ -125,6 +125,26 @@ def _run_import(
     return skill_handler._handle_user_skill_import(handler)
 
 
+def _security_test_result_with_passed(passed: int) -> dict:
+    return {
+        "status": "passed" if passed > 0 else "not_tested",
+        "checkSummary": {
+            "total": max(passed, 9),
+            "passed": passed,
+            "warning": 0,
+            "failed": max(0, max(passed, 9) - passed),
+        },
+    }
+
+
+def _availability_test_result_with_passed(passed: int) -> dict:
+    return {
+        "status": "passed" if passed > 0 else "not_tested",
+        "passedCases": passed,
+        "totalCases": max(passed, 1),
+    }
+
+
 def _make_user_skill_record(
     *,
     user_id="user-1",
@@ -1075,7 +1095,7 @@ def test_publish_to_market_review_rolls_back_when_template_create_fails(
     assert _response(responses)[1]["code"] == "nocobase_request_failed"
 
 
-def test_publish_to_market_review_allows_missing_reports(
+def test_publish_to_market_review_allows_missing_reports_for_admin(
     tmp_path,
     monkeypatch,
     nocobase_user_skills,
@@ -1087,6 +1107,7 @@ def test_publish_to_market_review_allows_missing_reports(
     innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
     _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
     nocobase_user_skills.records.append(_make_user_skill_record(status="draft"))
+    nocobase_skill_templates.users = [{"id": "user-1", "role": "admin"}]
     responses = []
 
     monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
@@ -1106,6 +1127,100 @@ def test_publish_to_market_review_allows_missing_reports(
     assert create_call["availability_test_result"] is None
     assert create_call["availability_tested_at"] == ""
     assert _response(responses)[0] == 200
+
+
+@pytest.mark.parametrize(
+    ("security_passed", "availability_passed", "should_pass"),
+    [
+        (9, 0, True),
+        (8, 0, False),
+        (7, 1, False),
+        (6, 3, True),
+        (9, 1, True),
+    ],
+)
+def test_publish_to_market_review_gate_for_non_admin(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    nocobase_skill_templates,
+    security_passed,
+    availability_passed,
+    should_pass,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    nocobase_user_skills.records.append(
+        _make_user_skill_record(
+            status="security_tested",
+            security_test_result=_security_test_result_with_passed(security_passed),
+            security_tested_at="2026-06-10T01:00:00Z",
+            availability_test_result=_availability_test_result_with_passed(availability_passed),
+            availability_tested_at="2026-06-10T02:00:00Z" if availability_passed else "",
+        )
+    )
+    nocobase_skill_templates.users = [{"id": "user-1", "role": "member"}]
+    responses = []
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {"skill_slug": "mail-assistant", "categories": "productivity"},
+    )
+
+    assert result is True
+    status, payload = _response(responses)
+    if should_pass:
+        assert status == 200
+        assert payload["ok"] is True
+        assert (innostar_root / "mail-assistant").is_dir()
+        assert len(nocobase_skill_templates.create_calls) == 1
+    else:
+        assert status == 400
+        assert payload["code"] == "user_skill_review_gate_not_met"
+        assert "9" in payload["error"]
+        assert not (innostar_root / "mail-assistant").exists()
+        assert not nocobase_skill_templates.create_calls
+
+
+def test_publish_to_market_review_rejects_missing_reports_for_non_admin(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    nocobase_skill_templates,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    innostar_root = tmp_path / "hub" / "hermes-innostar-skills"
+    _write_skill(user_root / "user-1" / "my-skills" / "mail-assistant")
+    nocobase_user_skills.records.append(_make_user_skill_record(status="draft"))
+    nocobase_skill_templates.users = [{"id": "user-1", "role": "member"}]
+    responses = []
+
+    monkeypatch.setenv("HERMES_INNOSTAR_SKILLS_DIR", str(innostar_root))
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_publish_to_market_review(
+        object(),
+        {"skill_slug": "mail-assistant", "categories": "productivity"},
+    )
+
+    assert result is True
+    status, payload = _response(responses)
+    assert status == 400
+    assert payload["code"] == "user_skill_review_gate_not_met"
+    assert not (innostar_root / "mail-assistant").exists()
+    assert not nocobase_skill_templates.create_calls
 
 
 def test_publish_to_market_review_rejects_missing_current_user_skill(

@@ -57,6 +57,7 @@ _USER_SKILL_STATUS_SECURITY_TESTED = "security_tested"
 _USER_SKILL_STATUS_FULLY_TESTED = "fully_tested"
 _USER_SKILL_STATUS_LEGACY_ACTIVE = "active"
 _USER_SKILL_FULLY_TESTED_PASS_THRESHOLD = 10
+_USER_SKILL_MARKET_REVIEW_PASS_THRESHOLD = 9
 _USER_SKILL_STATUS_VALUES = {
     _USER_SKILL_STATUS_DRAFT,
     _USER_SKILL_STATUS_AVAILABILITY_TESTED,
@@ -2997,12 +2998,15 @@ def _get_hermes_user_role_values(user_record: dict | None) -> set[str]:
     return roles
 
 
-def _ensure_skill_template_approver(handler) -> str:
-    user_id = _get_current_user_id(handler)
+def _is_skill_template_approver_user(user_id: str) -> bool:
     user_record = _nocobase_get_hermes_user_record(user_id)
     roles = _get_hermes_user_role_values(user_record)
+    return bool(roles.intersection(_SKILL_TEMPLATE_APPROVER_ROLES))
 
-    if not roles.intersection(_SKILL_TEMPLATE_APPROVER_ROLES):
+
+def _ensure_skill_template_approver(handler) -> str:
+    user_id = _get_current_user_id(handler)
+    if not _is_skill_template_approver_user(user_id):
         raise _UserSkillError(
             "Skill template review requires admin role",
             status=403,
@@ -3010,6 +3014,26 @@ def _ensure_skill_template_approver(handler) -> str:
         )
 
     return user_id
+
+
+def _ensure_user_skill_market_review_gate(user_skill_record: dict, *, user_id: str) -> None:
+    if _is_skill_template_approver_user(user_id):
+        return
+
+    security_passed = _user_skill_security_passed_node_count(
+        user_skill_record.get("security_test_result")
+    )
+    availability_passed = _user_skill_availability_passed_node_count(
+        user_skill_record.get("availability_test_result")
+    )
+    passed_nodes = security_passed + availability_passed
+    if passed_nodes < _USER_SKILL_MARKET_REVIEW_PASS_THRESHOLD:
+        raise _UserSkillError(
+            f"需至少 {_USER_SKILL_MARKET_REVIEW_PASS_THRESHOLD} 个测试节点通过后才能提交审核"
+            f"（当前 {passed_nodes} 个）",
+            status=400,
+            code="user_skill_review_gate_not_met",
+        )
 
 
 def _read_user_skill_market_content(skill_dir: Path) -> tuple[dict, str, str]:
@@ -3759,6 +3783,7 @@ def _handle_user_skill_publish_to_market_review(handler, body):
         )
         user_id = _get_current_user_id(handler)
         _my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
+        _ensure_user_skill_market_review_gate(record, user_id=user_id)
         metadata, description, content = _read_user_skill_market_content(skill_dir)
         innostar_root = _innostar_skills_root(create=True)
         market_skill_slug, destination = _generate_unique_skill_template_slug(skill_slug, innostar_root)
