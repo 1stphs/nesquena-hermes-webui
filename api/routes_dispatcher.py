@@ -1160,7 +1160,7 @@ def dispatch_post(handler, parsed) -> bool:
     if parsed.path == "/api/transcribe":
         return handle_transcribe(handler)
 
-    if parsed.path in ("/api/session/new", "/api/chat/start") and _is_server_memory_pressure_exceeded():
+    def _send_server_memory_pressure_response() -> bool:
         # 读 body 前短路时关闭连接，避免未消费请求体污染后续请求。
         handler.close_connection = True
         return j(
@@ -1175,6 +1175,14 @@ def dispatch_post(handler, parsed) -> bool:
                 "Connection": "close",
             },
         )
+
+    if parsed.path in (
+        "/api/auth/login",
+        "/api/auth/token-login",
+        "/api/session/new",
+        "/api/chat/start",
+    ) and _is_server_memory_pressure_exceeded():
+        return _send_server_memory_pressure_response()
 
     body = read_body(handler)
 

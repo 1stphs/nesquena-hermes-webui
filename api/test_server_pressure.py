@@ -32,7 +32,7 @@ def _missing_cgroup_paths(tmp_path):
 def test_meminfo_below_threshold_does_not_block(tmp_path):
     meminfo = tmp_path / "meminfo"
     cgroup_current, cgroup_max = _missing_cgroup_paths(tmp_path)
-    _write_meminfo(meminfo, total=1000, available=250)
+    _write_meminfo(meminfo, total=1000, available=251)
 
     blocked = server_pressure._is_server_memory_pressure_exceeded(
         proc_meminfo_path=meminfo,
@@ -46,7 +46,7 @@ def test_meminfo_below_threshold_does_not_block(tmp_path):
 def test_meminfo_equal_threshold_does_not_block(tmp_path):
     meminfo = tmp_path / "meminfo"
     cgroup_current, cgroup_max = _missing_cgroup_paths(tmp_path)
-    _write_meminfo(meminfo, total=1000, available=200)
+    _write_meminfo(meminfo, total=1000, available=250)
 
     blocked = server_pressure._is_server_memory_pressure_exceeded(
         proc_meminfo_path=meminfo,
@@ -60,7 +60,7 @@ def test_meminfo_equal_threshold_does_not_block(tmp_path):
 def test_meminfo_above_threshold_blocks(tmp_path):
     meminfo = tmp_path / "meminfo"
     cgroup_current, cgroup_max = _missing_cgroup_paths(tmp_path)
-    _write_meminfo(meminfo, total=1000, available=199)
+    _write_meminfo(meminfo, total=1000, available=249)
 
     blocked = server_pressure._is_server_memory_pressure_exceeded(
         proc_meminfo_path=meminfo,
@@ -111,7 +111,7 @@ def test_cgroup_v2_finite_limit_can_block(tmp_path):
     missing_meminfo = tmp_path / "missing-meminfo"
     cgroup_current = tmp_path / "memory.current"
     cgroup_max = tmp_path / "memory.max"
-    cgroup_current.write_text("801\n", encoding="utf-8")
+    cgroup_current.write_text("751\n", encoding="utf-8")
     cgroup_max.write_text("1000\n", encoding="utf-8")
 
     blocked = server_pressure._is_server_memory_pressure_exceeded(
@@ -121,6 +121,91 @@ def test_cgroup_v2_finite_limit_can_block(tmp_path):
     )
 
     assert blocked is True
+
+
+def test_default_pressure_threshold_is_75_percent():
+    assert server_pressure.SERVER_MEMORY_PRESSURE_THRESHOLD_PERCENT == 75.0
+
+
+def test_default_pressure_message_matches_user_copy():
+    assert server_pressure.SERVER_MEMORY_PRESSURE_MESSAGE == "请求人数超过80，请稍后再试～"
+
+
+def test_token_login_pressure_short_circuits_before_body_read(monkeypatch):
+    captured = {}
+
+    def capture_j(_handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+        captured["extra_headers"] = extra_headers
+        captured["handler_close_connection"] = _handler.close_connection
+        return True
+
+    monkeypatch.setattr(routes, "_is_server_memory_pressure_exceeded", lambda: True)
+    monkeypatch.setattr(routes, "j", capture_j)
+    monkeypatch.setattr(
+        routes,
+        "read_body",
+        lambda _handler: (_ for _ in ()).throw(AssertionError("read_body must not run")),
+    )
+
+    handled = dispatcher.dispatch_post(
+        _FakeHandler(),
+        urllib.parse.urlparse("/api/auth/token-login"),
+    )
+
+    assert handled is True
+    assert captured == {
+        "payload": {
+            "error": server_pressure.SERVER_MEMORY_PRESSURE_MESSAGE,
+            "code": server_pressure.SERVER_MEMORY_PRESSURE_CODE,
+        },
+        "status": 503,
+        "extra_headers": {
+            "Retry-After": server_pressure.SERVER_MEMORY_PRESSURE_RETRY_AFTER,
+            "Connection": "close",
+        },
+        "handler_close_connection": True,
+    }
+
+
+def test_password_login_pressure_short_circuits_before_body_read(monkeypatch):
+    captured = {}
+
+    def capture_j(_handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+        captured["extra_headers"] = extra_headers
+        captured["handler_close_connection"] = _handler.close_connection
+        return True
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr(routes, "_is_server_memory_pressure_exceeded", lambda: True)
+    monkeypatch.setattr(routes, "j", capture_j)
+    monkeypatch.setattr(
+        routes,
+        "read_body",
+        lambda _handler: (_ for _ in ()).throw(AssertionError("read_body must not run")),
+    )
+
+    handled = dispatcher.dispatch_post(
+        _FakeHandler(),
+        urllib.parse.urlparse("/api/auth/login"),
+    )
+
+    assert handled is True
+    assert captured == {
+        "payload": {
+            "error": server_pressure.SERVER_MEMORY_PRESSURE_MESSAGE,
+            "code": server_pressure.SERVER_MEMORY_PRESSURE_CODE,
+        },
+        "status": 503,
+        "extra_headers": {
+            "Retry-After": server_pressure.SERVER_MEMORY_PRESSURE_RETRY_AFTER,
+            "Connection": "close",
+        },
+        "handler_close_connection": True,
+    }
 
 
 def test_session_new_pressure_short_circuits_before_body_read(monkeypatch):
