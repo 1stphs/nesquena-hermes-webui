@@ -494,6 +494,9 @@ def verify_hermes_imports() -> tuple:
 # ── Limits ───────────────────────────────────────────────────────────────────
 MAX_FILE_BYTES = 200_000
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+CHAT_ATTACHMENT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+USER_SKILL_IMPORT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+MULTIPART_UPLOAD_OVERHEAD_BYTES = 1 * 1024 * 1024
 
 # ── File type maps ───────────────────────────────────────────────────────────
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp"}

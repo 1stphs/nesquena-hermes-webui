@@ -20,7 +20,11 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from api.config import MAX_UPLOAD_BYTES, STATE_DIR
+from api.config import (
+    MULTIPART_UPLOAD_OVERHEAD_BYTES,
+    STATE_DIR,
+    USER_SKILL_IMPORT_MAX_UPLOAD_BYTES,
+)
 from api.routes_handlers._base import _routes_binding
 from api.upload import parse_multipart
 
@@ -296,7 +300,9 @@ _USER_SKILL_IMPORT_ERROR_MESSAGES = {
     "unsupported_skill_upload_type": "仅支持上传 .md、.zip、.tar、.tar.gz、.tgz、.tar.bz2、.tbz2、.tar.xz 或 .txz 文件。",
     "missing_file": "请选择要导入的 Skill 文件。",
     "missing_filename": "上传文件缺少文件名，请重新选择文件后再导入。",
-    "upload_too_large": f"上传文件过大，当前最大支持 {MAX_UPLOAD_BYTES // 1024 // 1024}MB。",
+    "upload_too_large": (
+        f"上传文件过大，当前最大支持 {USER_SKILL_IMPORT_MAX_UPLOAD_BYTES // 1024 // 1024}MB。"
+    ),
     "invalid_skill_encoding": "SKILL.md 必须是 UTF-8 文本，请转换编码后再导入。",
     "invalid_skill_frontmatter": "SKILL.md 的 frontmatter 格式无效，请确认文件开头包含合法的 --- 元数据块。",
     "missing_skill_name": "SKILL.md 的 frontmatter 缺少 name，请补充技能名称后再导入。",
@@ -3549,7 +3555,7 @@ def _handle_user_skill_import(handler):
     try:
         content_type = handler.headers.get("Content-Type", "")
         content_length = int(handler.headers.get("Content-Length", 0) or 0)
-        if content_length > MAX_UPLOAD_BYTES:
+        if content_length > USER_SKILL_IMPORT_MAX_UPLOAD_BYTES + MULTIPART_UPLOAD_OVERHEAD_BYTES:
             raise _UserSkillError("上传文件过大", status=413, code="upload_too_large")
 
         _fields, files = parse_multipart(handler.rfile, content_type, content_length)
@@ -3560,6 +3566,8 @@ def _handle_user_skill_import(handler):
         source_filename = Path(str(filename or "")).name
         if not source_filename:
             raise _UserSkillError("上传文件缺少文件名", code="missing_filename")
+        if len(file_bytes) > USER_SKILL_IMPORT_MAX_UPLOAD_BYTES:
+            raise _UserSkillError("上传文件过大", status=413, code="upload_too_large")
 
         source_type = _get_upload_source_type(source_filename)
         user_id = _get_current_user_id(handler)

@@ -10,7 +10,11 @@ import email.parser
 import tempfile
 from pathlib import Path
 
-from api.config import MAX_UPLOAD_BYTES
+from api.config import (
+    CHAT_ATTACHMENT_MAX_UPLOAD_BYTES,
+    MAX_UPLOAD_BYTES,
+    MULTIPART_UPLOAD_OVERHEAD_BYTES,
+)
 from api.helpers import j, bad
 from api.models import get_session
 from api.workspace import safe_resolve_ws
@@ -67,8 +71,17 @@ def handle_upload(handler):
     try:
         content_type = handler.headers.get('Content-Type', '')
         content_length = int(handler.headers.get('Content-Length', 0) or 0)
-        if content_length > MAX_UPLOAD_BYTES:
-            return j(handler, {'error': f'File too large (max {MAX_UPLOAD_BYTES//1024//1024}MB)'}, status=413)
+        if content_length > CHAT_ATTACHMENT_MAX_UPLOAD_BYTES + MULTIPART_UPLOAD_OVERHEAD_BYTES:
+            return j(
+                handler,
+                {
+                    'error': (
+                        f'File too large '
+                        f'(max {CHAT_ATTACHMENT_MAX_UPLOAD_BYTES//1024//1024}MB)'
+                    )
+                },
+                status=413,
+            )
         fields, files = parse_multipart(handler.rfile, content_type, content_length)
         session_id = fields.get('session_id', '')
         if 'file' not in files:
@@ -76,6 +89,17 @@ def handle_upload(handler):
         filename, file_bytes = files['file']
         if not filename:
             return j(handler, {'error': 'No filename in upload'}, status=400)
+        if len(file_bytes) > CHAT_ATTACHMENT_MAX_UPLOAD_BYTES:
+            return j(
+                handler,
+                {
+                    'error': (
+                        f'File too large '
+                        f'(max {CHAT_ATTACHMENT_MAX_UPLOAD_BYTES//1024//1024}MB)'
+                    )
+                },
+                status=413,
+            )
         try:
             s = get_session(session_id)
         except KeyError:
