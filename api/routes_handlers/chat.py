@@ -88,6 +88,18 @@ def _handle_btw(handler, body):
     question = str(body["question"]).strip()
     if not question:
         return bad(handler, "question is required")
+    try:
+        from api.user_provider import (
+            UserProviderAuthError,
+            optional_user_id_from_handler,
+            verify_user_profile_access,
+        )
+
+        user_id = optional_user_id_from_handler(handler)
+        if user_id:
+            verify_user_profile_access(user_id, getattr(s, "profile", None))
+    except UserProviderAuthError as exc:
+        return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
     # Duplicate-stream guard (same pattern as chat/start)
     current_stream_id = getattr(s, "active_stream_id", None)
     if current_stream_id:
@@ -95,35 +107,61 @@ def _handle_btw(handler, body):
             if current_stream_id in STREAMS:
                 return j(handler, {"error": "session already has an active stream"}, status=409)
         s.active_stream_id = None
-    # Create ephemeral hidden session inheriting context
-    from api.models import new_session as _new_session
-    model_provider = getattr(s, 'model_provider', None)
-    ephemeral = _new_session(
-        workspace=s.workspace,
-        model=s.model,
-        model_provider=model_provider,
-        profile=getattr(s, 'profile', None),
-    )
-    # Copy conversation history for context (agent reads from messages)
-    ephemeral.messages = list(s.messages or [])
-    ephemeral.title = f"btw: {question[:60]}"
-    ephemeral.save()
     stream_id = uuid.uuid4().hex
-    ephemeral.active_stream_id = stream_id
-    ephemeral.save()
-    stream = create_stream_channel()
-    with STREAMS_LOCK:
-        STREAMS[stream_id] = stream
-    from api.background import track_btw
-    track_btw(body["session_id"], ephemeral.session_id, stream_id, question)
-    thr = threading.Thread(
-        target=_run_agent_streaming,
-        args=(ephemeral.session_id, question, s.model, s.workspace, stream_id, None),
-        kwargs={"ephemeral": True, "model_provider": model_provider},
-        daemon=True,
-    )
-    thr.start()
-    return j(handler, {"stream_id": stream_id, "session_id": ephemeral.session_id, "parent_session_id": body["session_id"]})
+    chat_start_rejection = try_acquire_chat_start_slot(user_id, stream_id)
+    if chat_start_rejection is not None:
+        return j(
+            handler,
+            request_limit_payload(chat_start_rejection),
+            status=429,
+            extra_headers=request_limit_headers(chat_start_rejection),
+        )
+    stream_started = False
+    try:
+        # Create ephemeral hidden session inheriting context
+        from api.models import new_session as _new_session
+
+        model_provider = getattr(s, "model_provider", None)
+        ephemeral = _new_session(
+            workspace=s.workspace,
+            model=s.model,
+            model_provider=model_provider,
+            profile=getattr(s, "profile", None),
+        )
+        # Copy conversation history for context (agent reads from messages)
+        ephemeral.messages = list(s.messages or [])
+        ephemeral.title = f"btw: {question[:60]}"
+        ephemeral.save()
+        ephemeral.active_stream_id = stream_id
+        ephemeral.save()
+        stream = create_stream_channel()
+        with STREAMS_LOCK:
+            STREAMS[stream_id] = stream
+        from api.background import track_btw
+
+        track_btw(body["session_id"], ephemeral.session_id, stream_id, question)
+        thr = threading.Thread(
+            target=_run_agent_streaming,
+            args=(ephemeral.session_id, question, s.model, s.workspace, stream_id, None),
+            kwargs={"ephemeral": True, "model_provider": model_provider},
+            daemon=True,
+        )
+        thr.start()
+        stream_started = True
+        return j(
+            handler,
+            {
+                "stream_id": stream_id,
+                "session_id": ephemeral.session_id,
+                "parent_session_id": body["session_id"],
+            },
+        )
+    except Exception:
+        if not stream_started:
+            with STREAMS_LOCK:
+                STREAMS.pop(stream_id, None)
+            release_chat_start_slot(stream_id)
+        raise
 
 
 def _handle_background(handler, body):
@@ -145,77 +183,109 @@ def _handle_background(handler, body):
     prompt = str(body["prompt"]).strip()
     if not prompt:
         return bad(handler, "prompt is required")
-    from api.models import new_session as _new_session
-    model_provider = getattr(s, 'model_provider', None)
-    bg = _new_session(
-        workspace=s.workspace,
-        model=s.model,
-        model_provider=model_provider,
-        profile=getattr(s, 'profile', None),
-    )
-    bg.title = f"bg: {prompt[:60]}"
-    bg.save()
+    try:
+        from api.user_provider import (
+            UserProviderAuthError,
+            optional_user_id_from_handler,
+            verify_user_profile_access,
+        )
+
+        user_id = optional_user_id_from_handler(handler)
+        if user_id:
+            verify_user_profile_access(user_id, getattr(s, "profile", None))
+    except UserProviderAuthError as exc:
+        return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
     stream_id = uuid.uuid4().hex
-    bg.active_stream_id = stream_id
-    bg.save()
-    stream = create_stream_channel()
-    with STREAMS_LOCK:
-        STREAMS[stream_id] = stream
-    task_id = uuid.uuid4().hex[:8]
-    from api.background import track_background, complete_background
-    parent_sid = body["session_id"]
-    bg_sid = bg.session_id
-    track_background(parent_sid, bg_sid, stream_id, task_id, prompt)
+    chat_start_rejection = try_acquire_chat_start_slot(user_id, stream_id)
+    if chat_start_rejection is not None:
+        return j(
+            handler,
+            request_limit_payload(chat_start_rejection),
+            status=429,
+            extra_headers=request_limit_headers(chat_start_rejection),
+        )
+    stream_started = False
+    try:
+        from api.models import new_session as _new_session
 
-    def _run_bg_and_notify():
-        """Run the background agent, then mark the tracked task `done` with the
-        last assistant reply so `/api/background/status` can surface it.  Without
-        this, `complete_background()` is never called and the result is lost —
-        `get_results()` would see a forever-`running` task and return nothing.
-        """
-        try:
-            _run_agent_streaming(
-                bg_sid,
-                prompt,
-                s.model,
-                s.workspace,
-                stream_id,
-                None,
-                model_provider=model_provider,
-            )
-            # Reload the bg session from disk and extract the final assistant reply.
-            try:
-                from api.models import Session as _Session
-                reloaded = _Session.load(bg_sid)
-                _answer = ""
-                for _m in reversed((reloaded.messages if reloaded else None) or []):
-                    if not isinstance(_m, dict) or _m.get("role") != "assistant":
-                        continue
-                    if _m.get("_error"):
-                        continue
-                    _content = str(_m.get("content") or "").strip()
-                    if _content:
-                        _answer = _content
-                        break
-                complete_background(parent_sid, task_id, _answer or "(no answer produced)")
-            except Exception:
-                complete_background(parent_sid, task_id, "(background task failed)")
-            # Best-effort cleanup of the hidden bg session file so it doesn't
-            # clutter the sidebar or SESSION_DIR. The index is pruned on the
-            # next rebuild via _index_entry_exists().
-            try:
-                (SESSION_DIR / f"{bg_sid}.json").unlink(missing_ok=True)
-            except Exception:
-                pass
-        except Exception:
-            try:
-                complete_background(parent_sid, task_id, "(background task failed)")
-            except Exception:
-                pass
+        model_provider = getattr(s, "model_provider", None)
+        bg = _new_session(
+            workspace=s.workspace,
+            model=s.model,
+            model_provider=model_provider,
+            profile=getattr(s, "profile", None),
+        )
+        bg.title = f"bg: {prompt[:60]}"
+        bg.save()
+        bg.active_stream_id = stream_id
+        bg.save()
+        stream = create_stream_channel()
+        with STREAMS_LOCK:
+            STREAMS[stream_id] = stream
+        task_id = uuid.uuid4().hex[:8]
+        from api.background import track_background, complete_background
 
-    thr = threading.Thread(target=_run_bg_and_notify, daemon=True)
-    thr.start()
-    return j(handler, {"task_id": task_id, "stream_id": stream_id, "session_id": bg.session_id})
+        parent_sid = body["session_id"]
+        bg_sid = bg.session_id
+        track_background(parent_sid, bg_sid, stream_id, task_id, prompt)
+
+        def _run_bg_and_notify():
+            """Run the background agent, then mark the tracked task `done` with the
+            last assistant reply so `/api/background/status` can surface it.  Without
+            this, `complete_background()` is never called and the result is lost —
+            `get_results()` would see a forever-`running` task and return nothing.
+            """
+            try:
+                _run_agent_streaming(
+                    bg_sid,
+                    prompt,
+                    s.model,
+                    s.workspace,
+                    stream_id,
+                    None,
+                    model_provider=model_provider,
+                )
+                # Reload the bg session from disk and extract the final assistant reply.
+                try:
+                    from api.models import Session as _Session
+
+                    reloaded = _Session.load(bg_sid)
+                    _answer = ""
+                    for _m in reversed((reloaded.messages if reloaded else None) or []):
+                        if not isinstance(_m, dict) or _m.get("role") != "assistant":
+                            continue
+                        if _m.get("_error"):
+                            continue
+                        _content = str(_m.get("content") or "").strip()
+                        if _content:
+                            _answer = _content
+                            break
+                    complete_background(parent_sid, task_id, _answer or "(no answer produced)")
+                except Exception:
+                    complete_background(parent_sid, task_id, "(background task failed)")
+                # Best-effort cleanup of the hidden bg session file so it doesn't
+                # clutter the sidebar or SESSION_DIR. The index is pruned on the
+                # next rebuild via _index_entry_exists().
+                try:
+                    (SESSION_DIR / f"{bg_sid}.json").unlink(missing_ok=True)
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    complete_background(parent_sid, task_id, "(background task failed)")
+                except Exception:
+                    pass
+
+        thr = threading.Thread(target=_run_bg_and_notify, daemon=True)
+        thr.start()
+        stream_started = True
+        return j(handler, {"task_id": task_id, "stream_id": stream_id, "session_id": bg.session_id})
+    except Exception:
+        if not stream_started:
+            with STREAMS_LOCK:
+                STREAMS.pop(stream_id, None)
+            release_chat_start_slot(stream_id)
+        raise
 
 
 def _handle_chat_start(handler, body):
@@ -299,40 +369,57 @@ def _handle_chat_start(handler, body):
         # Stale stream id from a previous run; clear and continue.
         _clear_stale_stream_state(s)
     stream_id = uuid.uuid4().hex
-    with _get_session_agent_lock(s.session_id):
-        _prepare_chat_start_session_for_stream(
-            s,
-            msg=msg,
-            attachments=attachments,
-            workspace=workspace,
-            model=model,
-            model_provider=model_provider,
-            stream_id=stream_id,
+    chat_start_rejection = try_acquire_chat_start_slot(user_id, stream_id)
+    if chat_start_rejection is not None:
+        return j(
+            handler,
+            request_limit_payload(chat_start_rejection),
+            status=429,
+            extra_headers=request_limit_headers(chat_start_rejection),
         )
-    set_last_workspace(workspace)
-    stream = create_stream_channel()
-    with STREAMS_LOCK:
-        STREAMS[stream_id] = stream
-    stream_kwargs = {"model_provider": model_provider}
-    if user_id:
-        stream_kwargs["user_id"] = user_id
-    thr = threading.Thread(
-        target=_run_agent_streaming,
-        args=(s.session_id, msg, model, workspace, stream_id, attachments),
-        kwargs=stream_kwargs,
-        daemon=True,
-    )
-    thr.start()
-    response = {
-        "stream_id": stream_id,
-        "session_id": s.session_id,
-        "pending_started_at": s.pending_started_at,
-    }
-    if normalized_model:
-        response["effective_model"] = model
-    if model_provider:
-        response["effective_model_provider"] = model_provider
-    return j(handler, response)
+    stream_started = False
+    try:
+        with _get_session_agent_lock(s.session_id):
+            _prepare_chat_start_session_for_stream(
+                s,
+                msg=msg,
+                attachments=attachments,
+                workspace=workspace,
+                model=model,
+                model_provider=model_provider,
+                stream_id=stream_id,
+            )
+        set_last_workspace(workspace)
+        stream = create_stream_channel()
+        with STREAMS_LOCK:
+            STREAMS[stream_id] = stream
+        stream_kwargs = {"model_provider": model_provider}
+        if user_id:
+            stream_kwargs["user_id"] = user_id
+        thr = threading.Thread(
+            target=_run_agent_streaming,
+            args=(s.session_id, msg, model, workspace, stream_id, attachments),
+            kwargs=stream_kwargs,
+            daemon=True,
+        )
+        thr.start()
+        stream_started = True
+        response = {
+            "stream_id": stream_id,
+            "session_id": s.session_id,
+            "pending_started_at": s.pending_started_at,
+        }
+        if normalized_model:
+            response["effective_model"] = model
+        if model_provider:
+            response["effective_model_provider"] = model_provider
+        return j(handler, response)
+    except Exception:
+        if not stream_started:
+            with STREAMS_LOCK:
+                STREAMS.pop(stream_id, None)
+            release_chat_start_slot(stream_id)
+        raise
 
 
 def _normalize_chat_attachments(raw_attachments):

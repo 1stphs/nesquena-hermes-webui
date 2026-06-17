@@ -5,11 +5,20 @@ That preserves the historical ``patch("api.routes.<name>")`` surface while
 letting api/routes.py stay as the stable public entrypoint.
 """
 
+import copy
+import threading
+import time
 import urllib.parse
 
 
 SESSION_PAGE_SIZE_DEFAULT = 20
 SESSION_PAGE_SIZE_MAX = 100
+SESSIONS_LIST_CACHE_TTL_SECONDS = 5.0
+
+_SESSIONS_LIST_CACHE_LOCK = threading.Lock()
+_SESSIONS_LIST_CACHE_SOURCE_ID = None
+_SESSIONS_LIST_CACHE_EXPIRES_AT = 0.0
+_SESSIONS_LIST_CACHE_VALUE = None
 
 
 def _sync_routes_bindings() -> None:
@@ -70,6 +79,115 @@ def _paginate_sessions(sessions, pagination_request):
         "has_more": has_more,
         "next_page": page + 1 if has_more else None,
     }
+
+
+_RUNTIME_SESSION_OVERLAY_KEYS = (
+    "active_stream_id",
+    "is_streaming",
+    "pending_user_message",
+    "has_pending_user_message",
+    "message_count",
+    "last_message_at",
+)
+
+
+def _overlay_sessions_streaming_state(sessions):
+    """Refresh volatile stream fields on cached session rows.
+
+    The sessions list cache keeps the expensive scan, but streaming state must
+    reflect the live STREAMS registry on every response.
+    """
+    from api.config import LOCK, SESSIONS
+    from api.models import _active_stream_ids, _is_streaming_session
+
+    if not sessions:
+        return sessions
+
+    active_stream_ids = _active_stream_ids()
+    session_map = {
+        str(session.get("session_id") or "").strip(): session
+        for session in sessions
+        if str(session.get("session_id") or "").strip()
+    }
+
+    with LOCK:
+        for live_session in SESSIONS.values():
+            runtime_view = live_session.compact(
+                include_runtime=True,
+                active_stream_ids=active_stream_ids,
+            )
+            session_id = str(runtime_view.get("session_id") or "").strip()
+            if not session_id or session_id not in session_map:
+                continue
+            row = session_map[session_id]
+            for key in _RUNTIME_SESSION_OVERLAY_KEYS:
+                if key in runtime_view:
+                    row[key] = runtime_view[key]
+
+    for session in sessions:
+        session["is_streaming"] = _is_streaming_session(
+            session.get("active_stream_id"),
+            active_stream_ids,
+        )
+
+    return sessions
+
+
+def _cached_all_sessions():
+    global _SESSIONS_LIST_CACHE_SOURCE_ID
+    global _SESSIONS_LIST_CACHE_EXPIRES_AT
+    global _SESSIONS_LIST_CACHE_VALUE
+
+    source_id = id(all_sessions)
+    now = time.monotonic()
+    with _SESSIONS_LIST_CACHE_LOCK:
+        if (
+            _SESSIONS_LIST_CACHE_SOURCE_ID == source_id
+            and _SESSIONS_LIST_CACHE_VALUE is not None
+            and now < _SESSIONS_LIST_CACHE_EXPIRES_AT
+        ):
+            return _overlay_sessions_streaming_state(
+                copy.deepcopy(_SESSIONS_LIST_CACHE_VALUE),
+            )
+
+    fresh_sessions = list(all_sessions())
+    cached_sessions = copy.deepcopy(fresh_sessions)
+    with _SESSIONS_LIST_CACHE_LOCK:
+        _SESSIONS_LIST_CACHE_SOURCE_ID = source_id
+        _SESSIONS_LIST_CACHE_EXPIRES_AT = now + SESSIONS_LIST_CACHE_TTL_SECONDS
+        _SESSIONS_LIST_CACHE_VALUE = cached_sessions
+        return _overlay_sessions_streaming_state(copy.deepcopy(cached_sessions))
+
+
+def _clear_sessions_list_cache_for_tests() -> None:
+    global _SESSIONS_LIST_CACHE_SOURCE_ID
+    global _SESSIONS_LIST_CACHE_EXPIRES_AT
+    global _SESSIONS_LIST_CACHE_VALUE
+
+    with _SESSIONS_LIST_CACHE_LOCK:
+        _SESSIONS_LIST_CACHE_SOURCE_ID = None
+        _SESSIONS_LIST_CACHE_EXPIRES_AT = 0.0
+        _SESSIONS_LIST_CACHE_VALUE = None
+
+
+def _request_limit_payload(rejection) -> dict:
+    return {
+        "error": getattr(rejection, "message", "当前使用人数较多，请稍后再试"),
+        "code": getattr(rejection, "code", "REQUEST_CONCURRENCY_LIMIT"),
+        "kind": getattr(rejection, "kind", "request"),
+        "limit": getattr(rejection, "limit", None),
+        "active": getattr(rejection, "active", None),
+    }
+
+
+def _send_request_limit_response(handler, rejection, *, close_connection: bool = False):
+    extra_headers = {
+        "Retry-After": getattr(rejection, "retry_after", "10"),
+    }
+    if close_connection:
+        handler.close_connection = True
+        extra_headers["Connection"] = "close"
+    return j(handler, _request_limit_payload(rejection), status=429, extra_headers=extra_headers)
 
 
 def dispatch_get(handler, parsed) -> bool:
@@ -514,7 +632,7 @@ self.addEventListener('fetch', () => {});
             pagination_request = _parse_sessions_pagination(parsed)
         except ValueError as e:
             return bad(handler, str(e), 400)
-        webui_sessions = all_sessions()
+        webui_sessions = _cached_all_sessions()
         settings = load_settings()
         show_cli_sessions = bool(settings.get("show_cli_sessions"))
         if show_cli_sessions:
@@ -1149,16 +1267,26 @@ def dispatch_post(handler, parsed) -> bool:
     if parsed.path != "/api/auth/token-login" and not _check_csrf(handler):
         return j(handler, {"error": "Cross-origin request rejected"}, status=403)
 
-    if parsed.path == "/api/upload":
-        return handle_upload(handler)
-    if parsed.path == "/api/upload/extract":
-        return handle_upload_extract(handler)
-
-    if parsed.path == "/api/user-skills/import":
-        return _handle_user_skill_import(handler)
-
-    if parsed.path == "/api/transcribe":
-        return handle_transcribe(handler)
+    if parsed.path in (
+        "/api/upload",
+        "/api/upload/extract",
+        "/api/user-skills/import",
+        "/api/transcribe",
+    ):
+        upload_rejection = try_acquire_upload_slot()
+        if upload_rejection is not None:
+            return _send_request_limit_response(handler, upload_rejection, close_connection=True)
+        try:
+            if parsed.path == "/api/upload":
+                return handle_upload(handler)
+            if parsed.path == "/api/upload/extract":
+                return handle_upload_extract(handler)
+            if parsed.path == "/api/user-skills/import":
+                return _handle_user_skill_import(handler)
+            if parsed.path == "/api/transcribe":
+                return handle_transcribe(handler)
+        finally:
+            release_upload_slot()
 
     def _send_server_memory_pressure_response() -> bool:
         # 读 body 前短路时关闭连接，避免未消费请求体污染后续请求。
@@ -1206,38 +1334,46 @@ def dispatch_post(handler, parsed) -> bool:
         return True
 
     if parsed.path == "/api/session/new":
+        request_rejection = try_acquire_session_create_slot()
+        if request_rejection is not None:
+            return _send_request_limit_response(handler, request_rejection)
         try:
-            workspace = str(resolve_trusted_workspace(body.get("workspace"))) if body.get("workspace") else None
-        except ValueError as e:
-            return bad(handler, str(e))
-        try:
-            from api.user_provider import (
-                UserProviderAuthError,
-                optional_user_id_from_handler,
-                verify_user_profile_access,
-            )
+            try:
+                workspace = (
+                    str(resolve_trusted_workspace(body.get("workspace"))) if body.get("workspace") else None
+                )
+            except ValueError as e:
+                return bad(handler, str(e))
+            try:
+                from api.user_provider import (
+                    UserProviderAuthError,
+                    optional_user_id_from_handler,
+                    verify_user_profile_access,
+                )
 
-            user_id = optional_user_id_from_handler(handler)
+                user_id = optional_user_id_from_handler(handler)
+                if user_id:
+                    verify_user_profile_access(user_id, body.get("profile"))
+            except UserProviderAuthError as exc:
+                return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
+            model, model_provider = _session_model_state_from_request(
+                body.get("model"),
+                body.get("model_provider"),
+            )
+            # Use the profile sent by the client tab (if any) so that two tabs on
+            # different profiles never clobber each other via the process-level global.
+            s = new_session(
+                workspace=workspace,
+                model=model,
+                model_provider=model_provider,
+                profile=body.get("profile") or None,
+                project_id=body.get("project_id") or None,
+            )
             if user_id:
-                verify_user_profile_access(user_id, body.get("profile"))
-        except UserProviderAuthError as exc:
-            return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
-        model, model_provider = _session_model_state_from_request(
-            body.get("model"),
-            body.get("model_provider"),
-        )
-        # Use the profile sent by the client tab (if any) so that two tabs on
-        # different profiles never clobber each other via the process-level global.
-        s = new_session(
-            workspace=workspace,
-            model=model,
-            model_provider=model_provider,
-            profile=body.get("profile") or None,
-            project_id=body.get("project_id") or None,
-        )
-        if user_id:
-            s.user_id = user_id
-        return j(handler, {"session": s.compact() | {"messages": s.messages}})
+                s.user_id = user_id
+            return j(handler, {"session": s.compact() | {"messages": s.messages}})
+        finally:
+            release_session_create_slot()
 
     if parsed.path == "/api/session/duplicate":
         try:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import re
 import threading
 import urllib.error
@@ -24,7 +25,13 @@ USAGE_TELEMETRY_ENABLED_ENV = "HERMES_USAGE_TELEMETRY_ENABLED"
 USAGE_TELEMETRY_TIMEZONE_ENV = "HERMES_USAGE_TIMEZONE"
 USAGE_TELEMETRY_SOURCE = "hermes-webui"
 DEFAULT_NOCOBASE_BASE_URL = "https://www.foxuai.com"
-DEFAULT_NOCOBASE_TIMEOUT_SECONDS = 10.0
+DEFAULT_NOCOBASE_TIMEOUT_SECONDS = 3.0
+USAGE_TELEMETRY_QUEUE_MAX_SIZE = 1000
+USAGE_TELEMETRY_WORKER_COUNT = 1
+
+_USAGE_TELEMETRY_QUEUE = queue.Queue(maxsize=USAGE_TELEMETRY_QUEUE_MAX_SIZE)
+_USAGE_TELEMETRY_WORKER_LOCK = threading.Lock()
+_USAGE_TELEMETRY_WORKERS_STARTED = False
 
 
 class UsageTelemetryError(RuntimeError):
@@ -302,6 +309,44 @@ def _create_usage_event(event: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _write_usage_telemetry_event(event: dict[str, Any]) -> None:
+    try:
+        _create_usage_event(event)
+    except Exception as exc:
+        logger.warning(
+            "Failed to write Hermes chat usage telemetry to NoCoBase: %s",
+            _redact_error_text(exc),
+        )
+
+
+def _usage_telemetry_worker() -> None:
+    while True:
+        event = _USAGE_TELEMETRY_QUEUE.get()
+        try:
+            _write_usage_telemetry_event(event)
+        finally:
+            _USAGE_TELEMETRY_QUEUE.task_done()
+
+
+def _ensure_usage_telemetry_worker_started() -> None:
+    global _USAGE_TELEMETRY_WORKERS_STARTED
+
+    if _USAGE_TELEMETRY_WORKERS_STARTED:
+        return
+
+    with _USAGE_TELEMETRY_WORKER_LOCK:
+        if _USAGE_TELEMETRY_WORKERS_STARTED:
+            return
+        for index in range(USAGE_TELEMETRY_WORKER_COUNT):
+            thread = threading.Thread(
+                target=_usage_telemetry_worker,
+                daemon=True,
+                name=f"usage-telemetry-worker-{index + 1}",
+            )
+            thread.start()
+        _USAGE_TELEMETRY_WORKERS_STARTED = True
+
+
 def record_chat_usage_done(
     *,
     session_id: Any,
@@ -341,7 +386,7 @@ def record_chat_usage_done_async(
     model_provider: Any,
     usage: dict[str, Any] | None,
     occurred_at: Any | None = None,
-) -> threading.Thread | None:
+) -> bool | None:
     if not is_usage_telemetry_enabled():
         return None
     event = build_chat_usage_done_event(
@@ -357,19 +402,13 @@ def record_chat_usage_done_async(
     if event is None:
         return None
 
-    def _worker() -> None:
-        try:
-            _create_usage_event(event)
-        except Exception as exc:
-            logger.warning(
-                "Failed to write Hermes chat usage telemetry to NoCoBase: %s",
-                _redact_error_text(exc),
-            )
-
-    thread = threading.Thread(
-        target=_worker,
-        daemon=True,
-        name=f"usage-telemetry-{str(stream_id or '')[:8]}",
-    )
-    thread.start()
-    return thread
+    _ensure_usage_telemetry_worker_started()
+    try:
+        _USAGE_TELEMETRY_QUEUE.put_nowait(event)
+    except queue.Full:
+        logger.warning(
+            "Dropped Hermes chat usage telemetry because the queue is full: max_size=%s",
+            USAGE_TELEMETRY_QUEUE_MAX_SIZE,
+        )
+        return False
+    return True

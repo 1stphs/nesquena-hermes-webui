@@ -1,6 +1,7 @@
 import collections
 import io
 import json
+import logging
 import queue
 import threading
 from datetime import datetime, timezone
@@ -205,6 +206,52 @@ def test_record_chat_usage_explicitly_disabled_does_not_open_url(monkeypatch):
 
     assert usage_telemetry.record_chat_usage_done(**_usage_kwargs()) is False
     assert usage_telemetry.record_chat_usage_done_async(**_usage_kwargs()) is None
+
+
+def test_record_chat_usage_async_enqueues_event_without_running_create(monkeypatch):
+    test_queue = queue.Queue(maxsize=2)
+    started_calls = []
+
+    monkeypatch.delenv("HERMES_USAGE_TELEMETRY_ENABLED", raising=False)
+    monkeypatch.setenv("NOCOBASE_API_BASE_URL", "https://nocobase.example/api")
+    monkeypatch.setenv("NOCOBASE_AUTHORIZATION", "secret-token")
+    monkeypatch.setattr(usage_telemetry, "_USAGE_TELEMETRY_QUEUE", test_queue)
+    monkeypatch.setattr(
+        usage_telemetry,
+        "_ensure_usage_telemetry_worker_started",
+        lambda: started_calls.append(True),
+    )
+    monkeypatch.setattr(
+        usage_telemetry,
+        "_create_usage_event",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("worker must not run")),
+    )
+
+    assert usage_telemetry.record_chat_usage_done_async(
+        **_usage_kwargs(occurred_at=datetime(2026, 6, 10, 16, 30, tzinfo=timezone.utc))
+    ) is True
+    assert started_calls == [True]
+
+    event = test_queue.get_nowait()
+    assert event["event_key"] == "session-1:stream-1"
+    assert event["business_date"] == "2026-06-11"
+
+
+def test_record_chat_usage_async_drops_when_queue_is_full(monkeypatch, caplog):
+    test_queue = queue.Queue(maxsize=1)
+    test_queue.put_nowait({"event_key": "already-queued"})
+
+    monkeypatch.delenv("HERMES_USAGE_TELEMETRY_ENABLED", raising=False)
+    monkeypatch.setenv("NOCOBASE_API_BASE_URL", "https://nocobase.example/api")
+    monkeypatch.setenv("NOCOBASE_AUTHORIZATION", "secret-token")
+    monkeypatch.setattr(usage_telemetry, "_USAGE_TELEMETRY_QUEUE", test_queue)
+    monkeypatch.setattr(usage_telemetry, "_ensure_usage_telemetry_worker_started", lambda: None)
+
+    with caplog.at_level(logging.WARNING):
+        assert usage_telemetry.record_chat_usage_done_async(**_usage_kwargs()) is False
+
+    assert test_queue.qsize() == 1
+    assert "queue is full" in caplog.text
 
 
 def test_nocobase_create_uses_api_base_url_and_bearer_authorization(monkeypatch):

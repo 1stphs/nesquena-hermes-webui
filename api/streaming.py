@@ -29,6 +29,7 @@ from api.config import (
     model_with_provider_context,
 )
 from api.helpers import redact_session_data, _redact_text
+from api.routes_helpers.request_limits import release_chat_start_slot
 from api.metering import meter
 
 # Global lock for os.environ writes. Per-session locks (_agent_lock) prevent
@@ -3465,6 +3466,7 @@ def _run_agent_streaming(
             STREAM_PARTIAL_TEXT.pop(stream_id, None)  # Clean up partial text buffer (#893)
             STREAM_REASONING_TEXT.pop(stream_id, None)  # Clean up reasoning trace (#1361 §A)
             STREAM_LIVE_TOOL_CALLS.pop(stream_id, None)  # Clean up tool calls (#1361 §B)
+        release_chat_start_slot(stream_id)
 
 # ============================================================
 # SECTION: HTTP Request Handler
@@ -3663,6 +3665,7 @@ def cancel_stream(stream_id: str) -> bool:
             live_tools = getattr(_live_config, 'STREAM_LIVE_TOOL_CALLS', STREAM_LIVE_TOOL_CALLS)
             if live_tools is not STREAM_LIVE_TOOL_CALLS:
                 _cancel_tool_calls = live_tools.get(stream_id, [])
+    release_chat_start_slot(stream_id)
 
     # Session cleanup outside STREAMS_LOCK to preserve lock ordering.
     # Acquire the per-session _agent_lock too, mirroring every other session
