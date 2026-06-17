@@ -100,20 +100,40 @@ run_ssh() {
     ssh -o BatchMode=yes "$SSH_HOST" "$@"
 }
 
+shell_quote() {
+    local value=${1//\'/\'\\\'\'}
+    printf "'%s'" "$value"
+}
+
+run_ssh_bash() {
+    local remote_command="bash -s --"
+    local arg
+    for arg in "$@"; do
+        remote_command+=" $(shell_quote "$arg")"
+    done
+    ssh -o BatchMode=yes "$SSH_HOST" "$remote_command"
+}
+
 log_info "Step 1/4 确认 SSH 可达: $SSH_HOST"
 run_ssh 'hostname; whoami'
 log_success "SSH 连接正常"
 
 log_info "Step 2/4 更新源码并重建 $SERVICE ..."
-run_ssh "set -euo pipefail
-cd '$REMOTE_DIR'
+run_ssh_bash "$REMOTE_DIR" "$BRANCH" "$SERVICE" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+REMOTE_DIR="$1"
+BRANCH="$2"
+SERVICE="$3"
+
+cd "$REMOTE_DIR"
 ensure_clean_checkout() {
-  local phase=\"\$1\"
+  local phase="$1"
   local status_output
-  status_output=\$(git status --short --untracked-files=normal)
-  if [[ -n \"\$status_output\" ]]; then
-    echo \"[ERROR] 服务器仓库存在未提交或未跟踪改动，停止自动部署 (\$phase)\" >&2
-    echo \"\$status_output\" >&2
+  status_output=$(git status --short --untracked-files=normal)
+  if [[ -n "$status_output" ]]; then
+    echo "[ERROR] 服务器仓库存在未提交或未跟踪改动，停止自动部署 ($phase)" >&2
+    echo "$status_output" >&2
     echo '请按 docs/deploy-172.md 手工核对；确认不是生产临时改动后再处理或加入 ignore。' >&2
     exit 1
   fi
@@ -121,35 +141,35 @@ ensure_clean_checkout() {
 ensure_head_matches_origin() {
   local head_commit
   local origin_commit
-  head_commit=\$(git rev-parse HEAD)
-  origin_commit=\$(git rev-parse 'origin/$BRANCH')
-  if [[ \"\$head_commit\" != \"\$origin_commit\" ]]; then
-    echo \"[ERROR] 服务器 HEAD 与 origin/$BRANCH 不一致，停止自动部署\" >&2
-    echo \"HEAD=\$head_commit\" >&2
-    echo \"origin/$BRANCH=\$origin_commit\" >&2
+  head_commit=$(git rev-parse HEAD)
+  origin_commit=$(git rev-parse "origin/$BRANCH")
+  if [[ "$head_commit" != "$origin_commit" ]]; then
+    echo "[ERROR] 服务器 HEAD 与 origin/$BRANCH 不一致，停止自动部署" >&2
+    echo "HEAD=$head_commit" >&2
+    echo "origin/$BRANCH=$origin_commit" >&2
     echo '请按 docs/deploy-172.md 手工核对服务器分支状态。' >&2
     exit 1
   fi
 }
-current_branch=\$(git branch --show-current)
-if [[ \"\$current_branch\" != '$BRANCH' ]]; then
-  echo \"[ERROR] 服务器当前分支不是 $BRANCH，停止自动部署\" >&2
-  echo \"current_branch=\$current_branch\" >&2
+current_branch=$(git branch --show-current)
+if [[ "$current_branch" != "$BRANCH" ]]; then
+  echo "[ERROR] 服务器当前分支不是 $BRANCH，停止自动部署" >&2
+  echo "current_branch=$current_branch" >&2
   echo '请按 docs/deploy-172.md 手工核对服务器分支状态。' >&2
   exit 1
 fi
 ensure_clean_checkout 'before pull'
-if ! git fetch origin 'refs/heads/$BRANCH:refs/remotes/origin/$BRANCH'; then
-  GIT_PROTOCOL=version=1 git fetch origin 'refs/heads/$BRANCH:refs/remotes/origin/$BRANCH'
+if ! git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"; then
+  GIT_PROTOCOL=version=1 git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
 fi
 git status --short
 git log --oneline -1 HEAD
-git log --oneline -1 'origin/$BRANCH'
-git merge --ff-only 'origin/$BRANCH'
+git log --oneline -1 "origin/$BRANCH"
+git merge --ff-only "origin/$BRANCH"
 ensure_clean_checkout 'after fast-forward'
 ensure_head_matches_origin
-docker compose up -d --build '$SERVICE'
-"
+docker compose up -d --build "$SERVICE"
+REMOTE_SCRIPT
 log_success "容器已重建"
 
 if [[ "$SKIP_SMOKE" -eq 1 ]]; then
@@ -159,62 +179,71 @@ if [[ "$SKIP_SMOKE" -eq 1 ]]; then
 fi
 
 log_info "Step 3/4 等待 $SERVICE 健康 (最多 ${HEALTH_WAIT_SECONDS}s) ..."
-run_ssh "set -euo pipefail
-deadline=\$((SECONDS + $HEALTH_WAIT_SECONDS))
+run_ssh_bash "$SERVICE" "$HEALTH_WAIT_SECONDS" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+SERVICE="$1"
+HEALTH_WAIT_SECONDS="$2"
+
+deadline=$((SECONDS + HEALTH_WAIT_SECONDS))
 health=starting
 health_http=000
 while (( SECONDS < deadline )); do
-  health=\$(docker inspect '$SERVICE' --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || echo missing)
-  health_http=\$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/health || echo 000)
-  if [[ \"\$health\" == healthy && \"\$health_http\" == 200 ]]; then
+  health=$(docker inspect "$SERVICE" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || echo missing)
+  health_http=$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/health || echo 000)
+  if [[ "$health" == healthy && "$health_http" == 200 ]]; then
     break
   fi
   sleep 2
 done
-echo \"health=\$health health_http=\$health_http\"
-if [[ \"\$health\" != healthy || \"\$health_http\" != 200 ]]; then
+echo "health=$health health_http=$health_http"
+if [[ "$health" != healthy || "$health_http" != 200 ]]; then
   echo '[ERROR] 健康检查超时' >&2
-  docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep '$SERVICE' || true
+  docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep "$SERVICE" || true
   exit 1
 fi
-"
+REMOTE_SCRIPT
 log_success "健康检查通过"
 
 log_info "Step 4/4 smoke check ..."
-run_ssh "set -euo pipefail
+run_ssh_bash "$SERVICE" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+SERVICE="$1"
+
 check_cors_preflight() {
-  local label=\"\$1\"
-  local url=\"\$2\"
-  local headers=\"/tmp/hermes-\${label}-cors.headers\"
+  local label="$1"
+  local url="$2"
+  local headers="/tmp/hermes-${label}-cors.headers"
   local http
-  http=\$(curl -sS --max-time 8 -D \"\$headers\" -o /dev/null -w '%{http_code}' -X OPTIONS \"\$url\" -H 'Origin: http://localhost:5173' -H 'Access-Control-Request-Method: POST' || echo 000)
-  echo \"\${label}_cors_http=\$http\"
-  if [[ \"\$http\" != 204 ]]; then
-    echo \"[ERROR] \${label} CORS preflight 检查失败\" >&2
+  http=$(curl -sS --max-time 8 -D "$headers" -o /dev/null -w '%{http_code}' -X OPTIONS "$url" -H 'Origin: http://localhost:5173' -H 'Access-Control-Request-Method: POST' || echo 000)
+  echo "${label}_cors_http=$http"
+  if [[ "$http" != 204 ]]; then
+    echo "[ERROR] ${label} CORS preflight 检查失败" >&2
     exit 1
   fi
-  if ! grep -qi '^Access-Control-Allow-Credentials:[[:space:]]*true' \"\$headers\"; then
-    echo \"[ERROR] \${label} CORS preflight 缺少 Access-Control-Allow-Credentials: true\" >&2
+  if ! grep -qi '^Access-Control-Allow-Credentials:[[:space:]]*true' "$headers"; then
+    echo "[ERROR] ${label} CORS preflight 缺少 Access-Control-Allow-Credentials: true" >&2
     exit 1
   fi
-  if ! grep -qi '^Access-Control-Allow-Methods:.*POST' \"\$headers\"; then
-    echo \"[ERROR] \${label} CORS preflight 缺少允许 POST 的 Access-Control-Allow-Methods\" >&2
+  if ! grep -qi '^Access-Control-Allow-Methods:.*POST' "$headers"; then
+    echo "[ERROR] ${label} CORS preflight 缺少允许 POST 的 Access-Control-Allow-Methods" >&2
     exit 1
   fi
 }
-docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep '^${SERVICE}|'
-docker inspect '$SERVICE' --format 'project={{ index .Config.Labels \"com.docker.compose.project\" }} service={{ index .Config.Labels \"com.docker.compose.service\" }} working_dir={{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}'
+docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep "^${SERVICE}|"
+docker inspect "$SERVICE" --format 'project={{ index .Config.Labels "com.docker.compose.project" }} service={{ index .Config.Labels "com.docker.compose.service" }} working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
 curl -sS --max-time 8 -o /tmp/hermes-health.json -w 'health_http=%{http_code}\n' http://127.0.0.1:8787/health
 python3 -m json.tool /tmp/hermes-health.json | head -5
 check_cors_preflight local http://127.0.0.1:8787/api/auth/token-login
-public_health_http=\$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' http://172.234.237.195:8787/health || echo 000)
-echo \"public_health_http=\$public_health_http\"
-if [[ \"\$public_health_http\" != 200 ]]; then
+public_health_http=$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' http://172.234.237.195:8787/health || echo 000)
+echo "public_health_http=$public_health_http"
+if [[ "$public_health_http" != 200 ]]; then
   echo '[ERROR] 公网 health 检查失败' >&2
   exit 1
 fi
 check_cors_preflight public http://172.234.237.195:8787/api/auth/token-login
-"
+REMOTE_SCRIPT
 log_success "smoke check 通过"
 
 log_success "部署完成: $SSH_HOST:$REMOTE_DIR ($SERVICE)"
