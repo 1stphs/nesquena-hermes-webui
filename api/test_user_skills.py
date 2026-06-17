@@ -891,6 +891,49 @@ def test_publish_from_profile_copies_skill_updates_name_and_creates_nocobase_rec
     assert payload["skill"]["originAgentId"] == "364194385035264"
 
 
+def test_publish_from_profile_copies_nested_profile_skill_path(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    profile_name = "default_367959913725953"
+    profile_home = tmp_path / "profiles" / profile_name
+    user_root = tmp_path / "users"
+    _write_skill(
+        profile_home / "skills" / "writing" / "novel-writing-basics",
+        content=_skill_markdown(
+            name="novel-writing-basics",
+            description="写小说的核心技巧与实践方法",
+        ),
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=profile_home)
+    _patch_skill_slug_suffix(monkeypatch, skill_handler, "abc123def0")
+
+    result = skill_handler._handle_user_skill_publish_from_profile(
+        object(),
+        {
+            "profile_name": profile_name,
+            "profile_id": "364194385035264",
+            "skill_slug": "writing/novel-writing-basics",
+        },
+    )
+
+    destination = user_root / "user-1" / "my-skills" / "novel-writing-basics-abc123def0"
+    assert result is True
+    assert destination.is_dir()
+    assert (destination / "SKILL.md").is_file()
+    assert nocobase_user_skills.create_calls[0]["skill_slug"] == "novel-writing-basics-abc123def0"
+    assert nocobase_user_skills.create_calls[0]["source_skill_slug"] == "writing/novel-writing-basics"
+    assert nocobase_user_skills.create_calls[0]["name"] == "novel-writing-basics"
+    assert _response(responses)[0] == 200
+
+
 def test_publish_to_market_review_copies_skill_and_creates_pending_template(
     tmp_path,
     monkeypatch,

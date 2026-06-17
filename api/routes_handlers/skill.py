@@ -694,6 +694,41 @@ def _validate_user_skill_english_name(value) -> str:
     return english_name
 
 
+def _validate_profile_installed_skill_path(value) -> str:
+    raw_path = str(value or "").strip()
+    if not raw_path:
+        raise _UserSkillError("skill_slug is required", code="missing_skill_slug")
+    if raw_path.endswith("/SKILL.md"):
+        raw_path = raw_path[: -len("/SKILL.md")]
+    if (
+        not raw_path
+        or raw_path.startswith("/")
+        or raw_path.endswith("/")
+        or "\\" in raw_path
+        or "\x00" in raw_path
+    ):
+        raise _UserSkillError("Invalid skill_slug", code="invalid_skill_slug")
+
+    parts = raw_path.split("/")
+    if not parts:
+        raise _UserSkillError("Invalid skill_slug", code="invalid_skill_slug")
+    for part in parts:
+        _validate_user_skill_segment(part, "skill_slug")
+
+    return "/".join(parts)
+
+
+def _resolve_profile_installed_skill_dir(skills_dir: Path, skill_path: str) -> Path:
+    normalized_path = _validate_profile_installed_skill_path(skill_path)
+    parts = normalized_path.split("/")
+    current_path = Path(skills_dir)
+    for part in parts:
+        current_path = current_path / part
+        if current_path.is_symlink():
+            raise _UserSkillError("Skill source cannot be a symlink", code="skill_source_symlink")
+    return _resolve_inside(skills_dir, *parts)
+
+
 def _user_skill_short_uuid() -> str:
     return uuid.uuid4().hex[:_USER_SKILL_SLUG_SUFFIX_LENGTH]
 
@@ -3713,7 +3748,14 @@ def _handle_user_skill_import_cancel(handler, body):
 def _handle_user_skill_publish_from_profile(handler, body):
     try:
         profile_name = str(body.get("profile_name") or body.get("profileName") or "").strip()
-        skill_slug = _validate_user_skill_segment(body.get("skill_slug") or body.get("skillSlug"), "skill_slug")
+        source_skill_path = _validate_profile_installed_skill_path(
+            body.get("skill_path")
+            or body.get("skillPath")
+            or body.get("source_skill_path")
+            or body.get("sourceSkillPath")
+            or body.get("skill_slug")
+            or body.get("skillSlug")
+        )
         origin_agent_id = _validate_user_skill_origin_agent_id(
             body.get("origin_agent_id")
             or body.get("originAgentId")
@@ -3724,7 +3766,7 @@ def _handle_user_skill_publish_from_profile(handler, body):
         user_id = _get_current_user_id(handler)
         profile_home = _get_owned_profile_home(handler, profile_name)
         profile_skills_dir = profile_home / "skills"
-        source_dir = _safe_skill_child_dir(profile_skills_dir, skill_slug)
+        source_dir = _resolve_profile_installed_skill_dir(profile_skills_dir, source_skill_path)
         my_skills_dir = _user_my_skills_dir(user_id, create=True)
 
         if profile_skills_dir.exists() and profile_skills_dir.is_symlink():
@@ -3750,7 +3792,7 @@ def _handle_user_skill_publish_from_profile(handler, body):
             source="profile",
             source_type="profile",
             source_profile_name=profile_name,
-            source_skill_slug=skill_slug,
+            source_skill_slug=source_skill_path,
             origin_type=_USER_SKILL_ORIGIN_AGENT,
             origin_agent_id=origin_agent_id,
             metadata=metadata,
