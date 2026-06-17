@@ -1,8 +1,15 @@
 import urllib.parse
 
+import pytest
+
 import api.routes as routes
 import api.routes_dispatcher as dispatcher
 from api.routes_helpers import server_pressure
+
+
+@pytest.fixture
+def memory_pressure_enabled(monkeypatch):
+    monkeypatch.setenv(server_pressure.SERVER_MEMORY_PRESSURE_ENABLED_ENV, "1")
 
 
 class _FakeHandler:
@@ -57,7 +64,22 @@ def test_meminfo_equal_threshold_does_not_block(tmp_path):
     assert blocked is False
 
 
-def test_meminfo_above_threshold_blocks(tmp_path):
+def test_memory_pressure_disabled_by_default_even_when_above_threshold(tmp_path, monkeypatch):
+    monkeypatch.delenv(server_pressure.SERVER_MEMORY_PRESSURE_ENABLED_ENV, raising=False)
+    meminfo = tmp_path / "meminfo"
+    cgroup_current, cgroup_max = _missing_cgroup_paths(tmp_path)
+    _write_meminfo(meminfo, total=1000, available=249)
+
+    blocked = server_pressure._is_server_memory_pressure_exceeded(
+        proc_meminfo_path=meminfo,
+        cgroup_current_path=cgroup_current,
+        cgroup_max_path=cgroup_max,
+    )
+
+    assert blocked is False
+
+
+def test_meminfo_above_threshold_blocks(tmp_path, memory_pressure_enabled):
     meminfo = tmp_path / "meminfo"
     cgroup_current, cgroup_max = _missing_cgroup_paths(tmp_path)
     _write_meminfo(meminfo, total=1000, available=249)
@@ -107,7 +129,7 @@ def test_cgroup_v2_max_value_is_ignored(tmp_path):
     assert blocked is False
 
 
-def test_cgroup_v2_finite_limit_can_block(tmp_path):
+def test_cgroup_v2_finite_limit_can_block(tmp_path, memory_pressure_enabled):
     missing_meminfo = tmp_path / "missing-meminfo"
     cgroup_current = tmp_path / "memory.current"
     cgroup_max = tmp_path / "memory.max"

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from api.helpers import _env_truthy
 
+
+SERVER_MEMORY_PRESSURE_ENABLED_ENV = "HERMES_WEBUI_MEMORY_PRESSURE_LIMIT"
 SERVER_MEMORY_PRESSURE_MESSAGE = "请求人数超过80，请稍后再试～"
 SERVER_MEMORY_PRESSURE_CODE = "SERVER_MEMORY_PRESSURE"
 SERVER_MEMORY_PRESSURE_RETRY_AFTER = "10"
@@ -92,6 +95,10 @@ def _cgroup_v2_usage_exceeds_threshold(
     return _usage_exceeds_threshold(used, total, threshold_percent=threshold_percent)
 
 
+def _is_server_memory_pressure_limit_enabled() -> bool:
+    return _env_truthy(SERVER_MEMORY_PRESSURE_ENABLED_ENV)
+
+
 def _is_server_memory_pressure_exceeded(
     *,
     proc_meminfo_path: Path = _PROC_MEMINFO_PATH,
@@ -101,8 +108,12 @@ def _is_server_memory_pressure_exceeded(
 ) -> bool:
     """任一可用内存压力指标超过阈值时返回 True。
 
+    默认关闭；设置 HERMES_WEBUI_MEMORY_PRESSURE_LIMIT=1 后启用。
     指标缺失或格式异常时视为不可用，避免非 Linux 本地开发环境误拦截。
     """
+    if not _is_server_memory_pressure_limit_enabled():
+        return False
+
     checks = (
         lambda: _meminfo_usage_exceeds_threshold(
             proc_meminfo_path,
