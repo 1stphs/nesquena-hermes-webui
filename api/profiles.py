@@ -933,6 +933,76 @@ def _create_profile_fallback(name: str, clone_from: str = None,
     return profile_dir
 
 
+def _clone_source_profile_dir(source_profile: str) -> Path:
+    if _is_root_profile(source_profile):
+        return _DEFAULT_HERMES_HOME
+    _validate_profile_name(source_profile)
+    for profile in list_profiles_api():
+        if profile.get('name') == source_profile and profile.get('path'):
+            try:
+                return Path(profile['path']).expanduser()
+            except Exception:
+                logger.debug("Failed to parse clone source profile path")
+            break
+    return _DEFAULT_HERMES_HOME / 'profiles' / source_profile
+
+
+def _copy_cloned_profile_skills(source_profile: str | None, profile_dir: Path) -> int:
+    """Copy top-level skills entries from a clone source into a new profile."""
+    if not source_profile:
+        return 0
+
+    source_dir = _clone_source_profile_dir(source_profile)
+    source_skills_dir = source_dir / 'skills'
+    if not source_skills_dir.is_dir():
+        return 0
+
+    target_skills_dir = profile_dir / 'skills'
+    if target_skills_dir.exists() and target_skills_dir.is_symlink():
+        raise OSError("Profile skills directory cannot be a symlink")
+    target_skills_dir.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for item in sorted(source_skills_dir.iterdir(), key=lambda path: path.name.lower()):
+        if item.name in ('.', '..') or item.name.startswith('.'):
+            continue
+        destination = target_skills_dir / item.name
+        if destination.exists() or destination.is_symlink():
+            continue
+        if item.is_symlink():
+            destination.symlink_to(os.readlink(item))
+        elif item.is_dir():
+            shutil.copytree(item, destination, symlinks=True)
+        elif item.is_file():
+            shutil.copy2(item, destination)
+        else:
+            continue
+        copied += 1
+    return copied
+
+
+def _count_profile_skill_dirs(profile_dir: Path) -> int:
+    skills_dir = profile_dir / 'skills'
+    if not skills_dir.is_dir():
+        return 0
+    count = 0
+    seen_dirs: set[Path] = set()
+    for root, dirs, files in os.walk(skills_dir, followlinks=True):
+        try:
+            resolved_root = Path(root).resolve()
+        except OSError:
+            dirs[:] = []
+            continue
+        if resolved_root in seen_dirs:
+            dirs[:] = []
+            continue
+        seen_dirs.add(resolved_root)
+        dirs[:] = [name for name in dirs if name not in ('.git', '.github', '.hub')]
+        if 'SKILL.md' in files and (Path(root) / 'SKILL.md').is_file():
+            count += 1
+    return count
+
+
 def _write_endpoint_to_config(profile_dir: Path, base_url: str = None, api_key: str = None) -> None:
     """Write custom endpoint fields into config.yaml for a profile."""
     if not base_url and not api_key:
@@ -963,6 +1033,7 @@ def _write_endpoint_to_config(profile_dir: Path, base_url: str = None, api_key: 
 
 def create_profile_api(name: str, clone_from: str = None,
                        clone_config: bool = False,
+                       clone_skills: bool = False,
                        base_url: str = None,
                        api_key: str = None) -> dict:
     """Create a new profile. Returns the new profile info dict."""
@@ -998,6 +1069,8 @@ def create_profile_api(name: str, clone_from: str = None,
             break
 
     profile_path.mkdir(parents=True, exist_ok=True)
+    if clone_skills:
+        _copy_cloned_profile_skills(clone_from, profile_path)
     _write_endpoint_to_config(profile_path, base_url=base_url, api_key=api_key)
 
     # Invalidate cached root-profile-name lookup; create_profile may have added
@@ -1020,7 +1093,7 @@ def create_profile_api(name: str, clone_from: str = None,
         'model': None,
         'provider': None,
         'has_env': (profile_path / '.env').exists(),
-        'skill_count': 0,
+        'skill_count': _count_profile_skill_dirs(profile_path),
     }
 
 

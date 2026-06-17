@@ -75,6 +75,79 @@ def test_install_profiles_accepts_150_character_profile_name(tmp_path, monkeypat
     assert (profiles_root / long_name / "SOUL.md").read_text(encoding="utf-8") == "profile"
 
 
+def test_copy_cloned_profile_skills_preserves_template_skill_entries(tmp_path, monkeypatch):
+    import api.profiles as profiles
+
+    hermes_home = tmp_path / ".hermes"
+    builtin_skill = tmp_path / "builtin" / "builtin-skill"
+    builtin_skill.mkdir(parents=True)
+    (builtin_skill / "SKILL.md").write_text(
+        "---\nname: builtin-skill\ndescription: Built in\n---\n",
+        encoding="utf-8",
+    )
+    template_skills = hermes_home / "profiles" / "template_profile" / "skills"
+    template_skills.mkdir(parents=True)
+    (template_skills / "builtin-skill").symlink_to(builtin_skill)
+    second_skill = template_skills / "second-skill"
+    second_skill.mkdir()
+    (second_skill / "SKILL.md").write_text(
+        "---\nname: second-skill\ndescription: Another built in\n---\n",
+        encoding="utf-8",
+    )
+    target_profile = hermes_home / "profiles" / "new-agent"
+    (target_profile / "skills").mkdir(parents=True)
+    monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", hermes_home)
+
+    copied = profiles._copy_cloned_profile_skills("template_profile", target_profile)
+
+    copied_skill_dir = target_profile / "skills" / "builtin-skill"
+    copied_skill = copied_skill_dir / "SKILL.md"
+    assert copied == 2
+    assert copied_skill_dir.is_symlink()
+    assert copied_skill.read_text(encoding="utf-8").startswith("---\nname: builtin-skill")
+    assert (target_profile / "skills" / "second-skill" / "SKILL.md").is_file()
+    assert profiles._count_profile_skill_dirs(target_profile) == 2
+
+
+def test_create_profile_agent_clones_template_skills(monkeypatch):
+    import api.profiles as profiles
+    import api.routes_handlers.profile as profile_handler
+
+    responses = []
+    create_calls = []
+
+    _patch_profile_handler_bindings(monkeypatch, profile_handler, responses)
+
+    def fake_create_profile_api(name, **options):
+        create_calls.append((name, options))
+        return {"name": name, "path": "/tmp/new-agent"}
+
+    monkeypatch.setattr(profiles, "create_profile_api", fake_create_profile_api)
+    monkeypatch.setattr(profile_handler, "_write_profile_agent_files", lambda _path, _agent: {})
+
+    result = profile_handler._handle_profile_agent_create(
+        object(),
+        {
+            "display_name": "New Agent",
+            "description": "desc",
+            "prompt": "prompt",
+        },
+    )
+
+    assert result is True
+    assert responses[0][0] == 200
+    assert create_calls[0] == (
+        "new-agent",
+        {
+            "clone_from": "template_profile",
+            "clone_config": True,
+            "base_url": None,
+            "api_key": None,
+            "clone_skills": True,
+        },
+    )
+
+
 def test_update_profile_agent_preserves_skills_when_omitted(tmp_path, monkeypatch):
     import api.routes_handlers.profile as profile_handler
 

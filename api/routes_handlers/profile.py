@@ -751,7 +751,7 @@ def _handle_profile_agent_create(handler, body):
 
         from api.profiles import create_profile_api
 
-        profile = create_profile_api(profile_id, **create_options)
+        profile = create_profile_api(profile_id, clone_skills=True, **create_options)
         raw_profile_path = str(profile.get("path") or "").strip()
         if not raw_profile_path:
             raise RuntimeError("created profile did not return a path")
