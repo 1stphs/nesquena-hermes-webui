@@ -387,8 +387,11 @@ def test_handle_cron_calendar_includes_calendar_events(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
 
     import api.routes as routes
+    from api.routes_handlers import cron_read
     from api.routes_handlers.cron_read import _handle_cron_calendar
     from api.calendar_events import create_calendar_event
+
+    cron_read._clear_cron_calendar_cache_for_tests()
 
     @contextmanager
     def _passthrough_context(_home):
@@ -433,3 +436,197 @@ def test_handle_cron_calendar_includes_calendar_events(tmp_path, monkeypatch):
     assert event["type"] == "calendar_event"
     assert event["title"] == "设计评审"
     assert event["description"] == "评审新方案"
+
+
+def test_handle_cron_calendar_uses_cache_for_unchanged_sources(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+
+    from datetime import date
+
+    import api.calendar_events as calendar_events
+    import api.profiles as profiles
+    import api.routes as routes
+    import cron.jobs as cron_jobs
+    from api.routes_handlers import cron_read
+
+    cron_read._clear_cron_calendar_cache_for_tests()
+    profile_home = tmp_path / ".hermes"
+    calls = {"jobs": 0, "events": 0}
+
+    @contextmanager
+    def _passthrough_context(_home):
+        yield
+
+    def _fake_list_jobs(include_disabled=True):
+        calls["jobs"] += 1
+        return [{"id": "job-1", "name": "例行提醒", "enabled": True}]
+
+    def _fake_load_calendar_events():
+        calls["events"] += 1
+        return []
+
+    monkeypatch.setattr(routes, "_normalize_cron_profile_lookup_name", lambda raw: str(raw))
+    monkeypatch.setattr(
+        routes,
+        "_profile_home_for_cron_profile_name",
+        lambda _profile: profile_home,
+    )
+    monkeypatch.setattr(
+        routes,
+        "_cron_calendar_dates_for_job",
+        lambda _job, _start, _end: {date(2026, 6, 9)},
+    )
+    monkeypatch.setattr(profiles, "cron_profile_context_for_home", _passthrough_context)
+    monkeypatch.setattr(cron_jobs, "list_jobs", _fake_list_jobs)
+    monkeypatch.setattr(calendar_events, "load_calendar_events", _fake_load_calendar_events)
+
+    body = {
+        "profiles": ["default"],
+        "start_date": "2026-06-09",
+        "end_date": "2026-06-09",
+    }
+
+    first_handler = _ResponseHandler()
+    cron_read._handle_cron_calendar(first_handler, body)
+    first_payload = _read_json(first_handler)
+
+    second_handler = _ResponseHandler()
+    cron_read._handle_cron_calendar(second_handler, body)
+    second_payload = _read_json(second_handler)
+
+    assert first_handler.status == 200
+    assert second_handler.status == 200
+    assert calls == {"jobs": 1, "events": 1}
+    assert second_payload == first_payload
+    assert second_payload["days"][0]["count"] == 1
+
+
+def test_handle_cron_calendar_reuses_profile_source_for_different_ranges(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+
+    import api.calendar_events as calendar_events
+    import api.profiles as profiles
+    import api.routes as routes
+    import cron.jobs as cron_jobs
+    from api.routes_handlers import cron_read
+
+    cron_read._clear_cron_calendar_cache_for_tests()
+    profile_home = tmp_path / ".hermes"
+    calls = {"jobs": 0, "events": 0}
+
+    @contextmanager
+    def _passthrough_context(_home):
+        yield
+
+    def _fake_list_jobs(include_disabled=True):
+        calls["jobs"] += 1
+        return [{"id": "job-1", "name": "例行提醒", "enabled": True}]
+
+    def _fake_load_calendar_events():
+        calls["events"] += 1
+        return []
+
+    monkeypatch.setattr(routes, "_normalize_cron_profile_lookup_name", lambda raw: str(raw))
+    monkeypatch.setattr(
+        routes,
+        "_profile_home_for_cron_profile_name",
+        lambda _profile: profile_home,
+    )
+    monkeypatch.setattr(
+        routes,
+        "_cron_calendar_dates_for_job",
+        lambda _job, start, _end: {start},
+    )
+    monkeypatch.setattr(profiles, "cron_profile_context_for_home", _passthrough_context)
+    monkeypatch.setattr(cron_jobs, "list_jobs", _fake_list_jobs)
+    monkeypatch.setattr(calendar_events, "load_calendar_events", _fake_load_calendar_events)
+
+    first_handler = _ResponseHandler()
+    cron_read._handle_cron_calendar(
+        first_handler,
+        {
+            "profiles": ["default"],
+            "start_date": "2026-06-09",
+            "end_date": "2026-06-09",
+        },
+    )
+
+    second_handler = _ResponseHandler()
+    cron_read._handle_cron_calendar(
+        second_handler,
+        {
+            "profiles": ["default"],
+            "start_date": "2026-06-10",
+            "end_date": "2026-06-10",
+        },
+    )
+    second_payload = _read_json(second_handler)
+
+    assert first_handler.status == 200
+    assert second_handler.status == 200
+    assert calls == {"jobs": 1, "events": 1}
+    assert second_payload["days"][0]["date"] == "2026-06-10"
+    assert second_payload["days"][0]["count"] == 1
+
+
+def test_handle_cron_calendar_cache_misses_when_source_file_changes(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+
+    from datetime import date
+
+    import api.calendar_events as calendar_events
+    import api.profiles as profiles
+    import api.routes as routes
+    import cron.jobs as cron_jobs
+    from api.routes_handlers import cron_read
+
+    cron_read._clear_cron_calendar_cache_for_tests()
+    profile_home = tmp_path / ".hermes"
+    calls = {"jobs": 0, "events": 0}
+
+    @contextmanager
+    def _passthrough_context(_home):
+        yield
+
+    def _fake_list_jobs(include_disabled=True):
+        calls["jobs"] += 1
+        return [{"id": "job-1", "name": "例行提醒", "enabled": True}]
+
+    def _fake_load_calendar_events():
+        calls["events"] += 1
+        return []
+
+    monkeypatch.setattr(routes, "_normalize_cron_profile_lookup_name", lambda raw: str(raw))
+    monkeypatch.setattr(
+        routes,
+        "_profile_home_for_cron_profile_name",
+        lambda _profile: profile_home,
+    )
+    monkeypatch.setattr(
+        routes,
+        "_cron_calendar_dates_for_job",
+        lambda _job, _start, _end: {date(2026, 6, 9)},
+    )
+    monkeypatch.setattr(profiles, "cron_profile_context_for_home", _passthrough_context)
+    monkeypatch.setattr(cron_jobs, "list_jobs", _fake_list_jobs)
+    monkeypatch.setattr(calendar_events, "load_calendar_events", _fake_load_calendar_events)
+
+    body = {
+        "profiles": ["default"],
+        "start_date": "2026-06-09",
+        "end_date": "2026-06-09",
+    }
+
+    first_handler = _ResponseHandler()
+    cron_read._handle_cron_calendar(first_handler, body)
+
+    cron_dir = profile_home / "cron"
+    cron_dir.mkdir(parents=True, exist_ok=True)
+    (cron_dir / "jobs.json").write_text('{"jobs": []}', encoding="utf-8")
+
+    second_handler = _ResponseHandler()
+    cron_read._handle_cron_calendar(second_handler, body)
+
+    assert first_handler.status == 200
+    assert second_handler.status == 200
+    assert calls == {"jobs": 2, "events": 2}
