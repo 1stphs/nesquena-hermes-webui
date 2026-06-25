@@ -365,6 +365,7 @@ from api.routes_handlers.skill import (
     _handle_skill_install_community,
     _handle_skill_uninstall_profile,
     _handle_user_skill_file_read,
+    _handle_user_skill_file_raw,
     _handle_user_skill_file_update,
     _handle_user_skill_files_list,
     _handle_user_skill_import,

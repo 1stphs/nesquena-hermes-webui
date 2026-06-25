@@ -4,6 +4,7 @@ import ast
 import io
 import json
 import logging
+import mimetypes
 import os
 import re
 import shutil
@@ -30,6 +31,8 @@ from api.upload import parse_multipart
 
 
 logger = logging.getLogger(__name__)
+mimetypes.add_type("image/apng", ".apng")
+mimetypes.add_type("image/avif", ".avif")
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -77,6 +80,35 @@ _USER_SKILL_INSTALLABLE_STATUSES = {
     _USER_SKILL_STATUS_FULLY_TESTED,
 }
 _USER_SKILL_EDIT_MAX_BYTES = 2 * 1024 * 1024
+_USER_SKILL_TEXT_SUFFIXES = {
+    ".css",
+    ".csv",
+    ".html",
+    ".js",
+    ".json",
+    ".md",
+    ".mjs",
+    ".py",
+    ".sh",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".vue",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+_USER_SKILL_INLINE_IMAGE_MIME_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+    "image/apng",
+    "image/x-icon",
+    "image/bmp",
+}
 _USER_IMPORT_MAX_EXTRACTED_BYTES = 200 * 1024 * 1024
 _USER_IMPORT_ARCHIVE_SUFFIXES = (
     ".zip",
@@ -2771,6 +2803,49 @@ def _resolve_user_skill_file(skill_dir: Path, relative_path: str) -> Path:
     return target
 
 
+def _user_skill_file_mime_type(target: Path) -> str:
+    mime = mimetypes.guess_type(target.name)[0]
+    return str(mime or "").strip().lower() or "application/octet-stream"
+
+
+def _is_user_skill_text_file(target: Path) -> bool:
+    mime = _user_skill_file_mime_type(target)
+    if mime.startswith("text/"):
+        return True
+    if mime in {"application/json", "application/xml", "application/xhtml+xml"}:
+        return True
+    if target.name.startswith(".env"):
+        return True
+    return target.suffix.lower() in _USER_SKILL_TEXT_SUFFIXES
+
+
+def _read_user_skill_file_raw(target: Path) -> tuple[bytes, str]:
+    try:
+        size_bytes = target.stat().st_size
+    except OSError as exc:
+        raise _UserSkillError(
+            "Failed to inspect skill file",
+            status=500,
+            code="skill_file_inspect_failed",
+        ) from exc
+
+    if size_bytes > USER_SKILL_IMPORT_MAX_UPLOAD_BYTES:
+        raise _UserSkillError(
+            "该文件过大，暂不支持在线预览",
+            status=413,
+            code="skill_file_too_large",
+        )
+
+    try:
+        return target.read_bytes(), _user_skill_file_mime_type(target)
+    except OSError as exc:
+        raise _UserSkillError(
+            "读取 Skill 文件失败",
+            status=500,
+            code="skill_file_read_failed",
+        ) from exc
+
+
 def _relative_skill_path(skill_dir: Path, item: Path) -> str:
     return item.relative_to(skill_dir).as_posix()
 
@@ -2801,7 +2876,8 @@ def _build_user_skill_file_tree(skill_dir: Path) -> tuple[list[dict], list[dict]
                     "name": child.name,
                     "path": relative_path,
                     "sizeBytes": size_bytes,
-                    "editable": size_bytes <= _USER_SKILL_EDIT_MAX_BYTES,
+                    "editable": size_bytes <= _USER_SKILL_EDIT_MAX_BYTES
+                    and _is_user_skill_text_file(child),
                 }
                 files.append(file_node)
                 children.append(file_node)
@@ -3605,6 +3681,67 @@ def _handle_user_skill_file_read(handler, parsed):
             "skill": skill,
         },
     )
+
+
+def _handle_user_skill_file_raw(handler, parsed):
+    try:
+        query = urllib.parse.parse_qs(parsed.query or "")
+        skill_slug = _validate_user_skill_english_name(
+            (query.get("skill_slug") or query.get("skillSlug") or [""])[0]
+        )
+        relative_path = _normalize_user_skill_file_path((query.get("path") or [""])[0])
+        user_id = _get_current_user_id(handler)
+        _my_skills_dir, skill_dir, _record = _get_owned_user_skill_dir(user_id, skill_slug)
+        target = _resolve_user_skill_file(skill_dir, relative_path)
+        mime_type = _user_skill_file_mime_type(target)
+        inline_preview = (query.get("inline") or [""])[0] == "1"
+        download = (query.get("download") or [""])[0] == "1"
+        has_inline_media_preview = (
+            mime_type in _USER_SKILL_INLINE_IMAGE_MIME_TYPES
+            or mime_type.startswith("audio/")
+            or mime_type.startswith("video/")
+        )
+        if not inline_preview and not download and not has_inline_media_preview:
+            if not _is_user_skill_text_file(target):
+                raise _UserSkillError(
+                    "该文件类型暂不支持预览",
+                    code="unsupported_skill_file_preview",
+                )
+        if inline_preview and mime_type == "text/html":
+            disposition = "inline"
+            csp = "sandbox allow-scripts"
+        elif download or mime_type in {"image/svg+xml", "application/octet-stream"}:
+            disposition = "attachment"
+            csp = None
+        else:
+            disposition = "inline" if mime_type in _USER_SKILL_INLINE_IMAGE_MIME_TYPES else "attachment"
+            csp = None
+        data, mime_type = _read_user_skill_file_raw(target)
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", mime_type)
+    handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("Cache-Control", "private, max-age=3600")
+    safe_filename = target.name.replace("\\", "_").replace('"', "_").replace("\r", "_").replace("\n", "_")
+    handler.send_header("Content-Disposition", f'{disposition}; filename="{safe_filename}"')
+    if csp:
+        handler.send_header("Content-Security-Policy", csp)
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        handler.send_header("Referrer-Policy", "same-origin")
+        handler.send_header(
+            "Permissions-Policy",
+            "camera=(), microphone=(self), geolocation=(), clipboard-write=(self)",
+        )
+    else:
+        _routes_binding("_security_headers")(handler)
+    handler.end_headers()
+    try:
+        handler.wfile.write(data)
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError, OSError):
+        return True
+    return True
 
 
 def _handle_user_skill_import(handler):

@@ -21,6 +21,11 @@ def _patch_skill_handler_bindings(monkeypatch, skill_handler, responses):
             return fake_bad
         if name == "_sanitize_error":
             return str
+        if name == "_security_headers":
+            def fake_security_headers(handler):
+                handler.send_header("X-Content-Type-Options", "nosniff")
+
+            return fake_security_headers
         raise AttributeError(name)
 
     monkeypatch.setattr(skill_handler, "_routes_binding", fake_routes_binding)
@@ -32,6 +37,31 @@ def _patch_user_root(monkeypatch, skill_handler, root):
 
 def _patch_skill_slug_suffix(monkeypatch, skill_handler, suffix):
     monkeypatch.setattr(skill_handler, "_user_skill_short_uuid", lambda: suffix)
+
+
+class _RawResponseHandler:
+    def __init__(self):
+        self.headers = {}
+        self.status = None
+        self.response_headers = []
+        self.wfile = io.BytesIO()
+        self.ended = False
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, name, value):
+        self.response_headers.append((name, value))
+
+    def end_headers(self):
+        self.ended = True
+
+    def header(self, name):
+        normalized = name.lower()
+        for header_name, value in reversed(self.response_headers):
+            if header_name.lower() == normalized:
+                return value
+        return ""
 
 
 def _patch_profile_access(monkeypatch, *, home, user_id="user-1", forbidden=False, calls=None):
@@ -3577,8 +3607,40 @@ def test_user_skill_files_list_returns_sorted_tree_and_default_skill_file(
         "docs/guide.md",
         "SKILL.md",
     ]
+    files_by_path = {item["path"]: item for item in payload["files"]}
+    assert files_by_path[".env.example"]["editable"] is True
     assert payload["tree"][0]["path"] == "docs"
     assert payload["skill"]["status"] == "availability_tested"
+
+
+def test_user_skill_files_list_marks_image_files_not_editable(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    source = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(source)
+    (source / "preview.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
+    nocobase_user_skills.records.append(_make_user_skill_record())
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_files_list(
+        object(),
+        SimpleNamespace(query="skill_slug=mail-assistant"),
+    )
+
+    status, payload = _response(responses)
+    files_by_path = {item["path"]: item for item in payload["files"]}
+    assert result is True
+    assert status == 200
+    assert files_by_path["preview.png"]["editable"] is False
 
 
 def test_user_skill_files_list_rejects_symlink_tree(tmp_path, monkeypatch, nocobase_user_skills):
@@ -3633,6 +3695,48 @@ def test_user_skill_file_read_returns_utf8_content(tmp_path, monkeypatch, nocoba
     assert payload["path"] == "notes.md"
     assert payload["content"] == "你好\n"
     assert payload["skill"]["englishName"] == "mail-assistant"
+
+
+@pytest.mark.parametrize(
+    "filename, expected_mime",
+    [
+        ("preview.png", "image/png"),
+        ("preview.apng", "image/apng"),
+    ],
+)
+def test_user_skill_file_raw_returns_image_bytes(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    filename,
+    expected_mime,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    png_bytes = b"\x89PNG\r\n\x1a\nimage-data"
+    user_root = tmp_path / "users"
+    source = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(source)
+    (source / filename).write_bytes(png_bytes)
+    nocobase_user_skills.records.append(_make_user_skill_record())
+    responses = []
+    handler = _RawResponseHandler()
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_file_raw(
+        handler,
+        SimpleNamespace(query=f"skill_slug=mail-assistant&path={filename}&inline=1"),
+    )
+
+    assert result is True
+    assert handler.status == 200
+    assert handler.header("Content-Type") == expected_mime
+    assert handler.header("Content-Disposition") == f'inline; filename="{filename}"'
+    assert handler.header("Content-Length") == str(len(png_bytes))
+    assert handler.wfile.getvalue() == png_bytes
 
 
 @pytest.mark.parametrize(

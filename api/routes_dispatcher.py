@@ -1010,6 +1010,9 @@ self.addEventListener('fetch', () => {});
     if parsed.path == "/api/user-skills/file":
         return _handle_user_skill_file_read(handler, parsed)
 
+    if parsed.path == "/api/user-skills/file/raw":
+        return _handle_user_skill_file_raw(handler, parsed)
+
     if parsed.path == "/api/user-skills/test-availability/status":
         return _handle_user_skill_test_availability_status(handler, parsed)
 
