@@ -64,12 +64,16 @@ label 为准。172 服务器部署 runbook 位置:
 `authorized_keys`，后续部署优先使用 key 登录；密码只作为恢复或换 key
 时的临时路径，不写入仓库。
 
-其他保留文档:
+其他辅助文档已归档到 `docs/other/`:
 
-- `docs/docker.md`: Docker 通用说明，适合本地或非 172 环境。
-- `docs/supervisor.md`: process supervisor 说明，当前 172 生产部署不以它为主。
-- `docs/troubleshooting.md`: 常见故障排查。
+- `docs/other/docker.md`: Docker 通用说明，适合本地或非 172 环境。
+- `docs/other/supervisor.md`: process supervisor 说明，当前 172 生产部署不以它为主。
+- `docs/other/troubleshooting.md`: 常见故障排查。
+- `docs/other/EXTENSIONS.md`: WebUI extension 注入说明，当前仅作为历史 / 辅助参考。
+- `docs/other/ISSUES.md`: 上游问题根因记录，当前仅作为历史 / 辅助参考。
 - `docs/api-docs.md`: API 说明。
+
+`docs/` 目录下所有文件均纳入 Git 版本管理，不在 `.gitignore` 中忽略；新增文档请与代码一并提交。详见 `docs/README.md`。
 
 本 fork 不再维护 GitHub Actions workflow。部署和验证以本地命令、服务器 runbook 和实际容器状态为准。
 

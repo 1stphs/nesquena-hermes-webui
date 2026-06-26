@@ -49,15 +49,8 @@ api/_version.py
 .DS_Store
 Thumbs.db
 
-# Local reference clones — never committed (except tracked design/UI-UX reference pages)
-docs/*
-!docs/ui-ux/
-!docs/ui-ux/**
-!docs/docker.md
-!docs/deploy-172.md
-!docs/api-docs.md
-!docs/supervisor.md
-!docs/troubleshooting.md
+# docs/ — 项目文档目录，全部纳入版本管理，禁止添加忽略规则
+# 含 Markdown、HTML 渲染页及 docs/other/ 子目录；新增文档直接 git add 后提交
 
 # Local-only PR review harness: rendering drivers, sample bank, fixtures.
 # Used by Claude during deep reviews; never shared in the repo.
