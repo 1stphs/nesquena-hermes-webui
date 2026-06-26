@@ -1,4 +1,618 @@
-# Digital Employee API 接口文档
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Digital Employee API 接口文档</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --surface: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --accent-soft: #eff6ff;
+      --code-bg: #f3f4f6;
+      --sidebar-w: 300px;
+      --header-h: 56px;
+      --content-max: 860px;
+      --radius: 10px;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      height: var(--header-h);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .topbar-actions a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .topbar-actions a:hover { text-decoration: underline; }
+
+    .btn-icon {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .btn-icon:hover { background: var(--bg); }
+
+    .btn-icon svg { display: block; }
+
+    .layout {
+      display: flex;
+      max-width: 1480px;
+      margin: 0 auto;
+      min-height: calc(100vh - var(--header-h));
+    }
+
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: var(--header-h) 0 0 0;
+      background: rgba(17, 24, 39, 0.4);
+      z-index: 150;
+    }
+
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      position: sticky;
+      top: var(--header-h);
+      height: calc(100vh - var(--header-h));
+      overflow-y: auto;
+      padding: 20px 14px 48px;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      z-index: 160;
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding: 0 6px;
+    }
+
+    .sidebar-tools {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+      padding: 0 6px;
+    }
+
+    .sidebar-tools button {
+      flex: 1;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .sidebar-tools button:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .toc-search {
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      outline: none;
+      background: var(--bg);
+    }
+
+    .toc-search:focus {
+      border-color: var(--accent);
+      background: var(--surface);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .toc-section.is-hidden { display: none; }
+
+    .sidebar-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .sidebar-close {
+      display: none;
+      padding: 4px 8px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+
+    .sidebar-close:hover { background: var(--bg); color: var(--text); }
+
+    .toc { list-style: none; margin: 0; padding: 0; }
+
+    .toc-section { margin-bottom: 4px; }
+
+    .toc-section-head {
+      display: flex;
+      align-items: stretch;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .toc-section-head:hover { background: var(--bg); }
+
+    .toc-toggle {
+      flex-shrink: 0;
+      width: 28px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s ease;
+    }
+
+    .toc-toggle:hover { color: var(--text); }
+
+    .toc-section.is-expanded .toc-toggle { transform: rotate(90deg); }
+
+    .toc-section.is-leaf .toc-toggle {
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .toc-h2-link {
+      flex: 1;
+      display: block;
+      padding: 7px 8px 7px 0;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+      min-width: 0;
+    }
+
+    .toc-h2-link:hover { color: var(--accent); }
+
+    .toc-h2-link.active {
+      color: var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .toc-children {
+      list-style: none;
+      margin: 0;
+      padding: 2px 0 6px 22px;
+      display: none;
+    }
+
+    .toc-section.is-expanded .toc-children { display: block; }
+
+    .toc-children a {
+      display: block;
+      padding: 5px 8px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 12px;
+      border-radius: 6px;
+      line-height: 1.45;
+    }
+
+    .toc-children a:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .toc-children a.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .content {
+      flex: 1;
+      min-width: 0;
+      padding: 28px 32px 96px;
+      background: var(--surface);
+    }
+
+    .content-inner {
+      max-width: var(--content-max);
+      margin: 0 auto;
+    }
+
+    .loading, .error-panel {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .error-panel {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: var(--radius);
+      margin: 24px 0;
+      color: #991b1b;
+      text-align: left;
+    }
+
+    .error-panel code {
+      background: #fee2e2;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .error-panel .hint {
+      margin-top: 16px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    #markdown-body > h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 0 0 12px;
+      letter-spacing: -0.03em;
+      line-height: 1.25;
+      color: var(--text);
+    }
+
+    #markdown-body > p:first-of-type {
+      font-size: 16px;
+      color: var(--muted);
+    }
+
+    .doc-section {
+      margin-top: 48px;
+      padding-top: 8px;
+    }
+
+    .doc-section:first-of-type { margin-top: 32px; }
+
+    #markdown-body h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 0 0 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      letter-spacing: -0.02em;
+    }
+
+    #markdown-body h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 32px 0 14px;
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      color: var(--text);
+    }
+
+    #markdown-body h4 {
+      font-size: 0.92rem;
+      font-weight: 600;
+      margin: 24px 0 10px;
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      color: #374151;
+    }
+
+    .has-anchor {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .heading-anchor {
+      opacity: 0;
+      flex-shrink: 0;
+      width: 1.25em;
+      height: 1.25em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.85em;
+      font-weight: 400;
+      border-radius: 4px;
+      transition: opacity 0.15s, color 0.15s, background 0.15s;
+    }
+
+    .has-anchor:hover .heading-anchor,
+    .heading-anchor:focus {
+      opacity: 1;
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    #markdown-body p { margin: 0 0 16px; }
+
+    #markdown-body blockquote {
+      margin: 20px 0;
+      padding: 14px 18px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      color: #374151;
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+
+    #markdown-body blockquote p:last-child { margin-bottom: 0; }
+
+    #markdown-body pre {
+      margin: 18px 0;
+      padding: 16px 18px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+
+    #markdown-body code {
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+      font-size: 0.88em;
+    }
+
+    #markdown-body :not(pre) > code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #b91c1c;
+      word-break: break-word;
+    }
+
+    .table-scroll {
+      width: 100%;
+      margin: 18px 0 24px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+
+    #markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    #markdown-body th,
+    #markdown-body td {
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      padding: 10px 14px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    #markdown-body th:last-child,
+    #markdown-body td:last-child { border-right: none; }
+
+    #markdown-body tr:last-child td { border-bottom: none; }
+
+    #markdown-body th {
+      background: #f9fafb;
+      font-weight: 600;
+      white-space: nowrap;
+      color: #374151;
+      font-size: 13px;
+    }
+
+    #markdown-body tbody tr:hover td { background: #fafbfc; }
+
+    #markdown-body td code { font-size: 0.86em; }
+
+    #markdown-body ul, #markdown-body ol {
+      margin: 0 0 16px;
+      padding-left: 1.5em;
+    }
+
+    #markdown-body li { margin-bottom: 8px; }
+
+    #markdown-body li > ul,
+    #markdown-body li > ol { margin-top: 6px; margin-bottom: 0; }
+
+    #markdown-body hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 40px 0;
+    }
+
+    #markdown-body a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    #markdown-body a:hover {
+      color: var(--accent-hover);
+      text-decoration: underline;
+    }
+
+    #markdown-body strong { font-weight: 600; color: #111827; }
+
+    .mermaid {
+      margin: 20px 0 28px;
+      padding: 18px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #fafbfc;
+      overflow-x: auto;
+      text-align: center;
+    }
+
+    .mermaid-fallback {
+      margin: 18px 0 24px;
+      padding: 16px 18px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 1024px) {
+      .btn-icon { display: inline-flex; }
+
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: var(--header-h);
+        height: calc(100vh - var(--header-h));
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        box-shadow: var(--shadow-md);
+      }
+
+      .sidebar.is-open { transform: translateX(0); }
+
+      .sidebar-backdrop.is-visible { display: block; }
+
+      .sidebar-close { display: block; }
+
+      .content { padding: 24px 20px 72px; }
+    }
+
+    @media (max-width: 640px) {
+      .topbar h1 { font-size: 14px; }
+      #markdown-body > h1 { font-size: 1.6rem; }
+      #markdown-body h2 { font-size: 1.2rem; }
+      .topbar-actions span { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button type="button" class="btn-icon" id="sidebar-open" aria-label="打开目录">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <h1>Digital Employee API 接口文档</h1>
+    </div>
+    <div class="topbar-actions">
+      <span id="updated-at"></span>
+      <a href="api-docs.md" download>下载 Markdown</a>
+    </div>
+  </header>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar" hidden aria-label="文档目录">
+      <div class="sidebar-header">
+        <p class="sidebar-title">目录</p>
+        <button type="button" class="sidebar-close" id="sidebar-close">关闭</button>
+      </div>
+      <input type="search" class="toc-search" id="toc-search" placeholder="搜索目录…" aria-label="搜索目录">
+      <div class="sidebar-tools">
+        <button type="button" id="toc-expand-all">全部展开</button>
+        <button type="button" id="toc-collapse-all">全部收起</button>
+      </div>
+      <ul class="toc" id="toc"></ul>
+    </nav>
+
+    <main class="content">
+      <div class="content-inner">
+        <div class="loading" id="loading">正在加载文档…</div>
+        <div class="error-panel" id="error" hidden></div>
+        <article id="markdown-body"></article>
+      </div>
+    </main>
+  </div>
+
+  <!-- 内嵌 Markdown，可直接双击打开，无需本地服务。由 scripts/build_docs_html.py 生成。 -->
+  <script type="text/plain" id="markdown-source"># Digital Employee API 接口文档
 
 本文档描述 **digital_employee** 用户端前端对接的两套后端能力：
 
@@ -806,4 +1420,439 @@ GET /hermes/api/profile/memory?path=/.hermes/profiles/agent-c59d60cc
 1. 新增或调整接口时，同步更新本文档对应章节。
 2. 统一使用中文编写说明；示例值脱敏。
 3. NocoBase workflow 返回值若有 wrapper，分别记录外层和内层结构。
-4. 与 `digital_employee/src/api/agent.md` 保持互补：本文档偏接口目录，agent.md 偏前端接线细节。
+4. 与 `digital_employee/src/api/agent.md` 保持互补：本文档偏接口目录，agent.md 偏前端接线细节。</script>
+
+  <script>
+    const TOC_STATE_KEY = 'api-docs-toc-expanded';
+
+    marked.setOptions({
+      gfm: true,
+      breaks: false,
+      mangle: false,
+      headerIds: false
+    });
+
+    function headingText(heading) {
+      const clone = heading.cloneNode(true);
+      clone.querySelectorAll('.heading-anchor').forEach((el) => el.remove());
+      return clone.textContent.replace(/\s+/g, ' ').trim();
+    }
+
+    function slugify(text) {
+      return text
+        .trim()
+        .toLowerCase()
+        .replace(/[\/\\]/g, ' ')
+        .replace(/[^\w\u4e00-\u9fff\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    }
+
+    /** Escape unescaped pipe characters inside inline code within table rows. */
+    function preprocessMarkdown(md) {
+      const lines = md.split('\n');
+      let inTable = false;
+
+      return lines.map((line) => {
+        const trimmed = line.trim();
+
+        if (!trimmed.startsWith('|')) {
+          inTable = false;
+          return line;
+        }
+
+        if (/^\|[\s\-:|]+\|$/.test(trimmed)) {
+          inTable = true;
+          return line;
+        }
+
+        if (!inTable) return line;
+
+        return line.replace(/`([^`\\]*(?:\\.[^`\\]*)*)`/g, (match, code) => {
+          const escaped = code.replace(/(?<!\\)\|/g, '\\|');
+          return '`' + escaped + '`';
+        });
+      }).join('\n');
+    }
+
+    function ensureHeadingIds(container) {
+      const used = new Set();
+      container.querySelectorAll('h2, h3, h4').forEach((heading) => {
+        if (heading.id) {
+          used.add(heading.id);
+          return;
+        }
+        const base = slugify(heading.textContent);
+        let id = base;
+        let suffix = 2;
+        while (used.has(id)) {
+          id = base + '-' + suffix++;
+        }
+        heading.id = id;
+        used.add(id);
+      });
+    }
+
+    function addHeadingAnchors(container) {
+      container.querySelectorAll('h2, h3, h4').forEach((heading) => {
+        if (heading.querySelector('.heading-anchor')) return;
+        heading.classList.add('has-anchor');
+        const anchor = document.createElement('a');
+        anchor.className = 'heading-anchor';
+        anchor.href = '#' + heading.id;
+        anchor.setAttribute('aria-label', '链接到此标题');
+        anchor.textContent = '#';
+        anchor.addEventListener('click', (e) => {
+          e.preventDefault();
+          history.replaceState(null, '', '#' + heading.id);
+          heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        heading.appendChild(anchor);
+      });
+    }
+
+    function wrapTables(container) {
+      container.querySelectorAll('table').forEach((table) => {
+        if (table.parentElement && table.parentElement.classList.contains('table-scroll')) return;
+        const wrap = document.createElement('div');
+        wrap.className = 'table-scroll';
+        table.parentNode.insertBefore(wrap, table);
+        wrap.appendChild(table);
+      });
+    }
+
+    function wrapSections(container) {
+      const children = [...container.children];
+      const h2List = children.filter((el) => el.tagName === 'H2');
+      if (!h2List.length) return;
+
+      h2List.forEach((h2) => {
+        const section = document.createElement('section');
+        section.className = 'doc-section';
+        section.id = 'section-' + h2.id;
+        h2.parentNode.insertBefore(section, h2);
+
+        let node = h2;
+        while (node) {
+          const next = node.nextElementSibling;
+          section.appendChild(node);
+          if (next && next.tagName === 'H2') break;
+          node = next;
+        }
+      });
+    }
+
+    function loadTocState() {
+      try {
+        const raw = localStorage.getItem(TOC_STATE_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function saveTocState(state) {
+      try {
+        localStorage.setItem(TOC_STATE_KEY, JSON.stringify(state));
+      } catch { /* ignore quota errors */ }
+    }
+
+    function buildToc(container) {
+      ensureHeadingIds(container);
+
+      const h2s = [...container.querySelectorAll('h2')];
+      const toc = document.getElementById('toc');
+      const sidebar = document.getElementById('sidebar');
+      toc.innerHTML = '';
+
+      if (!h2s.length) return;
+
+      const saved = loadTocState();
+
+      h2s.forEach((h2) => {
+        const section = document.createElement('li');
+        section.className = 'toc-section';
+        section.dataset.sectionId = h2.id;
+
+        const h3s = [];
+        let el = h2.nextElementSibling;
+        while (el && el.tagName !== 'H2') {
+          if (el.tagName === 'H3') h3s.push(el);
+          el = el.nextElementSibling;
+        }
+
+        if (!h3s.length) section.classList.add('is-leaf');
+
+        const expanded = saved[h2.id] !== undefined ? saved[h2.id] : h3s.length > 0;
+        if (expanded) section.classList.add('is-expanded');
+
+        const head = document.createElement('div');
+        head.className = 'toc-section-head';
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'toc-toggle';
+        toggle.setAttribute('aria-label', expanded ? '折叠章节' : '展开章节');
+        toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>';
+
+        const h2Link = document.createElement('a');
+        h2Link.className = 'toc-h2-link';
+        h2Link.href = '#' + h2.id;
+        h2Link.textContent = headingText(h2);
+
+        head.appendChild(toggle);
+        head.appendChild(h2Link);
+        section.appendChild(head);
+
+        if (h3s.length) {
+          const childList = document.createElement('ul');
+          childList.className = 'toc-children';
+
+          h3s.forEach((h3) => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = '#' + h3.id;
+            a.textContent = headingText(h3);
+            li.appendChild(a);
+            childList.appendChild(li);
+          });
+
+          section.appendChild(childList);
+        }
+
+        const persist = () => {
+          const state = loadTocState();
+          state[h2.id] = section.classList.contains('is-expanded');
+          saveTocState(state);
+        };
+
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (section.classList.contains('is-leaf')) return;
+          section.classList.toggle('is-expanded');
+          toggle.setAttribute('aria-label', section.classList.contains('is-expanded') ? '折叠章节' : '展开章节');
+          persist();
+        });
+
+        h2Link.addEventListener('click', () => closeMobileSidebar());
+
+        section.querySelectorAll('.toc-children a').forEach((a) => {
+          a.addEventListener('click', () => closeMobileSidebar());
+        });
+
+        toc.appendChild(section);
+      });
+
+      sidebar.hidden = false;
+      setupTocControls();
+    }
+
+    function setAllTocSections(expanded) {
+      document.querySelectorAll('.toc-section:not(.is-leaf)').forEach((section) => {
+        section.classList.toggle('is-expanded', expanded);
+        const toggle = section.querySelector('.toc-toggle');
+        if (toggle) {
+          toggle.setAttribute('aria-label', expanded ? '折叠章节' : '展开章节');
+        }
+        const id = section.dataset.sectionId;
+        if (id) {
+          const state = loadTocState();
+          state[id] = expanded;
+          saveTocState(state);
+        }
+      });
+    }
+
+    function setupTocControls() {
+      const search = document.getElementById('toc-search');
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        document.querySelectorAll('.toc-section').forEach((section) => {
+          const h2Text = section.querySelector('.toc-h2-link')?.textContent.toLowerCase() || '';
+          const childTexts = [...section.querySelectorAll('.toc-children a')].map((a) => a.textContent.toLowerCase());
+          const match = !q || h2Text.includes(q) || childTexts.some((t) => t.includes(q));
+          section.classList.toggle('is-hidden', !match);
+          if (match && q && childTexts.some((t) => t.includes(q))) {
+            section.classList.add('is-expanded');
+          }
+        });
+      });
+
+      document.getElementById('toc-expand-all').addEventListener('click', () => setAllTocSections(true));
+      document.getElementById('toc-collapse-all').addEventListener('click', () => setAllTocSections(false));
+    }
+
+    function setupScrollSpy() {
+      const tocLinks = [...document.querySelectorAll('.toc-h2-link, .toc-children a')];
+      const headingMap = new Map();
+
+      tocLinks.forEach((link) => {
+        const id = link.getAttribute('href').slice(1);
+        const heading = document.getElementById(id);
+        if (heading) headingMap.set(id, link);
+      });
+
+      const headings = [...headingMap.keys()]
+        .map((id) => document.getElementById(id))
+        .filter(Boolean)
+        .sort((a, b) => a.offsetTop - b.offsetTop);
+
+      const setActive = (id) => {
+        tocLinks.forEach((link) => link.classList.remove('active'));
+        const link = headingMap.get(id);
+        if (link) {
+          link.classList.add('active');
+          const section = link.closest('.toc-section');
+          if (section && link.classList.contains('toc-h2-link') === false) {
+            section.classList.add('is-expanded');
+            const state = loadTocState();
+            const sectionId = section.dataset.sectionId;
+            if (sectionId) {
+              state[sectionId] = true;
+              saveTocState(state);
+            }
+          }
+        }
+      };
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries
+            .filter((e) => e.isIntersecting)
+            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          if (visible.length) {
+            setActive(visible[0].target.id);
+          }
+        },
+        { rootMargin: '-88px 0px -60% 0px', threshold: [0, 0.1, 0.5] }
+      );
+
+      headings.forEach((h) => observer.observe(h));
+
+      if (location.hash) {
+        const id = location.hash.slice(1);
+        if (headingMap.has(id)) setActive(id);
+      }
+    }
+
+    function openMobileSidebar() {
+      document.getElementById('sidebar').classList.add('is-open');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      backdrop.hidden = false;
+      backdrop.classList.add('is-visible');
+    }
+
+    function closeMobileSidebar() {
+      document.getElementById('sidebar').classList.remove('is-open');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      backdrop.classList.remove('is-visible');
+      backdrop.hidden = true;
+    }
+
+    function extractUpdatedAt(md) {
+      const match = md.match(/\*\*最后更新：\*\*\s*(\S+)/);
+      if (match) {
+        document.getElementById('updated-at').textContent = '更新于 ' + match[1];
+      }
+    }
+
+    function showError(message, hint) {
+      document.getElementById('loading').hidden = true;
+      const panel = document.getElementById('error');
+      panel.hidden = false;
+      panel.innerHTML =
+        '<p><strong>无法加载文档</strong></p><p>' + message + '</p>' +
+        (hint ? '<div class="hint">' + hint + '</div>' : '');
+    }
+
+    function upgradeMermaidBlocks(container) {
+      const blocks = [...container.querySelectorAll('pre > code[class*="mermaid"]')];
+      blocks.forEach((code) => {
+        const pre = code.parentElement;
+        if (!pre) return;
+        const div = document.createElement('div');
+        div.className = 'mermaid';
+        div.textContent = code.textContent.trim();
+        pre.replaceWith(div);
+      });
+      return blocks.length;
+    }
+
+    async function renderMermaidDiagrams(container) {
+      const count = upgradeMermaidBlocks(container);
+      if (!count) return;
+
+      if (typeof mermaid === 'undefined') {
+        container.querySelectorAll('.mermaid').forEach((node) => {
+          const pre = document.createElement('pre');
+          pre.className = 'mermaid-fallback';
+          pre.textContent = node.textContent;
+          node.replaceWith(pre);
+        });
+        return;
+      }
+
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'neutral',
+        securityLevel: 'loose',
+        flowchart: { htmlLabels: true, curve: 'basis' },
+      });
+
+      try {
+        await mermaid.run({ nodes: container.querySelectorAll('.mermaid'), suppressErrors: false });
+      } catch (err) {
+        console.error('Mermaid render failed:', err);
+        container.querySelectorAll('.mermaid').forEach((node) => {
+          const pre = document.createElement('pre');
+          pre.className = 'mermaid-fallback';
+          pre.textContent = node.textContent;
+          node.replaceWith(pre);
+        });
+      }
+    }
+
+    async function renderMarkdown(md) {
+      document.getElementById('loading').hidden = true;
+      extractUpdatedAt(md);
+
+      const processed = preprocessMarkdown(md);
+      const body = document.getElementById('markdown-body');
+      body.innerHTML = marked.parse(processed);
+
+      wrapTables(body);
+      ensureHeadingIds(body);
+      addHeadingAnchors(body);
+      wrapSections(body);
+      await renderMermaidDiagrams(body);
+      buildToc(body);
+      setupScrollSpy();
+    }
+
+    async function loadMarkdown() {
+      const source = document.getElementById('markdown-source');
+      if (!source) {
+        showError('未找到内嵌文档内容');
+        return;
+      }
+      const md = source.textContent;
+      if (!md.trim()) {
+        showError('文档内容为空');
+        return;
+      }
+      try {
+        await renderMarkdown(md);
+      } catch (err) {
+        showError(err.message || String(err));
+      }
+    }
+
+    document.getElementById('sidebar-open').addEventListener('click', openMobileSidebar);
+    document.getElementById('sidebar-close').addEventListener('click', closeMobileSidebar);
+    document.getElementById('sidebar-backdrop').addEventListener('click', closeMobileSidebar);
+
+    loadMarkdown();
+  </script>
+</body>
+</html>

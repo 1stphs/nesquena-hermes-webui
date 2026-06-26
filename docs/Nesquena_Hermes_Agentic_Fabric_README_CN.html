@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nesquena Hermes — 企业级 Agentic Fabric</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --surface: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --accent-soft: #eff6ff;
+      --code-bg: #f3f4f6;
+      --sidebar-w: 300px;
+      --header-h: 56px;
+      --content-max: 860px;
+      --radius: 10px;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      height: var(--header-h);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .topbar-actions a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .topbar-actions a:hover { text-decoration: underline; }
+
+    .btn-icon {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .btn-icon:hover { background: var(--bg); }
+
+    .btn-icon svg { display: block; }
+
+    .layout {
+      display: flex;
+      max-width: 1480px;
+      margin: 0 auto;
+      min-height: calc(100vh - var(--header-h));
+    }
+
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: var(--header-h) 0 0 0;
+      background: rgba(17, 24, 39, 0.4);
+      z-index: 150;
+    }
+
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      position: sticky;
+      top: var(--header-h);
+      height: calc(100vh - var(--header-h));
+      overflow-y: auto;
+      padding: 20px 14px 48px;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      z-index: 160;
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding: 0 6px;
+    }
+
+    .sidebar-tools {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+      padding: 0 6px;
+    }
+
+    .sidebar-tools button {
+      flex: 1;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .sidebar-tools button:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .toc-search {
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      outline: none;
+      background: var(--bg);
+    }
+
+    .toc-search:focus {
+      border-color: var(--accent);
+      background: var(--surface);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .toc-section.is-hidden { display: none; }
+
+    .sidebar-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .sidebar-close {
+      display: none;
+      padding: 4px 8px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+
+    .sidebar-close:hover { background: var(--bg); color: var(--text); }
+
+    .toc { list-style: none; margin: 0; padding: 0; }
+
+    .toc-section { margin-bottom: 4px; }
+
+    .toc-section-head {
+      display: flex;
+      align-items: stretch;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .toc-section-head:hover { background: var(--bg); }
+
+    .toc-toggle {
+      flex-shrink: 0;
+      width: 28px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s ease;
+    }
+
+    .toc-toggle:hover { color: var(--text); }
+
+    .toc-section.is-expanded .toc-toggle { transform: rotate(90deg); }
+
+    .toc-section.is-leaf .toc-toggle {
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .toc-h2-link {
+      flex: 1;
+      display: block;
+      padding: 7px 8px 7px 0;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+      min-width: 0;
+    }
+
+    .toc-h2-link:hover { color: var(--accent); }
+
+    .toc-h2-link.active {
+      color: var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .toc-children {
+      list-style: none;
+      margin: 0;
+      padding: 2px 0 6px 22px;
+      display: none;
+    }
+
+    .toc-section.is-expanded .toc-children { display: block; }
+
+    .toc-children a {
+      display: block;
+      padding: 5px 8px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 12px;
+      border-radius: 6px;
+      line-height: 1.45;
+    }
+
+    .toc-children a:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .toc-children a.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .content {
+      flex: 1;
+      min-width: 0;
+      padding: 28px 32px 96px;
+      background: var(--surface);
+    }
+
+    .content-inner {
+      max-width: var(--content-max);
+      margin: 0 auto;
+    }
+
+    .loading, .error-panel {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .error-panel {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: var(--radius);
+      margin: 24px 0;
+      color: #991b1b;
+      text-align: left;
+    }
+
+    .error-panel code {
+      background: #fee2e2;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .error-panel .hint {
+      margin-top: 16px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    #markdown-body > h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 0 0 12px;
+      letter-spacing: -0.03em;
+      line-height: 1.25;
+      color: var(--text);
+    }
+
+    #markdown-body > p:first-of-type {
+      font-size: 16px;
+      color: var(--muted);
+    }
+
+    .doc-section {
+      margin-top: 48px;
+      padding-top: 8px;
+    }
+
+    .doc-section:first-of-type { margin-top: 32px; }
+
+    #markdown-body h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 0 0 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      letter-spacing: -0.02em;
+    }
+
+    #markdown-body h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 32px 0 14px;
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      color: var(--text);
+    }
+
+    #markdown-body h4 {
+      font-size: 0.92rem;
+      font-weight: 600;
+      margin: 24px 0 10px;
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      color: #374151;
+    }
+
+    .has-anchor {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .heading-anchor {
+      opacity: 0;
+      flex-shrink: 0;
+      width: 1.25em;
+      height: 1.25em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.85em;
+      font-weight: 400;
+      border-radius: 4px;
+      transition: opacity 0.15s, color 0.15s, background 0.15s;
+    }
+
+    .has-anchor:hover .heading-anchor,
+    .heading-anchor:focus {
+      opacity: 1;
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    #markdown-body p { margin: 0 0 16px; }
+
+    #markdown-body blockquote {
+      margin: 20px 0;
+      padding: 14px 18px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      color: #374151;
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+
+    #markdown-body blockquote p:last-child { margin-bottom: 0; }
+
+    #markdown-body pre {
+      margin: 18px 0;
+      padding: 16px 18px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+
+    #markdown-body code {
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+      font-size: 0.88em;
+    }
+
+    #markdown-body :not(pre) > code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #b91c1c;
+      word-break: break-word;
+    }
+
+    .table-scroll {
+      width: 100%;
+      margin: 18px 0 24px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+
+    #markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    #markdown-body th,
+    #markdown-body td {
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      padding: 10px 14px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    #markdown-body th:last-child,
+    #markdown-body td:last-child { border-right: none; }
+
+    #markdown-body tr:last-child td { border-bottom: none; }
+
+    #markdown-body th {
+      background: #f9fafb;
+      font-weight: 600;
+      white-space: nowrap;
+      color: #374151;
+      font-size: 13px;
+    }
+
+    #markdown-body tbody tr:hover td { background: #fafbfc; }
+
+    #markdown-body td code { font-size: 0.86em; }
+
+    #markdown-body ul, #markdown-body ol {
+      margin: 0 0 16px;
+      padding-left: 1.5em;
+    }
+
+    #markdown-body li { margin-bottom: 8px; }
+
+    #markdown-body li > ul,
+    #markdown-body li > ol { margin-top: 6px; margin-bottom: 0; }
+
+    #markdown-body hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 40px 0;
+    }
+
+    #markdown-body a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    #markdown-body a:hover {
+      color: var(--accent-hover);
+      text-decoration: underline;
+    }
+
+    #markdown-body strong { font-weight: 600; color: #111827; }
+
+    .mermaid {
+      margin: 20px 0 28px;
+      padding: 18px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #fafbfc;
+      overflow-x: auto;
+      text-align: center;
+    }
+
+    .mermaid-fallback {
+      margin: 18px 0 24px;
+      padding: 16px 18px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 1024px) {
+      .btn-icon { display: inline-flex; }
+
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: var(--header-h);
+        height: calc(100vh - var(--header-h));
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        box-shadow: var(--shadow-md);
+      }
+
+      .sidebar.is-open { transform: translateX(0); }
+
+      .sidebar-backdrop.is-visible { display: block; }
+
+      .sidebar-close { display: block; }
+
+      .content { padding: 24px 20px 72px; }
+    }
+
+    @media (max-width: 640px) {
+      .topbar h1 { font-size: 14px; }
+      #markdown-body > h1 { font-size: 1.6rem; }
+      #markdown-body h2 { font-size: 1.2rem; }
+      .topbar-actions span { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button type="button" class="btn-icon" id="sidebar-open" aria-label="打开目录">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <h1>Nesquena Hermes — 企业级 Agentic Fabric</h1>
+    </div>
+    <div class="topbar-actions">
+      <span id="updated-at"></span>
+      <a href="Nesquena_Hermes_Agentic_Fabric_README_CN.md" download>下载 Markdown</a>
+    </div>
+  </header>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar" hidden aria-label="文档目录">
+      <div class="sidebar-header">
+        <p class="sidebar-title">目录</p>
+        <button type="button" class="sidebar-close" id="sidebar-close">关闭</button>
+      </div>
+      <input type="search" class="toc-search" id="toc-search" placeholder="搜索目录…" aria-label="搜索目录">
+      <div class="sidebar-tools">
+        <button type="button" id="toc-expand-all">全部展开</button>
+        <button type="button" id="toc-collapse-all">全部收起</button>
+      </div>
+      <ul class="toc" id="toc"></ul>
+    </nav>
+
+    <main class="content">
+      <div class="content-inner">
+        <div class="loading" id="loading">正在加载文档…</div>
+        <div class="error-panel" id="error" hidden></div>
+        <article id="markdown-body"></article>
+      </div>
+    </main>
+  </div>
+
+  <!-- 内嵌 Markdown，可直接双击打开，无需本地服务。由 scripts/build_docs_html.py 生成。 -->
+  <script type="text/plain" id="markdown-source"># 🌀 Nesquena Hermes —— 企业级 Agentic Fabric
+
+> **从「给一个人用的聊天机器人」，进化成「组织真正拥有并治理的数字员工 workforce」。**  
+> Nesquena Hermes 是让企业能够安全运行、治理和规模化编排专业化数字员工的**主权级 Agentic Fabric**。
+
+**Nesquena Hermes API Service** 把原本单用户的 Hermes，升级为一个**生产级、多租户、可治理的 Agentic Fabric** —— 在这个底座上，数字员工拥有持久身份、隔离记忆、可审计行为，以及可被创建、审核、发布和复用的技能资产。
+
+这不是又一个 LLM 的包装壳。
+这是**连接原始 Agent 能力与企业现实之间缺失的编排与治理层**。
+
+---
+
+## 🌍 时代转向：从工具到数字员工
+
+今天绝大多数「AI Agent」仍然是高级聊天机器人 —— 被动响应、无状态、活在个人浏览器里。
+
+企业真正需要的不是更多聊天机器人。
+他们需要的是能够执行真实跨系统工作流、积累组织长期记忆、组成专业团队、在明确治理边界下自主运行的 **Digital Workers（数字员工）**。
+
+Nesquena Hermes 正是为这场转变而生 —— 将 Hermes 强大的原生 Agentic 能力，转化为一个**可治理、可隔离、可资产化**的数字劳动力平台。
+
+---
+
+## ✨ Agentic Fabric 的核心能力
+
+### 1. 双层主权隔离织网（Dual-Layer Sovereign Isolation Fabric）
+企业级信任的基石。
+
+传统 Agent 平台要么让所有人共享状态，要么被迫为每个用户单独部署。Nesquena Hermes 提供了真正的**双层主权隔离**：
+
+- **平台层（NocoBase）**：负责用户身份、角色、权限和业务数据主权。
+- **智能体层（Hermes 原生）**：每个智能体（数字员工）都拥有完全独立的会话、长期记忆、技能、工作区和执行状态。
+
+结果是：同一个轻量服务实例可以安全承载数百用户、数千数字员工，同时每个请求只能看到它被授权看到的内容。零数据泄露，零意外的智能体间污染。
+
+这就是让「规模化治理」成为可能的**企业级智能体隔离矩阵**。
+
+### 2. 智能体主权空间 —— 每个数字员工都有自己的房间
+智能体不再是临时会话，而是一个拥有持久身份的**数字员工**，具备：
+
+- 跨会话、跨任务的长期记忆织网
+- 私有技能 + 公共技能双轨体系
+- 专属工作区与文件系统
+- 模型偏好与行为护栏
+- 完整执行历史与状态
+
+用户只能看到并操作属于自己的智能体。智能体之间除非通过受治理的转交通道，否则无法互相看到记忆和上下文。
+
+这就是从「我有一个 Agent」到「我运营一支专业数字员工团队」的根本区别。
+
+### 3. 主权技能工坊与 Agent Marketplace
+技能不再是散落的个人脚本，而是成为**组织级资产**。
+
+- 在 Skill Forge 中创建、测试、版本化并发布技能
+- 将技能提交至内部市场，经管理员审核后才能上架
+- 审核通过后，其他用户的智能体可一键安装使用
+- 私有技能始终只对创建者可见
+
+这在组织内部形成了真正的**智能体技能经济** —— 高价值能力可以复用和 compounding，而不是每个人都重复造轮子。
+
+### 4. 数字人才招募与智能体入职
+招募数字员工，应该像招人一样严肃和顺畅。
+
+Nesquena Hermes 把「使用 Agent」变成了真正的**入职体验**：
+
+- 浏览公共/内部人才池中的预构建、受治理智能体
+- 一键将专业数字员工招募到自己的主权工作空间
+- 该智能体自带记忆、技能和执行上下文，开箱即用
+
+不再是复制粘贴系统提示词，而是真正的智能体身份转移 + 治理。
+
+### 5. 主动执行织网（Proactive Execution Mesh）
+数字员工不应该只等人类下指令。
+
+Nesquena Hermes 为每个智能体配备了**主动执行织网**：
+
+- 日历视图、定时触发、事件驱动执行
+- 完整执行历史、暂停/恢复、手动干预、审计轨迹
+- 支持日报、合规巡检、数据同步、监控告警等真实生产任务的自主运行
+
+这就是把「会聊天的 Agent」和「真正能干活的数字劳动力」区分开来的关键。
+
+### 6. 认知治理与合规控制面（Cognitive Governance & Compliance Plane）
+这是企业最在意的部分。
+
+原始 Agent 能力强大，但在规模化时充满风险。Nesquena Hermes 补上了缺失的**治理与合规控制面**：
+
+- 技能进入市场的管理员审核与准入流程
+- 实时用量遥测、Token 消耗追踪与配额管控
+- 智能体行为、决策、工具调用的完整可审计性
+- 健康监控、系统可观测性与确定性控制边界
+
+正如 X 上企业声音所说：「企业平台要能治理 Agent 权限、审计、控制并强制执行……要能确定性地保障合规。」
+
+Nesquena Hermes 让这句话在 Hermes 强大引擎之上成为现实。
+
+### 7. 持久认知连续性层（Persistent Cognitive Continuity Layer）
+记忆不是锦上添花，而是数字员工能真正发挥价值的根基。
+
+Nesquena Hermes 提供了**持久、跨会话、跨任务的认知连续性**：
+
+- 长期记忆在会话重置后依然存在
+- 上下文压缩而不造成灾难性遗忘
+- 记忆可在智能体间选择性共享或严格隔离
+- 完整支持终端、文件操作、工具调用与人在回路审批流程
+
+智能体终于可以积累真正的组织知识，而不是每次会话都重置。
+
+---
+
+## 🏗️ 架构 —— 两层主权，一张连贯织网
+
+### 产品链路
+
+```mermaid
+flowchart LR
+  User["用户 / 数字员工运营者"] --> Frontend["digital_employee 前端<br/>Vue + TypeScript + Vite"]
+  Frontend --> Caddy["Caddy 反向代理"]
+  Caddy -->|/hermes/api/*| WebUI["hermes-webui:8787<br/>Nesquena Hermes API Service<br/>Agentic Fabric 层"]
+  Caddy -->|/nocobase/*| NocoBase["NocoBase<br/>平台主权层<br/>用户·权限·业务数据·工作流"]
+  
+  WebUI --> HermesHome["Hermes Home<br/>智能体主权状态存储"]
+  WebUI --> SkillsHub["Skills Hub<br/>技能工坊 + 市场 + 治理"]
+  WebUI -.独立服务边界.-> Gateway["hermes:8642<br/>OpenAI-compatible Agent Gateway"]
+```
+
+### 隔离模型（真正的企业护城河）
+
+```mermaid
+flowchart TB
+  Platform["NocoBase 平台主权层<br/>租户 · 用户 · 角色 · 权限 · 业务数据"] --> UserA["用户 A"]
+  Platform --> UserB["用户 B"]
+  
+  UserA --> A1["智能体 A-1<br/>主权记忆 · 技能 · 工作区 · 执行历史"]
+  UserA --> A2["智能体 A-2<br/>主权记忆 · 技能 · 工作区 · 执行历史"]
+  UserB --> B1["智能体 B-1<br/>主权记忆 · 技能 · 工作区 · 执行历史"]
+  
+  A1 & A2 & B1 --> HermesFabric["Nesquena Hermes Agentic Fabric<br/>同一轻量实例 · 双层主权隔离"]
+```
+
+**核心设计**：NocoBase 负责**平台级主权**，Hermes 负责**智能体级主权**。两者叠加后，同一个服务即可安全支撑企业级规模的数字员工团队，同时保持严格的隔离与审计边界。
+
+---
+
+## 🧠 核心概念（我们真实构建的）
+
+| 概念 | 实际含义 | 企业为什么在意 |
+|------|----------|----------------|
+| **双层主权隔离织网** | 平台权限 + 原生智能体级隔离 | 安全的多租户，无需为每个用户单独部署 |
+| **智能体主权空间** | 每个数字员工拥有持久身份、记忆和技能 | 从「我提示了一个 Agent」变成「我运营受治理的数字员工团队」 |
+| **主权技能工坊与市场** | 技能成为可审核、可发布、可复用的组织资产 | 能力复用与 compounding，而非不断重复造轮子 |
+| **主动执行织网** | 支持 Cron 与事件驱动的自主工作流 + 完整审计 | 数字员工真正能干活，而非需要人一直盯着 |
+| **认知治理与合规控制面** | 管理员审核、遥测、配额、审计轨迹 | 从「强大的 Agent」到「可部署的数字劳动力」的关键区别 |
+| **持久认知连续性层** | 跨会话、跨任务的长期记忆 | 智能体能积累真正的组织知识 |
+
+---
+
+## 📊 关键差异化对比
+
+| 维度           | 原生 Hermes          | 普通「Agent 平台」       | Nesquena Hermes Agentic Fabric              |
+|----------------|----------------------|--------------------------|---------------------------------------------|
+| 用户隔离       | 无（单用户）         | 通常较弱 / 共享状态      | 真正的双层主权隔离                          |
+| 智能体身份     | 临时会话             | 往往只是提示词           | 持久主权工作空间                            |
+| 技能体系       | 个人脚本             | 有限市场                 | 完整生命周期 + 管理员治理的市场             |
+| 治理能力       | 无                   | 基础日志                 | 真正的合规控制面 + 审计 + 审批流程          |
+| 主动执行       | 有限                 | 参差不齐                 | 一等公民的 Cron + 工作流编排                |
+| 记忆           | 会话绑定             | 经常重置                 | 持久的跨会话组织记忆                        |
+| 企业就绪度     | 个人工具             | 营销话术                 | 从第一天就为受治理的数字劳动力而生          |
+
+---
+
+## 🚀 快速开始
+
+```bash
+# 生产部署（推荐）
+./scripts/deploy-172.sh
+
+# 本地开发
+python3 bootstrap.py
+# 或
+./ctl.sh start
+```
+
+部署流程已内置健康检查、CORS 验证和冒烟测试。
+
+---
+
+## 🛠️ 技术栈
+
+- **核心**：Python 3.12 + ThreadingHTTPServer（刻意保持轻量，避免重框架债务）
+- **Agent 引擎**：NousResearch Hermes（完整工具调用、记忆、插件系统）
+- **流式**：Server-Sent Events（实时对话、审批、澄清事件）
+- **隔离与状态**：Hermes home 文件系统 + 严格的 per-profile 边界
+- **平台层**：NocoBase（用户、权限、业务工作流主权）
+- **反向代理**：Caddy
+- **可观测性**：内置健康检查、用量遥测与结构化日志
+- **部署**：Docker + Docker Compose，一键生产发布
+
+我们刻意不引入重型框架，让 Fabric 始终贴近 Hermes 强大的原生能力，同时叠加企业级治理层。
+
+---
+
+## 📦 部署内容
+
+- `hermes-webui:8787` —— 完整的 Nesquena Hermes Agentic Fabric（本仓库）
+- `hermes:8642` —— 独立的 OpenAI-compatible Agent Gateway（除非明确需要，否则不要重启）
+
+两个服务边界清晰，只重建需要重建的部分即可。
+
+---
+
+## 🔮 愿景
+
+我们正在从「数百万孤立的 App」走向「数十亿专业化 Agent」。
+
+但如果没有治理、隔离、记忆连续性和组织级技能 compounding，Agent 能力只会制造更多混乱，而非创造价值。
+
+Nesquena Hermes 存在的意义，就是成为让数字员工在企业规模下**安全、可审计、真正可用**的**主权级 Agentic Fabric**。
+
+不是又一个聊天机器人平台。
+而是**数字劳动力时代**的真正基石。
+
+---
+
+## 📜 许可
+
+基于 MIT License（保留原 Hermes 许可声明）。
+
+用过度的野心，以及对「企业 deserves 比 prompt-wrapped toys 更好的东西」的坚定信念构建。
+
+---
+
+**Nesquena Hermes** —— 你的数字员工 workforce 应得的 Agentic Fabric。
+
+如果你的组织已经准备好从「我们试了几个 Agent」进化到「我们正在运行一支受治理的数字员工团队」，这个项目就是为你而生。
+
+欢迎加入这场从工具到数字劳动力的真正转变。
+</script>
+
+  <script>
+    const TOC_STATE_KEY = 'agentic-fabric-readme-toc-expanded';
+
+    marked.setOptions({
+      gfm: true,
+      breaks: false,
+      mangle: false,
+      headerIds: false
+    });
+
+    function headingText(heading) {
+      const clone = heading.cloneNode(true);
+      clone.querySelectorAll('.heading-anchor').forEach((el) => el.remove());
+      return clone.textContent.replace(/\s+/g, ' ').trim();
+    }
+
+    function slugify(text) {
+      return text
+        .trim()
+        .toLowerCase()
+        .replace(/[\/\\]/g, ' ')
+        .replace(/[^\w\u4e00-\u9fff\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    }
+
+    /** Escape unescaped pipe characters inside inline code within table rows. */
+    function preprocessMarkdown(md) {
+      const lines = md.split('\n');
+      let inTable = false;
+
+      return lines.map((line) => {
+        const trimmed = line.trim();
+
+        if (!trimmed.startsWith('|')) {
+          inTable = false;
+          return line;
+        }
+
+        if (/^\|[\s\-:|]+\|$/.test(trimmed)) {
+          inTable = true;
+          return line;
+        }
+
+        if (!inTable) return line;
+
+        return line.replace(/`([^`\\]*(?:\\.[^`\\]*)*)`/g, (match, code) => {
+          const escaped = code.replace(/(?<!\\)\|/g, '\\|');
+          return '`' + escaped + '`';
+        });
+      }).join('\n');
+    }
+
+    function ensureHeadingIds(container) {
+      const used = new Set();
+      container.querySelectorAll('h2, h3, h4').forEach((heading) => {
+        if (heading.id) {
+          used.add(heading.id);
+          return;
+        }
+        const base = slugify(heading.textContent);
+        let id = base;
+        let suffix = 2;
+        while (used.has(id)) {
+          id = base + '-' + suffix++;
+        }
+        heading.id = id;
+        used.add(id);
+      });
+    }
+
+    function addHeadingAnchors(container) {
+      container.querySelectorAll('h2, h3, h4').forEach((heading) => {
+        if (heading.querySelector('.heading-anchor')) return;
+        heading.classList.add('has-anchor');
+        const anchor = document.createElement('a');
+        anchor.className = 'heading-anchor';
+        anchor.href = '#' + heading.id;
+        anchor.setAttribute('aria-label', '链接到此标题');
+        anchor.textContent = '#';
+        anchor.addEventListener('click', (e) => {
+          e.preventDefault();
+          history.replaceState(null, '', '#' + heading.id);
+          heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        heading.appendChild(anchor);
+      });
+    }
+
+    function wrapTables(container) {
+      container.querySelectorAll('table').forEach((table) => {
+        if (table.parentElement && table.parentElement.classList.contains('table-scroll')) return;
+        const wrap = document.createElement('div');
+        wrap.className = 'table-scroll';
+        table.parentNode.insertBefore(wrap, table);
+        wrap.appendChild(table);
+      });
+    }
+
+    function wrapSections(container) {
+      const children = [...container.children];
+      const h2List = children.filter((el) => el.tagName === 'H2');
+      if (!h2List.length) return;
+
+      h2List.forEach((h2) => {
+        const section = document.createElement('section');
+        section.className = 'doc-section';
+        section.id = 'section-' + h2.id;
+        h2.parentNode.insertBefore(section, h2);
+
+        let node = h2;
+        while (node) {
+          const next = node.nextElementSibling;
+          section.appendChild(node);
+          if (next && next.tagName === 'H2') break;
+          node = next;
+        }
+      });
+    }
+
+    function loadTocState() {
+      try {
+        const raw = localStorage.getItem(TOC_STATE_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function saveTocState(state) {
+      try {
+        localStorage.setItem(TOC_STATE_KEY, JSON.stringify(state));
+      } catch { /* ignore quota errors */ }
+    }
+
+    function buildToc(container) {
+      ensureHeadingIds(container);
+
+      const h2s = [...container.querySelectorAll('h2')];
+      const toc = document.getElementById('toc');
+      const sidebar = document.getElementById('sidebar');
+      toc.innerHTML = '';
+
+      if (!h2s.length) return;
+
+      const saved = loadTocState();
+
+      h2s.forEach((h2) => {
+        const section = document.createElement('li');
+        section.className = 'toc-section';
+        section.dataset.sectionId = h2.id;
+
+        const h3s = [];
+        let el = h2.nextElementSibling;
+        while (el && el.tagName !== 'H2') {
+          if (el.tagName === 'H3') h3s.push(el);
+          el = el.nextElementSibling;
+        }
+
+        if (!h3s.length) section.classList.add('is-leaf');
+
+        const expanded = saved[h2.id] !== undefined ? saved[h2.id] : h3s.length > 0;
+        if (expanded) section.classList.add('is-expanded');
+
+        const head = document.createElement('div');
+        head.className = 'toc-section-head';
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'toc-toggle';
+        toggle.setAttribute('aria-label', expanded ? '折叠章节' : '展开章节');
+        toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>';
+
+        const h2Link = document.createElement('a');
+        h2Link.className = 'toc-h2-link';
+        h2Link.href = '#' + h2.id;
+        h2Link.textContent = headingText(h2);
+
+        head.appendChild(toggle);
+        head.appendChild(h2Link);
+        section.appendChild(head);
+
+        if (h3s.length) {
+          const childList = document.createElement('ul');
+          childList.className = 'toc-children';
+
+          h3s.forEach((h3) => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = '#' + h3.id;
+            a.textContent = headingText(h3);
+            li.appendChild(a);
+            childList.appendChild(li);
+          });
+
+          section.appendChild(childList);
+        }
+
+        const persist = () => {
+          const state = loadTocState();
+          state[h2.id] = section.classList.contains('is-expanded');
+          saveTocState(state);
+        };
+
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (section.classList.contains('is-leaf')) return;
+          section.classList.toggle('is-expanded');
+          toggle.setAttribute('aria-label', section.classList.contains('is-expanded') ? '折叠章节' : '展开章节');
+          persist();
+        });
+
+        h2Link.addEventListener('click', () => closeMobileSidebar());
+
+        section.querySelectorAll('.toc-children a').forEach((a) => {
+          a.addEventListener('click', () => closeMobileSidebar());
+        });
+
+        toc.appendChild(section);
+      });
+
+      sidebar.hidden = false;
+      setupTocControls();
+    }
+
+    function setAllTocSections(expanded) {
+      document.querySelectorAll('.toc-section:not(.is-leaf)').forEach((section) => {
+        section.classList.toggle('is-expanded', expanded);
+        const toggle = section.querySelector('.toc-toggle');
+        if (toggle) {
+          toggle.setAttribute('aria-label', expanded ? '折叠章节' : '展开章节');
+        }
+        const id = section.dataset.sectionId;
+        if (id) {
+          const state = loadTocState();
+          state[id] = expanded;
+          saveTocState(state);
+        }
+      });
+    }
+
+    function setupTocControls() {
+      const search = document.getElementById('toc-search');
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        document.querySelectorAll('.toc-section').forEach((section) => {
+          const h2Text = section.querySelector('.toc-h2-link')?.textContent.toLowerCase() || '';
+          const childTexts = [...section.querySelectorAll('.toc-children a')].map((a) => a.textContent.toLowerCase());
+          const match = !q || h2Text.includes(q) || childTexts.some((t) => t.includes(q));
+          section.classList.toggle('is-hidden', !match);
+          if (match && q && childTexts.some((t) => t.includes(q))) {
+            section.classList.add('is-expanded');
+          }
+        });
+      });
+
+      document.getElementById('toc-expand-all').addEventListener('click', () => setAllTocSections(true));
+      document.getElementById('toc-collapse-all').addEventListener('click', () => setAllTocSections(false));
+    }
+
+    function setupScrollSpy() {
+      const tocLinks = [...document.querySelectorAll('.toc-h2-link, .toc-children a')];
+      const headingMap = new Map();
+
+      tocLinks.forEach((link) => {
+        const id = link.getAttribute('href').slice(1);
+        const heading = document.getElementById(id);
+        if (heading) headingMap.set(id, link);
+      });
+
+      const headings = [...headingMap.keys()]
+        .map((id) => document.getElementById(id))
+        .filter(Boolean)
+        .sort((a, b) => a.offsetTop - b.offsetTop);
+
+      const setActive = (id) => {
+        tocLinks.forEach((link) => link.classList.remove('active'));
+        const link = headingMap.get(id);
+        if (link) {
+          link.classList.add('active');
+          const section = link.closest('.toc-section');
+          if (section && link.classList.contains('toc-h2-link') === false) {
+            section.classList.add('is-expanded');
+            const state = loadTocState();
+            const sectionId = section.dataset.sectionId;
+            if (sectionId) {
+              state[sectionId] = true;
+              saveTocState(state);
+            }
+          }
+        }
+      };
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries
+            .filter((e) => e.isIntersecting)
+            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          if (visible.length) {
+            setActive(visible[0].target.id);
+          }
+        },
+        { rootMargin: '-88px 0px -60% 0px', threshold: [0, 0.1, 0.5] }
+      );
+
+      headings.forEach((h) => observer.observe(h));
+
+      if (location.hash) {
+        const id = location.hash.slice(1);
+        if (headingMap.has(id)) setActive(id);
+      }
+    }
+
+    function openMobileSidebar() {
+      document.getElementById('sidebar').classList.add('is-open');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      backdrop.hidden = false;
+      backdrop.classList.add('is-visible');
+    }
+
+    function closeMobileSidebar() {
+      document.getElementById('sidebar').classList.remove('is-open');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      backdrop.classList.remove('is-visible');
+      backdrop.hidden = true;
+    }
+
+    function extractUpdatedAt(md) {
+      const match = md.match(/\*\*最后更新：\*\*\s*(\S+)/);
+      if (match) {
+        document.getElementById('updated-at').textContent = '更新于 ' + match[1];
+      }
+    }
+
+    function showError(message, hint) {
+      document.getElementById('loading').hidden = true;
+      const panel = document.getElementById('error');
+      panel.hidden = false;
+      panel.innerHTML =
+        '<p><strong>无法加载文档</strong></p><p>' + message + '</p>' +
+        (hint ? '<div class="hint">' + hint + '</div>' : '');
+    }
+
+    function upgradeMermaidBlocks(container) {
+      const blocks = [...container.querySelectorAll('pre > code[class*="mermaid"]')];
+      blocks.forEach((code) => {
+        const pre = code.parentElement;
+        if (!pre) return;
+        const div = document.createElement('div');
+        div.className = 'mermaid';
+        div.textContent = code.textContent.trim();
+        pre.replaceWith(div);
+      });
+      return blocks.length;
+    }
+
+    async function renderMermaidDiagrams(container) {
+      const count = upgradeMermaidBlocks(container);
+      if (!count) return;
+
+      if (typeof mermaid === 'undefined') {
+        container.querySelectorAll('.mermaid').forEach((node) => {
+          const pre = document.createElement('pre');
+          pre.className = 'mermaid-fallback';
+          pre.textContent = node.textContent;
+          node.replaceWith(pre);
+        });
+        return;
+      }
+
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'neutral',
+        securityLevel: 'loose',
+        flowchart: { htmlLabels: true, curve: 'basis' },
+      });
+
+      try {
+        await mermaid.run({ nodes: container.querySelectorAll('.mermaid'), suppressErrors: false });
+      } catch (err) {
+        console.error('Mermaid render failed:', err);
+        container.querySelectorAll('.mermaid').forEach((node) => {
+          const pre = document.createElement('pre');
+          pre.className = 'mermaid-fallback';
+          pre.textContent = node.textContent;
+          node.replaceWith(pre);
+        });
+      }
+    }
+
+    async function renderMarkdown(md) {
+      document.getElementById('loading').hidden = true;
+      extractUpdatedAt(md);
+
+      const processed = preprocessMarkdown(md);
+      const body = document.getElementById('markdown-body');
+      body.innerHTML = marked.parse(processed);
+
+      wrapTables(body);
+      ensureHeadingIds(body);
+      addHeadingAnchors(body);
+      wrapSections(body);
+      await renderMermaidDiagrams(body);
+      buildToc(body);
+      setupScrollSpy();
+    }
+
+    async function loadMarkdown() {
+      const source = document.getElementById('markdown-source');
+      if (!source) {
+        showError('未找到内嵌文档内容');
+        return;
+      }
+      const md = source.textContent;
+      if (!md.trim()) {
+        showError('文档内容为空');
+        return;
+      }
+      try {
+        await renderMarkdown(md);
+      } catch (err) {
+        showError(err.message || String(err));
+      }
+    }
+
+    document.getElementById('sidebar-open').addEventListener('click', openMobileSidebar);
+    document.getElementById('sidebar-close').addEventListener('click', closeMobileSidebar);
+    document.getElementById('sidebar-backdrop').addEventListener('click', closeMobileSidebar);
+
+    loadMarkdown();
+  </script>
+</body>
+</html>

@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nesquena Hermes API Service</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --surface: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --accent-soft: #eff6ff;
+      --code-bg: #f3f4f6;
+      --sidebar-w: 300px;
+      --header-h: 56px;
+      --content-max: 860px;
+      --radius: 10px;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      height: var(--header-h);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .topbar-actions a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .topbar-actions a:hover { text-decoration: underline; }
+
+    .btn-icon {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .btn-icon:hover { background: var(--bg); }
+
+    .btn-icon svg { display: block; }
+
+    .layout {
+      display: flex;
+      max-width: 1480px;
+      margin: 0 auto;
+      min-height: calc(100vh - var(--header-h));
+    }
+
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: var(--header-h) 0 0 0;
+      background: rgba(17, 24, 39, 0.4);
+      z-index: 150;
+    }
+
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      position: sticky;
+      top: var(--header-h);
+      height: calc(100vh - var(--header-h));
+      overflow-y: auto;
+      padding: 20px 14px 48px;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      z-index: 160;
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding: 0 6px;
+    }
+
+    .sidebar-tools {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+      padding: 0 6px;
+    }
+
+    .sidebar-tools button {
+      flex: 1;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .sidebar-tools button:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .toc-search {
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      outline: none;
+      background: var(--bg);
+    }
+
+    .toc-search:focus {
+      border-color: var(--accent);
+      background: var(--surface);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .toc-section.is-hidden { display: none; }
+
+    .sidebar-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .sidebar-close {
+      display: none;
+      padding: 4px 8px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+
+    .sidebar-close:hover { background: var(--bg); color: var(--text); }
+
+    .toc { list-style: none; margin: 0; padding: 0; }
+
+    .toc-section { margin-bottom: 4px; }
+
+    .toc-section-head {
+      display: flex;
+      align-items: stretch;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .toc-section-head:hover { background: var(--bg); }
+
+    .toc-toggle {
+      flex-shrink: 0;
+      width: 28px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s ease;
+    }
+
+    .toc-toggle:hover { color: var(--text); }
+
+    .toc-section.is-expanded .toc-toggle { transform: rotate(90deg); }
+
+    .toc-section.is-leaf .toc-toggle {
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .toc-h2-link {
+      flex: 1;
+      display: block;
+      padding: 7px 8px 7px 0;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+      min-width: 0;
+    }
+
+    .toc-h2-link:hover { color: var(--accent); }
+
+    .toc-h2-link.active {
+      color: var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .toc-children {
+      list-style: none;
+      margin: 0;
+      padding: 2px 0 6px 22px;
+      display: none;
+    }
+
+    .toc-section.is-expanded .toc-children { display: block; }
+
+    .toc-children a {
+      display: block;
+      padding: 5px 8px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 12px;
+      border-radius: 6px;
+      line-height: 1.45;
+    }
+
+    .toc-children a:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .toc-children a.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .content {
+      flex: 1;
+      min-width: 0;
+      padding: 28px 32px 96px;
+      background: var(--surface);
+    }
+
+    .content-inner {
+      max-width: var(--content-max);
+      margin: 0 auto;
+    }
+
+    .loading, .error-panel {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .error-panel {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: var(--radius);
+      margin: 24px 0;
+      color: #991b1b;
+      text-align: left;
+    }
+
+    .error-panel code {
+      background: #fee2e2;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .error-panel .hint {
+      margin-top: 16px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    #markdown-body > h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 0 0 12px;
+      letter-spacing: -0.03em;
+      line-height: 1.25;
+      color: var(--text);
+    }
+
+    #markdown-body > p:first-of-type {
+      font-size: 16px;
+      color: var(--muted);
+    }
+
+    .doc-section {
+      margin-top: 48px;
+      padding-top: 8px;
+    }
+
+    .doc-section:first-of-type { margin-top: 32px; }
+
+    #markdown-body h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 0 0 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      letter-spacing: -0.02em;
+    }
+
+    #markdown-body h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 32px 0 14px;
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      color: var(--text);
+    }
+
+    #markdown-body h4 {
+      font-size: 0.92rem;
+      font-weight: 600;
+      margin: 24px 0 10px;
+      scroll-margin-top: calc(var(--header-h) + 20px);
+      color: #374151;
+    }
+
+    .has-anchor {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .heading-anchor {
+      opacity: 0;
+      flex-shrink: 0;
+      width: 1.25em;
+      height: 1.25em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.85em;
+      font-weight: 400;
+      border-radius: 4px;
+      transition: opacity 0.15s, color 0.15s, background 0.15s;
+    }
+
+    .has-anchor:hover .heading-anchor,
+    .heading-anchor:focus {
+      opacity: 1;
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    #markdown-body p { margin: 0 0 16px; }
+
+    #markdown-body blockquote {
+      margin: 20px 0;
+      padding: 14px 18px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      color: #374151;
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+
+    #markdown-body blockquote p:last-child { margin-bottom: 0; }
+
+    #markdown-body pre {
+      margin: 18px 0;
+      padding: 16px 18px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+
+    #markdown-body code {
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+      font-size: 0.88em;
+    }
+
+    #markdown-body :not(pre) > code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #b91c1c;
+      word-break: break-word;
+    }
+
+    .table-scroll {
+      width: 100%;
+      margin: 18px 0 24px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+
+    #markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    #markdown-body th,
+    #markdown-body td {
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      padding: 10px 14px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    #markdown-body th:last-child,
+    #markdown-body td:last-child { border-right: none; }
+
+    #markdown-body tr:last-child td { border-bottom: none; }
+
+    #markdown-body th {
+      background: #f9fafb;
+      font-weight: 600;
+      white-space: nowrap;
+      color: #374151;
+      font-size: 13px;
+    }
+
+    #markdown-body tbody tr:hover td { background: #fafbfc; }
+
+    #markdown-body td code { font-size: 0.86em; }
+
+    #markdown-body ul, #markdown-body ol {
+      margin: 0 0 16px;
+      padding-left: 1.5em;
+    }
+
+    #markdown-body li { margin-bottom: 8px; }
+
+    #markdown-body li > ul,
+    #markdown-body li > ol { margin-top: 6px; margin-bottom: 0; }
+
+    #markdown-body hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 40px 0;
+    }
+
+    #markdown-body a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    #markdown-body a:hover {
+      color: var(--accent-hover);
+      text-decoration: underline;
+    }
+
+    #markdown-body strong { font-weight: 600; color: #111827; }
+
+    .mermaid {
+      margin: 20px 0 28px;
+      padding: 18px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #fafbfc;
+      overflow-x: auto;
+      text-align: center;
+    }
+
+    .mermaid-fallback {
+      margin: 18px 0 24px;
+      padding: 16px 18px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 1024px) {
+      .btn-icon { display: inline-flex; }
+
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: var(--header-h);
+        height: calc(100vh - var(--header-h));
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        box-shadow: var(--shadow-md);
+      }
+
+      .sidebar.is-open { transform: translateX(0); }
+
+      .sidebar-backdrop.is-visible { display: block; }
+
+      .sidebar-close { display: block; }
+
+      .content { padding: 24px 20px 72px; }
+    }
+
+    @media (max-width: 640px) {
+      .topbar h1 { font-size: 14px; }
+      #markdown-body > h1 { font-size: 1.6rem; }
+      #markdown-body h2 { font-size: 1.2rem; }
+      .topbar-actions span { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button type="button" class="btn-icon" id="sidebar-open" aria-label="打开目录">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <h1>Nesquena Hermes API Service</h1>
+    </div>
+    <div class="topbar-actions">
+      <span id="updated-at"></span>
+      <a href="README.md" download>下载 Markdown</a>
+    </div>
+  </header>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar" hidden aria-label="文档目录">
+      <div class="sidebar-header">
+        <p class="sidebar-title">目录</p>
+        <button type="button" class="sidebar-close" id="sidebar-close">关闭</button>
+      </div>
+      <input type="search" class="toc-search" id="toc-search" placeholder="搜索目录…" aria-label="搜索目录">
+      <div class="sidebar-tools">
+        <button type="button" id="toc-expand-all">全部展开</button>
+        <button type="button" id="toc-collapse-all">全部收起</button>
+      </div>
+      <ul class="toc" id="toc"></ul>
+    </nav>
+
+    <main class="content">
+      <div class="content-inner">
+        <div class="loading" id="loading">正在加载文档…</div>
+        <div class="error-panel" id="error" hidden></div>
+        <article id="markdown-body"></article>
+      </div>
+    </main>
+  </div>
+
+  <!-- 内嵌 Markdown，可直接双击打开，无需本地服务。由 scripts/build_docs_html.py 生成。 -->
+  <script type="text/plain" id="markdown-source"># Nesquena Hermes API Service
+
+> 这是把原本“给一个人用”的 Hermes，改造成“给一群人用”的数字员工底座。
+>
+> 原生 Hermes 更像一个单人工作台。Nesquena Hermes API Service 则把它升级成一个可被平台调用、可被多人隔离、可被管理员治理、可被持续运营的 Agent 服务层。
+
+## 产品定位
+
+让Hermes不是一个聊天壳子，给 Hermes 加上了三层关键能力：
+
+| 升级点 | 说明 |
+|---|---|
+| 用户隔离 | 原生 Hermes 没有“用户”概念，默认是一个人独占一套环境；现在可以让多个人共同使用同一个服务，但彼此看不到对方的数据。 |
+| 智能体隔离 | 每个用户只能看到自己的智能体，看不到别人的智能体；会话、记忆、工作区、技能和模型偏好都跟着智能体走。 |
+| 权限概念 | 我们把用户分成管理员和普通用户，管理员负责审核、治理和用量追踪，普通用户负责使用和创建自己的数字员工。 |
+
+这意味着 Hermes 不再只是一个个人 Agent，而是一个面向企业内部数字员工平台的中台能力。
+
+## 产品能力
+
+### 1. 智能体空间
+
+智能体是每个用户真正的工作空间，也是数字员工的“个人房间”。
+
+- 用户只能看见自己的智能体。
+- 每个智能体都有独立的会话、记忆、工作区、模型偏好和运行状态。
+- 智能体里可以安装公共技能，也可以保留自己的私有技能。
+- 智能体还可以作为单个数字员工的运行载体，承接不同场景的工作方式。
+
+### 2. 技能工坊
+
+技能不是散落在系统里的配置，而是可以被生产、提交、审核、分发的产品能力。
+
+- 用户可以在技能工坊里创建、编辑、测试和发布技能。
+- 智能体可以从公共技能市场添加技能，快速扩展能力。
+- 技能模板支持提交到市场审核，管理员确认后再发布。
+- 这套机制让技能从“个人脚本”变成“可流通资产”。
+
+### 3. AI 员工招募
+
+我们把“招募”做成了一个真正的产品动作。
+
+- 用户可以从公共人才池里挑选现成的智能体。
+- 一键把公共智能体变成自己的智能体。
+- 这不是复制一个配置文件，而是把一个可用的数字员工纳入自己的工作空间。
+
+### 4. 日程与待办
+
+让数字员工不只会回答问题，还能主动干活。
+
+- 支持日历视图、定时触发、执行历史、手动运行、暂停和恢复。
+- 任务可以挂在特定智能体下运行。
+- 适合日报、提醒、巡检、备份、审计和周期性自动化。
+
+### 5. 邮箱
+
+邮箱不是孤立功能，而是数字员工对外协作的入口之一。
+
+- 支持用户邮箱账号的管理。
+- 可以和自动化、通知、任务触发结合。
+
+### 6. 通讯录
+
+通讯录承接的是平台里的关系网络。
+
+- 用户可以维护自己的联系人。
+- 联系人关系和个人卡片独立管理。
+- 适合把数字员工放进真实的组织关系里，而不是只停留在对话框里。
+
+### 7. 管理员端
+
+管理员不是只看配置的人，而是平台秩序的维护者。
+
+- 管理员可以审核技能模板。
+- 管理员可以看到用户用量追踪。
+- 管理员可以做权限分层、市场准入和运行治理。
+
+### 8. 持续记忆与协作
+
+- 对话支持流式输出、上下文恢复、中断、重试和压缩。
+- 记忆支持跨会话积累。
+- 终端、文件、工具调用和审批流程让数字员工不只是“会说”，也能“会做”。
+
+### 平台边界
+
+通讯录、AI 员工招募、管理员审核、多用户权限和部分业务工作流主要由 `digital_employee` 前端和 NocoBase 承担。本仓库负责 Hermes 的能力底座、智能体隔离、技能运行、Cron 自动化和运行观测，不伪造平台业务数据。
+
+## 架构图
+
+### 产品链路
+
+```mermaid
+flowchart LR
+  User["用户浏览器"] --> Frontend["digital_employee<br/>Vue + TypeScript + Vite"]
+  Frontend -->|/hermes/api/*| Caddy["Caddy 反向代理"]
+  Frontend -->|/nocobase/*| NocoBase["NocoBase<br/>用户 / 权限 / 业务数据 / 工作流"]
+  Caddy --> WebUI["hermes-webui:8787<br/>本仓库 API service"]
+  WebUI --> HermesHome["Hermes home<br/>智能体 / 会话 / 记忆 / 技能 / Cron"]
+  WebUI --> AgentSrc["hermes-agent-src<br/>Agent 源码副本"]
+  WebUI --> SkillsHub["Skills hub<br/>内置技能 / 用户技能 / 市场技能"]
+  WebUI -.独立服务边界.-> Gateway["hermes:8642<br/>OpenAI-compatible Agent gateway"]
+```
+
+### 隔离模型
+
+```mermaid
+flowchart TB
+  Platform["平台租户与用户层<br/>NocoBase"] --> UserA["用户 A"]
+  Platform --> UserB["用户 B"]
+  UserA --> A1["智能体 A-1<br/>会话 / 记忆 / 技能 / 工作区"]
+  UserA --> A2["智能体 A-2<br/>会话 / 记忆 / 技能 / 工作区"]
+  UserB --> B1["智能体 B-1<br/>会话 / 记忆 / 技能 / 工作区"]
+  A1 --> Hermes["同一个 Hermes API service 实例"]
+  A2 --> Hermes
+  B1 --> Hermes
+```
+
+NocoBase 负责平台级用户、角色、权限和业务数据隔离；本服务负责 Hermes 层的智能体隔离。两层组合后，同一个服务实例可以承载多个用户和多个数字员工，但请求只能看到当前用户可访问的智能体与业务数据。
+
+## 技术栈
+
+| 层级 | 技术 | 当前用途 |
+|---|---|---|
+| 后端语言 | Python 3.12 | API service、状态读写、路由分发、Agent 调用封装 |
+| HTTP 服务 | `ThreadingHTTPServer` | 轻量 HTTP server，无 FastAPI/Flask/Django 依赖 |
+| 配置解析 | `pyyaml` | 读取 Hermes / WebUI 配置 |
+| Agent 引擎 | NousResearch Hermes Agent | 模型适配、工具调用、记忆、Cron、Skills、插件 |
+| 流式协议 | Server-Sent Events | 对话增量输出、审批和澄清事件推送 |
+| 容器化 | Docker / Docker Compose | 生产运行 `hermes-webui` 服务 |
+| 反向代理 | Caddy | `/hermes/*`、`/nocobase/*` 和静态前端路由 |
+| 前端产品 | Vue + TypeScript + Vite | 位于独立 `digital_employee` 仓库 |
+| 业务平台 | NocoBase | 用户、权限、多租户、通讯录、员工招募、技能市场审核、业务工作流 |
+| 业务数据库 | PostgreSQL | NocoBase 底层数据库 |
+| 状态存储 | Hermes home 文件系统 | 智能体、会话、记忆、技能、Cron、工作区等 Agent 状态 |
+| 评测工具 | Node.js 24 + promptfoo | 用户技能可用性评测 |
+
+## 运行架构
+
+```text
+digital_employee Vue 前端
+  ├─ /hermes/*   -> Caddy -> hermes-webui:8787 -> 本仓库 API service
+  └─ /nocobase/* -> Caddy -> https://www.foxuai.com/api/* -> NocoBase
+
+hermes-webui:8787
+  ├─ 读写共享 Hermes home: /var/www/hermes-agent/.hermes
+  ├─ 使用挂载的 agent 源码副本: /var/www/nesquena-hermes-webui/hermes-agent-src
+  └─ 对外提供 /api/*，不承载内置浏览器 UI
+
+hermes:8642
+  └─ 独立 Hermes Agent gateway / OpenAI-compatible API Server
+```
+
+`8787` 和 `8642` 是两个不同服务边界。部署本仓库时只重建 `hermes-webui`，不要顺手重启独立 `hermes` gateway，除非任务明确要求部署 Agent gateway。
+
+## 模块树
+
+| 模块 | 关键文件或目录 | 产品职责 |
+|---|---|---|
+| 服务入口 | `server.py`、`bootstrap.py`、`ctl.sh` | 启动服务、处理请求生命周期、鉴权、CORS、智能体 cookie 上下文、进程管理 |
+| 路由分发 | `api/routes.py`、`api/routes_dispatcher.py`、`api/routes_handlers/`、`api/routes_helpers/` | 维护稳定 `/api/*` 路由入口，并把产品能力拆到 handler/helper |
+| 认证 | `api/auth.py` | 密码登录、token login、`hermes_session` HttpOnly cookie、登录态校验 |
+| 智能体空间 | `api/profiles.py`、`api/routes_handlers/profile.py`、`api/routes_helpers/profile_filter.py` | 数字员工档案创建、切换、隔离、用户绑定和智能体文件/记忆读写 |
+| 会话 | `api/models.py`、`api/agent_sessions.py`、`api/session_ops.py`、`api/session_recovery.py`、`api/routes_handlers/session_*` | 会话列表、创建、恢复、搜索、归档、分支、压缩、重试和导入 |
+| 对话流 | `api/routes_handlers/chat.py`、`api/streaming.py`、`api/clarify.py` | 聊天请求、SSE 流式输出、中断、澄清、审批事件和 Agent 线程运行 |
+| 记忆 | `api/routes_handlers/memory.py`、`hermes-agent-src/agent/memory_*` | 长期记忆读写、智能体记忆和 Agent 侧记忆提供者 |
+| 日程与待办 | `api/routes_handlers/cron_read.py`、`api/routes_handlers/cron_write.py`、`api/services/cron_service.py`、`hermes-agent-src/cron/` | 定时任务 CRUD、日历视图、执行历史、手动触发和后台调度 |
+| 技能工坊与市场 | `api/routes_handlers/skill.py`、`scripts/ensure_*skill*fields.py`、`hermes-agent-src/skills/` | 技能浏览、安装、编辑、导入、测试、市场发布、审核和 Agent 技能执行 |
+| 工作区与文件 | `api/workspace.py`、`api/routes_handlers/file*.py` | 工作区管理、文件浏览、上传、下载、保存、重命名和 raw 文件访问 |
+| 终端 | `api/routes_handlers/terminal.py`、`hermes-agent-src/agent/shell_hooks.py` | 终端会话创建、输入、输出、resize、关闭和 Agent shell hook |
+| 模型与提供商 | `api/live_models.py`、`api/providers.py`、`api/routes_helpers/model_resolve.py` | 模型列表、provider 配置、模型解析、用户 provider 同步 |
+| MCP 与插件 | `api/routes_handlers/mcp.py`、`hermes-agent-src/plugins/` | MCP server/tool 查询、插件能力、外部工具扩展 |
+| 审批和转交 | `api/routes_handlers/approval*.py`、`api/routes_handlers/handoff.py` | 敏感操作审批、审批 SSE、会话转交和任务交接 |
+| 观测与用量 | `api/routes_handlers/logs.py`、`api/usage_telemetry.py`、`api/metering.py`、`api/system_health.py`、`api/agent_health.py` | 日志读取、健康检查、Agent 状态、Token/API 用量追踪 |
+| 部署 | `Dockerfile`、`docker-compose.yml`、`scripts/deploy-172.sh`、`docs/deploy-172.md` | 镜像构建、172 服务器发布、health/CORS smoke、回滚和部署事实记录 |
+
+## 数据归属
+
+| 数据 | 事实源 | 说明 |
+|---|---|---|
+| 用户、角色、权限、租户 | NocoBase | 平台用户体系和权限边界 |
+| 通讯录、员工招募、用户态工作流 | NocoBase + 前端产品 | 平台业务数据，不在本仓库本地伪造 |
+| Profile、会话、记忆、日程与待办、工作区 | Hermes home 文件系统 | 本服务按 Profile 隔离读写 |
+| 用户技能文件 | Hermes home / skills hub | 用户创建、导入、测试和安装的技能 |
+| 技能模板、审核状态、驳回原因 | NocoBase + 本服务脚本/接口 | 技能市场、技能工坊和管理员审核使用 |
+| 模型和 provider 配置 | Hermes config + WebUI state | 支持用户级 provider 和模型选择 |
+| 运行日志、健康状态、用量追踪 | 本服务运行态 + 必要的业务表 | 用于运维、审计、配额和计费 |
+
+## 关键 API 面
+
+| 能力 | 主要接口 |
+|---|---|
+| 登录 | `POST /api/auth/token-login`、`POST /api/auth/login`、`POST /api/auth/logout` |
+| 智能体空间 | `GET /api/profiles`、`POST /api/profile/switch`、`POST /api/profile/create`、`POST /api/profile/create-agent` |
+| 会话 | `GET /api/sessions`、`POST /api/session/new`、`POST /api/session/rename`、`POST /api/session/archive`、`POST /api/session/compress` |
+| 对话 | `POST /api/chat`、`POST /api/chat/start`、`GET /api/chat/stream`、`POST /api/chat/cancel` |
+| 记忆 | `GET /api/memory`、`POST /api/memory/write`、`GET /api/profile/memory` |
+| 日程与待办 | `GET /api/crons`、`POST /api/crons/create`、`POST /api/crons/update`、`POST /api/crons/run`、`GET /api/crons/history` |
+| 技能工坊与市场 | `GET /api/skills`、`GET /api/user-skills`、`POST /api/user-skills/update`、`POST /api/user-skills/publish-to-market-review` |
+| 技能审核 | `GET /api/skill-templates/review-list`、`POST /api/skill-templates/approve`、`POST /api/skill-templates/reject` |
+| 文件和工作区 | `GET /api/file`、`GET /api/file/raw`、`POST /api/file/save`、`GET /api/workspaces`、`POST /api/workspaces/add` |
+| 终端 | `POST /api/terminal/start`、`GET /api/terminal/output`、`POST /api/terminal/input`、`POST /api/terminal/close` |
+| 模型和 provider | `GET /api/models`、`GET /api/models/live`、`GET /api/providers`、`POST /api/providers` |
+| 观测 | `GET /health`、`GET /api/system/health`、`GET /api/health/agent`、`GET /api/logs`、`GET /api/session/usage` |
+
+## 本地启动
+
+```bash
+python3 bootstrap.py
+```
+
+或使用脚本：
+
+```bash
+./start.sh
+./ctl.sh start
+./ctl.sh status
+./ctl.sh logs --lines 100
+./ctl.sh restart
+./ctl.sh stop
+```
+
+## 验证
+
+常用检查：
+
+```bash
+python -m compileall -q api
+python scripts/scan_routes_contracts.py --check
+pytest tests/ -v --timeout=60
+```
+
+routes 拆分后必须跑 `python scripts/scan_routes_contracts.py --check`。涉及用户技能测试字段或技能市场审核字段时，先只读运行对应 `scripts/ensure_*fields.py`，确认生产 schema 写操作后再加 `--apply`。
+
+## 部署
+
+生产部署事实以 `docker-compose.yml`、服务器只读检查和 `docs/deploy-172.md` 为准。日常发布优先：
+
+```bash
+./scripts/deploy-172.sh
+```
+
+脚本会在服务器 `/var/www/nesquena-hermes-webui` 拉取目标分支，只重建 `hermes-webui`，等待健康，并执行本机和公网 health/CORS smoke check。
+
+## 相关文档
+
+| 文档 | 用途 |
+|---|---|
+| `README.md` | 仓库维护入口和工程约束 |
+| `docs/deploy-172.md` | 172 生产部署、回滚、smoke 和容器关系 |
+| `docs/api-docs.md` | 前端 API 对接说明 |
+| `docs/missing-docs.md` | 平台文档缺口梳理与编写路线图 |
+| `docs/other/docker.md` | Docker 辅助说明 |
+| `docs/other/troubleshooting.md` | 常见排障 |
+| `docs/other/EXTENSIONS.md` | 历史 WebUI extension 说明 |
+| `docs/api-docs.html` | API 文档 HTML 渲染页 |
+| `docs/missing-docs.md` + `.html` | 缺失文档梳理与渲染页 |
+
+## 版本管理
+
+`docs/` 目录下所有文件**必须纳入 Git 提交**，不在 `.gitignore` 中忽略。新增或更新文档后，与代码变更一并 `git add docs/` 提交。
+
+## 许可
+
+本项目基于 MIT License 开源项目二次开发，原许可声明保留在 `LICENSE`。
+</script>
+
+  <script>
+    const TOC_STATE_KEY = 'readme-toc-expanded';
+
+    marked.setOptions({
+      gfm: true,
+      breaks: false,
+      mangle: false,
+      headerIds: false
+    });
+
+    function headingText(heading) {
+      const clone = heading.cloneNode(true);
+      clone.querySelectorAll('.heading-anchor').forEach((el) => el.remove());
+      return clone.textContent.replace(/\s+/g, ' ').trim();
+    }
+
+    function slugify(text) {
+      return text
+        .trim()
+        .toLowerCase()
+        .replace(/[\/\\]/g, ' ')
+        .replace(/[^\w\u4e00-\u9fff\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    }
+
+    /** Escape unescaped pipe characters inside inline code within table rows. */
+    function preprocessMarkdown(md) {
+      const lines = md.split('\n');
+      let inTable = false;
+
+      return lines.map((line) => {
+        const trimmed = line.trim();
+
+        if (!trimmed.startsWith('|')) {
+          inTable = false;
+          return line;
+        }
+
+        if (/^\|[\s\-:|]+\|$/.test(trimmed)) {
+          inTable = true;
+          return line;
+        }
+
+        if (!inTable) return line;
+
+        return line.replace(/`([^`\\]*(?:\\.[^`\\]*)*)`/g, (match, code) => {
+          const escaped = code.replace(/(?<!\\)\|/g, '\\|');
+          return '`' + escaped + '`';
+        });
+      }).join('\n');
+    }
+
+    function ensureHeadingIds(container) {
+      const used = new Set();
+      container.querySelectorAll('h2, h3, h4').forEach((heading) => {
+        if (heading.id) {
+          used.add(heading.id);
+          return;
+        }
+        const base = slugify(heading.textContent);
+        let id = base;
+        let suffix = 2;
+        while (used.has(id)) {
+          id = base + '-' + suffix++;
+        }
+        heading.id = id;
+        used.add(id);
+      });
+    }
+
+    function addHeadingAnchors(container) {
+      container.querySelectorAll('h2, h3, h4').forEach((heading) => {
+        if (heading.querySelector('.heading-anchor')) return;
+        heading.classList.add('has-anchor');
+        const anchor = document.createElement('a');
+        anchor.className = 'heading-anchor';
+        anchor.href = '#' + heading.id;
+        anchor.setAttribute('aria-label', '链接到此标题');
+        anchor.textContent = '#';
+        anchor.addEventListener('click', (e) => {
+          e.preventDefault();
+          history.replaceState(null, '', '#' + heading.id);
+          heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        heading.appendChild(anchor);
+      });
+    }
+
+    function wrapTables(container) {
+      container.querySelectorAll('table').forEach((table) => {
+        if (table.parentElement && table.parentElement.classList.contains('table-scroll')) return;
+        const wrap = document.createElement('div');
+        wrap.className = 'table-scroll';
+        table.parentNode.insertBefore(wrap, table);
+        wrap.appendChild(table);
+      });
+    }
+
+    function wrapSections(container) {
+      const children = [...container.children];
+      const h2List = children.filter((el) => el.tagName === 'H2');
+      if (!h2List.length) return;
+
+      h2List.forEach((h2) => {
+        const section = document.createElement('section');
+        section.className = 'doc-section';
+        section.id = 'section-' + h2.id;
+        h2.parentNode.insertBefore(section, h2);
+
+        let node = h2;
+        while (node) {
+          const next = node.nextElementSibling;
+          section.appendChild(node);
+          if (next && next.tagName === 'H2') break;
+          node = next;
+        }
+      });
+    }
+
+    function loadTocState() {
+      try {
+        const raw = localStorage.getItem(TOC_STATE_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function saveTocState(state) {
+      try {
+        localStorage.setItem(TOC_STATE_KEY, JSON.stringify(state));
+      } catch { /* ignore quota errors */ }
+    }
+
+    function buildToc(container) {
+      ensureHeadingIds(container);
+
+      const h2s = [...container.querySelectorAll('h2')];
+      const toc = document.getElementById('toc');
+      const sidebar = document.getElementById('sidebar');
+      toc.innerHTML = '';
+
+      if (!h2s.length) return;
+
+      const saved = loadTocState();
+
+      h2s.forEach((h2) => {
+        const section = document.createElement('li');
+        section.className = 'toc-section';
+        section.dataset.sectionId = h2.id;
+
+        const h3s = [];
+        let el = h2.nextElementSibling;
+        while (el && el.tagName !== 'H2') {
+          if (el.tagName === 'H3') h3s.push(el);
+          el = el.nextElementSibling;
+        }
+
+        if (!h3s.length) section.classList.add('is-leaf');
+
+        const expanded = saved[h2.id] !== undefined ? saved[h2.id] : h3s.length > 0;
+        if (expanded) section.classList.add('is-expanded');
+
+        const head = document.createElement('div');
+        head.className = 'toc-section-head';
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'toc-toggle';
+        toggle.setAttribute('aria-label', expanded ? '折叠章节' : '展开章节');
+        toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>';
+
+        const h2Link = document.createElement('a');
+        h2Link.className = 'toc-h2-link';
+        h2Link.href = '#' + h2.id;
+        h2Link.textContent = headingText(h2);
+
+        head.appendChild(toggle);
+        head.appendChild(h2Link);
+        section.appendChild(head);
+
+        if (h3s.length) {
+          const childList = document.createElement('ul');
+          childList.className = 'toc-children';
+
+          h3s.forEach((h3) => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = '#' + h3.id;
+            a.textContent = headingText(h3);
+            li.appendChild(a);
+            childList.appendChild(li);
+          });
+
+          section.appendChild(childList);
+        }
+
+        const persist = () => {
+          const state = loadTocState();
+          state[h2.id] = section.classList.contains('is-expanded');
+          saveTocState(state);
+        };
+
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (section.classList.contains('is-leaf')) return;
+          section.classList.toggle('is-expanded');
+          toggle.setAttribute('aria-label', section.classList.contains('is-expanded') ? '折叠章节' : '展开章节');
+          persist();
+        });
+
+        h2Link.addEventListener('click', () => closeMobileSidebar());
+
+        section.querySelectorAll('.toc-children a').forEach((a) => {
+          a.addEventListener('click', () => closeMobileSidebar());
+        });
+
+        toc.appendChild(section);
+      });
+
+      sidebar.hidden = false;
+      setupTocControls();
+    }
+
+    function setAllTocSections(expanded) {
+      document.querySelectorAll('.toc-section:not(.is-leaf)').forEach((section) => {
+        section.classList.toggle('is-expanded', expanded);
+        const toggle = section.querySelector('.toc-toggle');
+        if (toggle) {
+          toggle.setAttribute('aria-label', expanded ? '折叠章节' : '展开章节');
+        }
+        const id = section.dataset.sectionId;
+        if (id) {
+          const state = loadTocState();
+          state[id] = expanded;
+          saveTocState(state);
+        }
+      });
+    }
+
+    function setupTocControls() {
+      const search = document.getElementById('toc-search');
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        document.querySelectorAll('.toc-section').forEach((section) => {
+          const h2Text = section.querySelector('.toc-h2-link')?.textContent.toLowerCase() || '';
+          const childTexts = [...section.querySelectorAll('.toc-children a')].map((a) => a.textContent.toLowerCase());
+          const match = !q || h2Text.includes(q) || childTexts.some((t) => t.includes(q));
+          section.classList.toggle('is-hidden', !match);
+          if (match && q && childTexts.some((t) => t.includes(q))) {
+            section.classList.add('is-expanded');
+          }
+        });
+      });
+
+      document.getElementById('toc-expand-all').addEventListener('click', () => setAllTocSections(true));
+      document.getElementById('toc-collapse-all').addEventListener('click', () => setAllTocSections(false));
+    }
+
+    function setupScrollSpy() {
+      const tocLinks = [...document.querySelectorAll('.toc-h2-link, .toc-children a')];
+      const headingMap = new Map();
+
+      tocLinks.forEach((link) => {
+        const id = link.getAttribute('href').slice(1);
+        const heading = document.getElementById(id);
+        if (heading) headingMap.set(id, link);
+      });
+
+      const headings = [...headingMap.keys()]
+        .map((id) => document.getElementById(id))
+        .filter(Boolean)
+        .sort((a, b) => a.offsetTop - b.offsetTop);
+
+      const setActive = (id) => {
+        tocLinks.forEach((link) => link.classList.remove('active'));
+        const link = headingMap.get(id);
+        if (link) {
+          link.classList.add('active');
+          const section = link.closest('.toc-section');
+          if (section && link.classList.contains('toc-h2-link') === false) {
+            section.classList.add('is-expanded');
+            const state = loadTocState();
+            const sectionId = section.dataset.sectionId;
+            if (sectionId) {
+              state[sectionId] = true;
+              saveTocState(state);
+            }
+          }
+        }
+      };
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries
+            .filter((e) => e.isIntersecting)
+            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          if (visible.length) {
+            setActive(visible[0].target.id);
+          }
+        },
+        { rootMargin: '-88px 0px -60% 0px', threshold: [0, 0.1, 0.5] }
+      );
+
+      headings.forEach((h) => observer.observe(h));
+
+      if (location.hash) {
+        const id = location.hash.slice(1);
+        if (headingMap.has(id)) setActive(id);
+      }
+    }
+
+    function openMobileSidebar() {
+      document.getElementById('sidebar').classList.add('is-open');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      backdrop.hidden = false;
+      backdrop.classList.add('is-visible');
+    }
+
+    function closeMobileSidebar() {
+      document.getElementById('sidebar').classList.remove('is-open');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      backdrop.classList.remove('is-visible');
+      backdrop.hidden = true;
+    }
+
+    function extractUpdatedAt(md) {
+      const match = md.match(/\*\*最后更新：\*\*\s*(\S+)/);
+      if (match) {
+        document.getElementById('updated-at').textContent = '更新于 ' + match[1];
+      }
+    }
+
+    function showError(message, hint) {
+      document.getElementById('loading').hidden = true;
+      const panel = document.getElementById('error');
+      panel.hidden = false;
+      panel.innerHTML =
+        '<p><strong>无法加载文档</strong></p><p>' + message + '</p>' +
+        (hint ? '<div class="hint">' + hint + '</div>' : '');
+    }
+
+    function upgradeMermaidBlocks(container) {
+      const blocks = [...container.querySelectorAll('pre > code[class*="mermaid"]')];
+      blocks.forEach((code) => {
+        const pre = code.parentElement;
+        if (!pre) return;
+        const div = document.createElement('div');
+        div.className = 'mermaid';
+        div.textContent = code.textContent.trim();
+        pre.replaceWith(div);
+      });
+      return blocks.length;
+    }
+
+    async function renderMermaidDiagrams(container) {
+      const count = upgradeMermaidBlocks(container);
+      if (!count) return;
+
+      if (typeof mermaid === 'undefined') {
+        container.querySelectorAll('.mermaid').forEach((node) => {
+          const pre = document.createElement('pre');
+          pre.className = 'mermaid-fallback';
+          pre.textContent = node.textContent;
+          node.replaceWith(pre);
+        });
+        return;
+      }
+
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'neutral',
+        securityLevel: 'loose',
+        flowchart: { htmlLabels: true, curve: 'basis' },
+      });
+
+      try {
+        await mermaid.run({ nodes: container.querySelectorAll('.mermaid'), suppressErrors: false });
+      } catch (err) {
+        console.error('Mermaid render failed:', err);
+        container.querySelectorAll('.mermaid').forEach((node) => {
+          const pre = document.createElement('pre');
+          pre.className = 'mermaid-fallback';
+          pre.textContent = node.textContent;
+          node.replaceWith(pre);
+        });
+      }
+    }
+
+    async function renderMarkdown(md) {
+      document.getElementById('loading').hidden = true;
+      extractUpdatedAt(md);
+
+      const processed = preprocessMarkdown(md);
+      const body = document.getElementById('markdown-body');
+      body.innerHTML = marked.parse(processed);
+
+      wrapTables(body);
+      ensureHeadingIds(body);
+      addHeadingAnchors(body);
+      wrapSections(body);
+      await renderMermaidDiagrams(body);
+      buildToc(body);
+      setupScrollSpy();
+    }
+
+    async function loadMarkdown() {
+      const source = document.getElementById('markdown-source');
+      if (!source) {
+        showError('未找到内嵌文档内容');
+        return;
+      }
+      const md = source.textContent;
+      if (!md.trim()) {
+        showError('文档内容为空');
+        return;
+      }
+      try {
+        await renderMarkdown(md);
+      } catch (err) {
+        showError(err.message || String(err));
+      }
+    }
+
+    document.getElementById('sidebar-open').addEventListener('click', openMobileSidebar);
+    document.getElementById('sidebar-close').addEventListener('click', closeMobileSidebar);
+    document.getElementById('sidebar-backdrop').addEventListener('click', closeMobileSidebar);
+
+    loadMarkdown();
+  </script>
+</body>
+</html>

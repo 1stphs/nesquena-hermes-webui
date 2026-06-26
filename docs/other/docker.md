@@ -1,6 +1,6 @@
 # Hermes WebUI — Docker setup guide
 
-This is the comprehensive Docker reference. For a 5-minute quickstart, see the [README Docker section](../README.md#docker).
+This is the comprehensive Docker reference. For a 5-minute quickstart, see the [README Docker section](../../README.md#docker).
 
 ## TL;DR
 
@@ -120,10 +120,10 @@ volumes:
 
 ## Reference
 
-- [`docker-compose.yml`](../docker-compose.yml) — single container (recommended)
-- [`.env.docker.example`](../.env.docker.example) — environment variable template
-- [`Dockerfile`](../Dockerfile) — single-container build
-- [`docker_init.bash`](../docker_init.bash) — container entrypoint script
+- [`docker-compose.yml`](../../docker-compose.yml) — single container (recommended)
+- [`.env.docker.example`](../../.env.docker.example) — environment variable template
+- [`Dockerfile`](../../Dockerfile) — single-container build
+- [`docker_init.bash`](../../docker_init.bash) — container entrypoint script
 
 ## Related issues
 
