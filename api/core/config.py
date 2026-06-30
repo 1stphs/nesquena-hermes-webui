@@ -577,6 +577,7 @@ _DEFAULT_TOOLSETS = [
     "skills",
     "terminal",
     "todo",
+    "user_contacts",
     "web",
     "webhook",
 ]

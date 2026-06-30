@@ -90,6 +90,12 @@ TOOLSETS = {
         "tools": ["image_generate"],
         "includes": []
     },
+
+    "user_contacts": {
+        "description": "Current WebUI user's contact lookup tools",
+        "tools": ["current_user_contacts_lookup"],
+        "includes": []
+    },
     
     "terminal": {
         "description": "Terminal/command execution and process management tools",

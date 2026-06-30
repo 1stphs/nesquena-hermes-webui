@@ -37,6 +37,7 @@ from api.features.chat.metering import meter
 # interleave their os.environ writes. This global lock serializes the env
 # save/restore around the entire agent run.
 _ENV_LOCK = threading.Lock()
+_WEBUI_REQUIRED_TOOLSETS = ("user_contacts",)
 
 # Lazy import to avoid circular deps -- hermes-agent is on sys.path via api/config.py
 try:
@@ -436,6 +437,38 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
     return env
 
 
+def _set_webui_session_context(user_id: str, session_id: str):
+    try:
+        from gateway.session_context import set_session_vars
+
+        return set_session_vars(
+            platform="webui",
+            user_id=str(user_id or "").strip(),
+            session_key=str(session_id or "").strip(),
+        )
+    except Exception:
+        return None
+
+
+def _clear_webui_session_context(tokens) -> None:
+    if tokens is None:
+        return
+    try:
+        from gateway.session_context import clear_session_vars
+
+        clear_session_vars(tokens)
+    except Exception:
+        pass
+
+
+def _with_webui_required_toolsets(toolsets):
+    result = [str(toolset) for toolset in (toolsets or []) if str(toolset).strip()]
+    for toolset in _WEBUI_REQUIRED_TOOLSETS:
+        if toolset not in result:
+            result.append(toolset)
+    return result
+
+
 _WEBUI_SKILL_SOURCE_GUARD_PROMPT = """
 WebUI 全局 Skill 安全边界：
 核心原则：
@@ -493,6 +526,15 @@ WebUI 全局 Skill 安全边界：
 """.strip()
 
 
+_WEBUI_USER_CONTACTS_PROMPT = """
+WebUI 当前用户通讯录规则：
+当用户要求给某个人发邮件、但没有提供明确邮箱地址时，先调用 current_user_contacts_lookup 查询通讯录。
+通讯录包含当前用户的个人联系人，以及公司联系人中的其他用户。
+只使用工具返回的联系人结果，不要猜测邮箱；如果没有匹配结果或结果有歧义，向用户确认收件人或邮箱。
+不得请求、枚举或推断其他用户的个人联系人。
+""".strip()
+
+
 def _build_webui_global_ephemeral_prompt(profile_name, profile_home) -> str:
     """构造 WebUI 每轮对话注入给 Hermes Agent 的全局临时提示词。"""
     display_profile_name = str(profile_name or '').strip() or 'default'
@@ -509,6 +551,7 @@ def _build_webui_global_ephemeral_prompt(profile_name, profile_home) -> str:
         '3. 不要跨 profile 查看、修改或删除其他智能体的定时任务。\n'
         '4. 创建成功后必须回复 job_id、任务名称、schedule、next_run_at，以及实际写入的 cron jobs 文件路径。\n'
         '5. 如果工具调用无法确认实际写入路径，必须明确说明“未能确认写入当前 profile cron 文件”，不要声称前端一定可见。'
+        f'\n\n{_WEBUI_USER_CONTACTS_PROMPT}'
         f'\n\n{_WEBUI_SKILL_SOURCE_GUARD_PROMPT}'
     )
 
@@ -2064,6 +2107,7 @@ def _run_agent_streaming(
     _checkpoint_stop = None
     _ckpt_thread = None
     _agent_lock = None
+    _session_context_tokens = None
     try:
         s = get_session(session_id)
         s.workspace = str(Path(workspace).expanduser().resolve())
@@ -2102,6 +2146,7 @@ def _run_agent_streaming(
             _profile_home,
         )
         _set_thread_env(**_thread_env)
+        _session_context_tokens = _set_webui_session_context(user_id or "", session_id)
         # Still set process-level env as fallback for tools that bypass thread-local
         # Acquire lock only for the env mutation, then release before the agent runs.
         # The finally block re-acquires to restore — keeping critical sections short
@@ -2427,7 +2472,7 @@ def _run_agent_streaming(
             # Per-profile toolsets — use _resolve_cli_toolsets() so MCP
             # server toolsets are included, matching native CLI behaviour.
             from api.core.config import _resolve_cli_toolsets
-            _toolsets = _resolve_cli_toolsets(_cfg)
+            _toolsets = _with_webui_required_toolsets(_resolve_cli_toolsets(_cfg))
 
             # Per-session toolset override (#493): if the session has
             # enabled_toolsets set, use that instead of the global config.
@@ -2444,7 +2489,7 @@ def _run_agent_streaming(
                     # (Opus pre-release advisor finding for v0.50.257.)
                     _override = getattr(_session_meta, 'enabled_toolsets', None) if _session_meta else None
                     if _override:
-                        _toolsets = _override
+                        _toolsets = _with_webui_required_toolsets(_override)
             except Exception as _ts_err:
                 print(f"[webui] WARNING: failed to read per-session toolsets for {session_id}: {_ts_err}", flush=True)
 
@@ -3458,6 +3503,7 @@ def _run_agent_streaming(
                 and getattr(s, 'active_stream_id', None) == stream_id
                 and getattr(s, 'pending_user_message', None)):
             _last_resort_sync_from_core(s, stream_id, _agent_lock)
+        _clear_webui_session_context(_session_context_tokens)
         _clear_thread_env()  # TD1: always clear thread-local context
         with STREAMS_LOCK:
             STREAMS.pop(stream_id, None)

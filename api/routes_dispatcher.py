@@ -1509,6 +1509,20 @@ def dispatch_post(handler, parsed) -> bool:
             payload, status = error_payload(exc)
             return j(handler, payload, status=status)
 
+    if parsed.path == "/api/user-contacts/search":
+        from api.features.user_contacts import (
+            error_payload,
+            search_current_user_contacts_payload,
+        )
+        from api.user_provider import current_user_id_from_handler
+
+        try:
+            user_id = current_user_id_from_handler(handler)
+            return j(handler, search_current_user_contacts_payload(user_id, body))
+        except Exception as exc:
+            payload, status = error_payload(exc)
+            return j(handler, payload, status=status)
+
     if parsed.path == "/api/internal/provider-sync/root-profiles":
         from api.internal_provider_sync import (
             error_payload,

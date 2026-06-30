@@ -461,6 +461,14 @@ def _handle_chat_sync(handler, body):
     if not msg:
         return j(handler, {"error": "empty message"}, status=400)
     try:
+        from api.user_provider import UserProviderAuthError, optional_user_id_from_handler
+
+        user_id = optional_user_id_from_handler(handler)
+        if user_id:
+            s.user_id = user_id
+    except UserProviderAuthError as exc:
+        return j(handler, {"error": str(exc), "code": exc.code}, status=exc.status)
+    try:
         workspace = str(resolve_trusted_workspace(body.get("workspace") or s.workspace))
     except ValueError as e:
         return bad(handler, str(e))
@@ -481,7 +489,18 @@ def _handle_chat_sync(handler, body):
         old_session_key = os.environ.get("HERMES_SESSION_KEY")
         os.environ["HERMES_EXEC_ASK"] = "1"
         os.environ["HERMES_SESSION_KEY"] = s.session_id
+    session_context_tokens = None
     try:
+        try:
+            from gateway.session_context import set_session_vars
+
+            session_context_tokens = set_session_vars(
+                platform="webui",
+                user_id=str(user_id or "").strip(),
+                session_key=s.session_id,
+            )
+        except Exception:
+            session_context_tokens = None
         AIAgent = _get_ai_agent()
         if AIAgent is None:
             raise ImportError(_aiagent_import_error_detail())
@@ -513,6 +532,8 @@ def _handle_chat_sync(handler, body):
                     f"[webui] WARNING: resolve_runtime_provider failed: {_e}",
                     flush=True,
                 )
+            from api.streaming import _with_webui_required_toolsets
+
             agent = AIAgent(
                 model=_model,
                 provider=_provider,
@@ -522,7 +543,7 @@ def _handle_chat_sync(handler, body):
                 # does not inject CLI-specific terminal/output guidance.
                 platform="webui",
                 quiet_mode=True,
-                enabled_toolsets=_resolve_cli_toolsets(),
+                enabled_toolsets=_with_webui_required_toolsets(_resolve_cli_toolsets()),
                 session_id=s.session_id,
             )
             workspace_ctx = f"[Workspace: {s.workspace}]\n"
@@ -556,6 +577,13 @@ def _handle_chat_sync(handler, body):
                 persist_user_message=msg,
             )
     finally:
+        if session_context_tokens is not None:
+            try:
+                from gateway.session_context import clear_session_vars
+
+                clear_session_vars(session_context_tokens)
+            except Exception:
+                pass
         with _ENV_LOCK:
             if old_cwd is None:
                 os.environ.pop("TERMINAL_CWD", None)
