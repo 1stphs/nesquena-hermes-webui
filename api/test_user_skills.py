@@ -64,7 +64,15 @@ class _RawResponseHandler:
         return ""
 
 
-def _patch_profile_access(monkeypatch, *, home, user_id="user-1", forbidden=False, calls=None):
+def _patch_profile_access(
+    monkeypatch,
+    *,
+    home,
+    user_id="user-1",
+    forbidden=False,
+    calls=None,
+    profile_records=None,
+):
     import api.profiles as profiles
     import api.user_provider as user_provider
 
@@ -82,6 +90,13 @@ def _patch_profile_access(monkeypatch, *, home, user_id="user-1", forbidden=Fals
 
     monkeypatch.setattr(user_provider, "verify_user_profile_access", fake_verify_user_profile_access)
     monkeypatch.setattr(profiles, "get_hermes_home_for_profile", lambda _profile: home)
+    monkeypatch.setattr(
+        user_provider,
+        "list_user_profile_records",
+        lambda _user_id: profile_records
+        if profile_records is not None
+        else [{"user_id": _user_id, "profile_name": "default_1"}],
+    )
 
 
 def _write_skill(skill_dir, content=None):
@@ -3643,6 +3658,55 @@ def test_user_skill_files_list_marks_image_files_not_editable(
     assert files_by_path["preview.png"]["editable"] is False
 
 
+def test_user_skill_files_list_falls_back_to_profile_installed_skill(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    profile_name = "default_367959913725953"
+    profile_home = tmp_path / "profiles" / profile_name
+    source = profile_home / "skills" / "email-assistant"
+    _write_skill(
+        source,
+        """---
+name: hermes-email-assistant
+description: 对话触发式邮箱助手
+---
+
+# hermes-email-assistant
+""",
+    )
+    (source / "docs").mkdir()
+    (source / "docs" / "guide.md").write_text("guide", encoding="utf-8")
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(
+        monkeypatch,
+        home=profile_home,
+        profile_records=[{"user_id": "user-1", "profile_name": profile_name}],
+    )
+
+    result = skill_handler._handle_user_skill_files_list(
+        object(),
+        SimpleNamespace(query="skill_slug=email-assistant"),
+    )
+
+    status, payload = _response(responses)
+    assert result is True
+    assert status == 200
+    assert payload["skillSlug"] == "email-assistant"
+    assert payload["skillRoot"] == "email-assistant"
+    assert payload["selectedPath"] == "SKILL.md"
+    assert [item["path"] for item in payload["files"]] == ["docs/guide.md", "SKILL.md"]
+    assert payload["skill"]["englishName"] == "email-assistant"
+    assert payload["skill"]["name"] == "hermes-email-assistant"
+    assert payload["skill"]["persisted"] is False
+    assert payload["skill"]["readOnly"] is True
+
+
 def test_user_skill_files_list_rejects_symlink_tree(tmp_path, monkeypatch, nocobase_user_skills):
     import api.routes_handlers.skill as skill_handler
 
@@ -3695,6 +3759,42 @@ def test_user_skill_file_read_returns_utf8_content(tmp_path, monkeypatch, nocoba
     assert payload["path"] == "notes.md"
     assert payload["content"] == "你好\n"
     assert payload["skill"]["englishName"] == "mail-assistant"
+
+
+def test_user_skill_file_read_falls_back_to_profile_installed_skill(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    profile_name = "default_367959913725953"
+    profile_home = tmp_path / "profiles" / profile_name
+    source = profile_home / "skills" / "email-assistant"
+    _write_skill(source)
+    (source / "notes.md").write_text("profile note\n", encoding="utf-8")
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_profile_access(
+        monkeypatch,
+        home=profile_home,
+        profile_records=[{"user_id": "user-1", "profile_name": profile_name}],
+    )
+
+    result = skill_handler._handle_user_skill_file_read(
+        object(),
+        SimpleNamespace(query="skill_slug=email-assistant&path=notes.md"),
+    )
+
+    status, payload = _response(responses)
+    assert result is True
+    assert status == 200
+    assert payload["path"] == "notes.md"
+    assert payload["content"] == "profile note\n"
+    assert payload["skill"]["englishName"] == "email-assistant"
+    assert payload["skill"]["persisted"] is False
+    assert payload["skill"]["readOnly"] is True
 
 
 @pytest.mark.parametrize(

@@ -2252,6 +2252,8 @@ def _nocobase_user_skill_record_to_skill(record: dict) -> dict | None:
         or "",
         "createdAt": record.get("createdAt") or record.get("created_at") or "",
         "updatedAt": record.get("updatedAt") or record.get("updated_at") or "",
+        "persisted": record.get("is_persisted", True) is not False,
+        "readOnly": record.get("is_persisted", True) is False,
         "raw": record,
     }
 
@@ -2274,6 +2276,95 @@ def _nocobase_list_user_skill_records(user_id: str, *, skill_slug: str = "") -> 
 def _nocobase_get_user_skill_record(user_id: str, skill_slug: str) -> dict | None:
     records = _nocobase_list_user_skill_records(user_id, skill_slug=skill_slug)
     return records[0] if records else None
+
+
+def _fallback_profile_skill_record(skill_slug: str, skill_dir: Path) -> dict:
+    skill = _read_profile_installed_skill(skill_dir, skill_dir.parent)
+    if not skill:
+        skill = {
+            "id": skill_slug,
+            "name": skill_slug,
+            "title": skill_slug,
+            "description": "",
+            "summary": "",
+            "path": skill_slug,
+            "skill_file": f"{skill_slug}/SKILL.md",
+        }
+    return {
+        "id": "",
+        "user_id": "",
+        "skill_slug": skill_slug,
+        "name": _clean_profile_installed_skill_text(skill.get("name")) or skill_slug,
+        "description": _clean_profile_installed_skill_text(
+            skill.get("description") or skill.get("summary")
+        ),
+        "source": "profile",
+        "source_filename": "",
+        "source_type": "profile",
+        "source_profile_name": "",
+        "source_skill_slug": _clean_profile_installed_skill_text(skill.get("path")) or skill_slug,
+        "origin_type": "agent",
+        "origin_agent_id": "",
+        "storage_path": "",
+        "skill_file_path": _clean_profile_installed_skill_text(skill.get("skill_file"))
+        or f"{skill_slug}/SKILL.md",
+        "file_count": 0,
+        "size_bytes": 0,
+        "status": "installed",
+        "security_test_result": None,
+        "security_tested_at": "",
+        "availability_test_result": None,
+        "availability_tested_at": "",
+        "is_persisted": False,
+    }
+
+
+def _iter_current_user_profile_skill_roots(user_id: str):
+    from api.profiles import _PROFILE_ID_RE, get_hermes_home_for_profile
+    from api.user_provider import UserProviderLookupError, list_user_profile_records
+
+    try:
+        records = list_user_profile_records(user_id)
+    except UserProviderLookupError as exc:
+        raise _UserSkillError(
+            "Profile lookup failed",
+            status=503,
+            code="profile_lookup_failed",
+        ) from exc
+
+    seen_profiles: set[str] = set()
+    for record in records:
+        for key in ("name", "profile_name", "profile_key", "webui_profile_id"):
+            profile = _clean_profile_installed_skill_text(record.get(key))
+            if not profile or profile in seen_profiles or not _PROFILE_ID_RE.fullmatch(profile):
+                continue
+            seen_profiles.add(profile)
+            try:
+                profile_home = Path(get_hermes_home_for_profile(profile)).expanduser().resolve()
+            except OSError:
+                logger.debug("Skipping unresolved profile home for installed skill fallback: %s", profile)
+                continue
+            skills_dir = profile_home / "skills"
+            if skills_dir.is_dir():
+                yield profile, skills_dir
+
+
+def _get_profile_installed_user_skill_dir(
+    user_id: str,
+    skill_slug: str,
+) -> tuple[Path, Path, dict]:
+    slug = _validate_user_skill_english_name(skill_slug)
+
+    for profile, skills_dir in _iter_current_user_profile_skill_roots(user_id):
+        skill_dir = _safe_skill_child_dir(skills_dir, slug)
+        if not skill_dir.is_dir() or skill_dir.is_symlink():
+            continue
+        _assert_no_symlink_tree(skill_dir)
+        record = _fallback_profile_skill_record(slug, skill_dir)
+        record["source_profile_name"] = profile
+        return skills_dir, skill_dir, record
+
+    raise _UserSkillError("Skill not found", status=404, code="skill_not_found")
 
 
 def _nocobase_create_user_skill_record(record: dict) -> dict:
@@ -2789,6 +2880,15 @@ def _get_owned_user_skill_dir(user_id: str, skill_slug: str) -> tuple[Path, Path
         raise _UserSkillError("Skill not found", status=404, code="skill_not_found")
     _assert_no_symlink_tree(skill_dir)
     return my_skills_dir, skill_dir, record
+
+
+def _get_readable_user_skill_dir(user_id: str, skill_slug: str) -> tuple[Path, Path, dict]:
+    slug = _validate_user_skill_english_name(skill_slug)
+    record = _nocobase_get_user_skill_record(user_id, slug)
+    if record:
+        return _get_owned_user_skill_dir(user_id, slug)
+
+    return _get_profile_installed_user_skill_dir(user_id, slug)
 
 
 def _resolve_user_skill_file(skill_dir: Path, relative_path: str) -> Path:
@@ -3616,7 +3716,7 @@ def _handle_user_skill_files_list(handler, parsed):
             (query.get("skill_slug") or query.get("skillSlug") or [""])[0]
         )
         user_id = _get_current_user_id(handler)
-        my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
+        my_skills_dir, skill_dir, record = _get_readable_user_skill_dir(user_id, skill_slug)
         tree, files, selected_path = _build_user_skill_file_tree(skill_dir)
         skill = _nocobase_user_skill_record_to_skill(record)
         if not skill:
@@ -3657,7 +3757,7 @@ def _handle_user_skill_file_read(handler, parsed):
         )
         relative_path = _normalize_user_skill_file_path((query.get("path") or [""])[0])
         user_id = _get_current_user_id(handler)
-        _my_skills_dir, skill_dir, record = _get_owned_user_skill_dir(user_id, skill_slug)
+        _my_skills_dir, skill_dir, record = _get_readable_user_skill_dir(user_id, skill_slug)
         target = _resolve_user_skill_file(skill_dir, relative_path)
         content = _read_user_skill_text_file(target)
         skill = _nocobase_user_skill_record_to_skill(record)
@@ -3691,7 +3791,7 @@ def _handle_user_skill_file_raw(handler, parsed):
         )
         relative_path = _normalize_user_skill_file_path((query.get("path") or [""])[0])
         user_id = _get_current_user_id(handler)
-        _my_skills_dir, skill_dir, _record = _get_owned_user_skill_dir(user_id, skill_slug)
+        _my_skills_dir, skill_dir, _record = _get_readable_user_skill_dir(user_id, skill_slug)
         target = _resolve_user_skill_file(skill_dir, relative_path)
         mime_type = _user_skill_file_mime_type(target)
         inline_preview = (query.get("inline") or [""])[0] == "1"
