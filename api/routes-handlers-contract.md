@@ -8,7 +8,7 @@
 {
   "contracts": [],
   "counts": {
-    "green": 104,
+    "green": 105,
     "red": 0,
     "yellow": 0
   },
@@ -525,6 +525,12 @@
       "status": "green"
     },
     {
+      "function": "_handle_user_skill_delete",
+      "location": "api/routes_handlers/skill.py",
+      "reasons": [],
+      "status": "green"
+    },
+    {
       "function": "_handle_user_skill_file_raw",
       "location": "api/routes_handlers/skill.py",
       "reasons": [],
@@ -644,7 +650,7 @@
 
 ## Summary
 
-- green: 104
+- green: 105
 - yellow: 0
 - red: 0
 
@@ -737,6 +743,7 @@
 | green | `_handle_terminal_output` | `api/routes.py` | no source-level contract detected |
 | green | `_handle_terminal_resize` | `api/routes_handlers/terminal.py` | no source-level contract detected |
 | green | `_handle_terminal_start` | `api/routes_handlers/terminal.py` | no source-level contract detected |
+| green | `_handle_user_skill_delete` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_file_raw` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_file_read` | `api/routes_handlers/skill.py` | no source-level contract detected |
 | green | `_handle_user_skill_file_update` | `api/routes_handlers/skill.py` | no source-level contract detected |
