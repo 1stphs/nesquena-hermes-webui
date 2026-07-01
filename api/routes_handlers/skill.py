@@ -3972,6 +3972,73 @@ def _handle_user_skill_import(handler):
     return _routes_binding("j")(handler, payload)
 
 
+def _handle_user_skill_create(handler, body):
+    destination = None
+    temp_dir = None
+
+    try:
+        content = _validate_user_skill_text_content(body.get("content"))
+        metadata, description = _validate_import_skill_metadata(content)
+        user_id = _get_current_user_id(handler)
+        my_skills_dir = _user_my_skills_dir(user_id, create=True)
+        if my_skills_dir.is_symlink():
+            raise _UserSkillError("My skills directory cannot be a symlink", code="my_skills_dir_symlink")
+
+        temp_dir = _safe_skill_child_dir(my_skills_dir, f".creating-{uuid.uuid4().hex}")
+        temp_dir.mkdir(parents=True)
+        (temp_dir / "SKILL.md").write_text(content, encoding="utf-8")
+
+        display_name = _clean_profile_installed_skill_text(metadata.get("name"))
+        skill_slug = _generate_unique_user_skill_slug(user_id, display_name, my_skills_dir)
+        destination = _safe_skill_child_dir(my_skills_dir, skill_slug)
+
+        if destination.exists():
+            raise _UserSkillError("Skill already exists", status=409, code="skill_conflict")
+
+        _assert_no_symlink_tree(temp_dir)
+        temp_dir.rename(destination)
+        temp_dir = None
+        record_body = _user_skill_record_body(
+            user_id=user_id,
+            skill_slug=skill_slug,
+            destination=destination,
+            source="created",
+            source_type="markdown",
+            origin_type=_USER_SKILL_ORIGIN_IMPORTED,
+            metadata=metadata,
+            description=description,
+        )
+        try:
+            record = _nocobase_create_user_skill_record(record_body)
+        except _UserSkillError:
+            if destination and destination.exists():
+                shutil.rmtree(destination, ignore_errors=True)
+            raise
+        payload = _user_skill_response_payload(record)
+    except _UserSkillError as exc:
+        if temp_dir and temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if destination and destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        return _user_skill_error_response(handler, exc, _USER_SKILL_IMPORT_ERROR_MESSAGES)
+    except OSError as exc:
+        logger.exception("Failed to create user skill")
+        if temp_dir and temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if destination and destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        return _routes_binding("j")(
+            handler,
+            {
+                "error": "新建 Skill 失败",
+                "code": "skill_create_failed",
+            },
+            status=500,
+        )
+
+    return _routes_binding("j")(handler, payload)
+
+
 def _handle_user_skill_import_cancel(handler, body):
     try:
         user_id = _get_current_user_id(handler)

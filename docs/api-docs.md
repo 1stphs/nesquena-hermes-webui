@@ -597,6 +597,7 @@ Token 登录请求体：`{ "token": "<api_token>" }`
 | GET | `/api/user-skills/file/raw` | 原始文件；`?skill_slug`、`?path`、`?inline`、`?download` |
 | POST | `/api/user-skills/file/update` | 更新文件 |
 | POST | `/api/user-skills/update` | 更新技能元数据 |
+| POST | `/api/user-skills/create` | 从 `SKILL.md` 文本创建单文件 Skill |
 | POST | `/api/user-skills/import` | 导入 ZIP |
 | POST | `/api/user-skills/import/cancel` | 取消导入 |
 | POST | `/api/user-skills/install-to-profile` | 安装到 Profile |

@@ -170,6 +170,20 @@ def _run_import(
     return skill_handler._handle_user_skill_import(handler)
 
 
+def _run_create(
+    tmp_path,
+    monkeypatch,
+    skill_handler,
+    responses,
+    content,
+):
+    handler = SimpleNamespace(headers={})
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, tmp_path / "users")
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+    return skill_handler._handle_user_skill_create(handler, {"content": content})
+
+
 def _security_test_result_with_passed(passed: int) -> dict:
     return {
         "status": "passed" if passed > 0 else "not_tested",
@@ -554,6 +568,137 @@ def test_import_markdown_writes_my_skills_and_creates_nocobase_record(
     assert payload["skill"]["source"] == "imported"
     assert payload["skill"]["originType"] == "imported"
     assert payload["skill"]["originAgentId"] == ""
+
+
+def test_create_from_text_writes_single_skill_file_and_creates_nocobase_record(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    responses = []
+    _patch_skill_slug_suffix(monkeypatch, skill_handler, "abc123def0")
+
+    result = _run_create(
+        tmp_path,
+        monkeypatch,
+        skill_handler,
+        responses,
+        _skill_markdown(name="Mail Assistant", description="Create mail drafts"),
+    )
+
+    destination = tmp_path / "users" / "user-1" / "my-skills" / "mail-assistant-abc123def0"
+    assert result is True
+    assert destination.is_dir()
+    assert (destination / "SKILL.md").is_file()
+    assert sorted(path.name for path in destination.iterdir()) == ["SKILL.md"]
+    assert len(nocobase_user_skills.create_calls) == 1
+    create_call = nocobase_user_skills.create_calls[0]
+    assert create_call["source"] == "created"
+    assert create_call["source_filename"] == ""
+    assert create_call["source_type"] == "markdown"
+    assert create_call["origin_type"] == "imported"
+    assert create_call["origin_agent_id"] == ""
+    assert create_call["skill_slug"] == "mail-assistant-abc123def0"
+    assert create_call["name"] == "Mail Assistant"
+    assert create_call["description"] == "Create mail drafts"
+    assert create_call["storage_path"] == "user-1/my-skills/mail-assistant-abc123def0"
+    assert create_call["status"] == "draft"
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["skillSlug"] == "mail-assistant-abc123def0"
+    assert payload["skill"]["englishName"] == "mail-assistant-abc123def0"
+    assert payload["skill"]["source"] == "created"
+    assert payload["skill"]["originType"] == "imported"
+
+
+def test_create_from_text_generates_skill_prefix_for_non_ascii_name(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    responses = []
+    _patch_skill_slug_suffix(monkeypatch, skill_handler, "abc123def0")
+
+    result = _run_create(
+        tmp_path,
+        monkeypatch,
+        skill_handler,
+        responses,
+        _skill_markdown(),
+    )
+
+    destination = tmp_path / "users" / "user-1" / "my-skills" / "skill-abc123def0"
+    assert result is True
+    assert destination.is_dir()
+    assert len(nocobase_user_skills.create_calls) == 1
+    assert nocobase_user_skills.create_calls[0]["skill_slug"] == "skill-abc123def0"
+    assert nocobase_user_skills.create_calls[0]["name"] == "邮箱助手"
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["skillSlug"] == "skill-abc123def0"
+
+
+@pytest.mark.parametrize(
+    ("content", "code"),
+    [
+        ("---\ndescription: 处理邮件草稿\n---\n", "missing_skill_name"),
+        ("---\nname: 邮箱助手\n---\n", "missing_skill_description"),
+        ("---\nname: 邮箱助手\n", "invalid_skill_frontmatter"),
+    ],
+)
+def test_create_from_text_rejects_invalid_skill_markdown(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+    content,
+    code,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    responses = []
+
+    result = _run_create(tmp_path, monkeypatch, skill_handler, responses, content)
+
+    assert result is True
+    assert not (tmp_path / "users" / "user-1" / "my-skills").exists()
+    assert not nocobase_user_skills.create_calls
+    status, payload = _response(responses)
+    assert status == 400
+    assert payload["code"] == code
+
+
+def test_create_from_text_rolls_back_when_nocobase_create_fails(tmp_path, monkeypatch):
+    import api.routes_handlers.skill as skill_handler
+
+    responses = []
+    _patch_skill_slug_suffix(monkeypatch, skill_handler, "abc123def0")
+
+    def fail_create(_record):
+        raise skill_handler._NocobaseSkillError(
+            "NoCoBase create failed",
+            status=502,
+            code="nocobase_request_failed",
+        )
+
+    monkeypatch.setattr(skill_handler, "_nocobase_create_user_skill_record", fail_create)
+
+    result = _run_create(
+        tmp_path,
+        monkeypatch,
+        skill_handler,
+        responses,
+        _skill_markdown(name="Mail Assistant", description="Create mail drafts"),
+    )
+
+    assert result is True
+    assert not (tmp_path / "users" / "user-1" / "my-skills" / "mail-assistant-abc123def0").exists()
+    status, payload = _response(responses)
+    assert status == 502
+    assert payload["code"] == "nocobase_request_failed"
 
 
 def test_import_archive_writes_my_skills_and_creates_nocobase_record(

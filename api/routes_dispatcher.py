@@ -2079,6 +2079,9 @@ def dispatch_post(handler, parsed) -> bool:
     if parsed.path == "/api/user-skills/install-to-profile":
         return _handle_user_skill_install_to_profile(handler, body)
 
+    if parsed.path == "/api/user-skills/create":
+        return _handle_user_skill_create(handler, body)
+
     if parsed.path == "/api/user-skills/update":
         return _handle_user_skill_update(handler, body)
 
