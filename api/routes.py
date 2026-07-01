@@ -364,6 +364,7 @@ from api.routes_handlers.skill import (
     _coerce_hermes_home_path,
     _handle_skill_install_community,
     _handle_skill_uninstall_profile,
+    _handle_user_skill_delete,
     _handle_user_skill_file_read,
     _handle_user_skill_file_raw,
     _handle_user_skill_file_update,

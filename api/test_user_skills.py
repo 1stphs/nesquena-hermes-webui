@@ -239,7 +239,7 @@ def _make_user_skill_record(
 def nocobase_user_skills(monkeypatch):
     import api.routes_handlers.skill as skill_handler
 
-    state = SimpleNamespace(records=[], create_calls=[], update_calls=[])
+    state = SimpleNamespace(records=[], create_calls=[], update_calls=[], delete_calls=[])
 
     def fake_list_records(user_id, *, skill_slug=""):
         return [
@@ -277,9 +277,32 @@ def nocobase_user_skills(monkeypatch):
             code="skill_record_not_found",
         )
 
+    def fake_delete_record(user_id, skill_slug, *, record_id=""):
+        state.delete_calls.append(
+            {
+                "user_id": user_id,
+                "skill_slug": skill_slug,
+                "record_id": record_id,
+            }
+        )
+        for index, record in enumerate(state.records):
+            existing_record_id = str(record.get("id") or "").strip()
+            if (
+                record.get("user_id") == user_id
+                and record.get("skill_slug") == skill_slug
+                and (not record_id or not existing_record_id or record_id == existing_record_id)
+            ):
+                return state.records.pop(index)
+        raise skill_handler._NocobaseSkillError(
+            "Skill record not found",
+            status=404,
+            code="skill_record_not_found",
+        )
+
     monkeypatch.setattr(skill_handler, "_nocobase_list_user_skill_records", fake_list_records)
     monkeypatch.setattr(skill_handler, "_nocobase_create_user_skill_record", fake_create_record)
     monkeypatch.setattr(skill_handler, "_nocobase_update_user_skill_record", fake_update_record)
+    monkeypatch.setattr(skill_handler, "_nocobase_delete_user_skill_record", fake_delete_record)
     monkeypatch.setattr(skill_handler, "_ensure_user_skill_test_fields", lambda: None)
     return state
 
@@ -2082,6 +2105,156 @@ def test_update_user_skill_renames_folder_updates_name_and_updates_nocobase(
     assert "status" not in update_call["patch"]
     assert _response(responses)[0] == 200
     assert _response(responses)[1]["skill"]["englishName"] == "new-mail-assistant"
+
+
+def test_delete_user_skill_removes_local_dir_and_nocobase_record(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    target = user_root / "user-1" / "my-skills" / "mail-assistant-a"
+    sibling = user_root / "user-1" / "my-skills" / "mail-assistant-b"
+    _write_skill(target)
+    _write_skill(sibling)
+    nocobase_user_skills.records.extend(
+        [
+            _make_user_skill_record(
+                skill_slug="mail-assistant-a",
+                name="邮箱助手",
+                record_id="record-a",
+            ),
+            _make_user_skill_record(
+                skill_slug="mail-assistant-b",
+                name="邮箱助手",
+                record_id="record-b",
+            ),
+        ]
+    )
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    result = skill_handler._handle_user_skill_delete(
+        object(),
+        {
+            "skill_slug": "mail-assistant-a",
+            "record_id": "record-a",
+        },
+    )
+
+    assert result is True
+    assert not target.exists()
+    assert sibling.is_dir()
+    assert len(nocobase_user_skills.records) == 1
+    assert nocobase_user_skills.records[0]["skill_slug"] == "mail-assistant-b"
+    assert nocobase_user_skills.delete_calls == [
+        {
+            "user_id": "user-1",
+            "skill_slug": "mail-assistant-a",
+            "record_id": "record-a",
+        }
+    ]
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["recordDeleted"] is True
+    assert payload["fileDeleted"] is True
+    assert payload["recordId"] == "record-a"
+    assert payload["skillSlug"] == "mail-assistant-a"
+
+
+def test_delete_user_skill_rolls_back_local_dir_when_nocobase_delete_fails(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    target = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(target)
+    nocobase_user_skills.records.append(_make_user_skill_record(record_id="record-1"))
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    def fail_delete_record(_user_id, _skill_slug, *, record_id=""):
+        raise skill_handler._NocobaseSkillError(
+            "NoCoBase unavailable",
+            status=503,
+            code="nocobase_unavailable",
+        )
+
+    monkeypatch.setattr(skill_handler, "_nocobase_delete_user_skill_record", fail_delete_record)
+
+    result = skill_handler._handle_user_skill_delete(
+        object(),
+        {
+            "skill_slug": "mail-assistant",
+            "record_id": "record-1",
+        },
+    )
+
+    assert result is True
+    assert target.is_dir()
+    assert (target / "SKILL.md").is_file()
+    assert nocobase_user_skills.records[0]["skill_slug"] == "mail-assistant"
+    status, payload = _response(responses)
+    assert status == 503
+    assert payload["code"] == "nocobase_unavailable"
+
+
+def test_delete_user_skill_keeps_record_deleted_when_file_cleanup_fails(
+    tmp_path,
+    monkeypatch,
+    nocobase_user_skills,
+):
+    import api.routes_handlers.skill as skill_handler
+
+    user_root = tmp_path / "users"
+    target = user_root / "user-1" / "my-skills" / "mail-assistant"
+    _write_skill(target)
+    nocobase_user_skills.records.append(_make_user_skill_record(record_id="record-1"))
+    responses = []
+
+    _patch_skill_handler_bindings(monkeypatch, skill_handler, responses)
+    _patch_user_root(monkeypatch, skill_handler, user_root)
+    _patch_profile_access(monkeypatch, home=tmp_path / "profiles" / "default_1")
+
+    def fail_rmtree(_path):
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(skill_handler.shutil, "rmtree", fail_rmtree)
+
+    result = skill_handler._handle_user_skill_delete(
+        object(),
+        {
+            "skill_slug": "mail-assistant",
+            "record_id": "record-1",
+        },
+    )
+
+    assert result is True
+    assert not target.exists()
+    assert len(nocobase_user_skills.records) == 0
+    deleting_dirs = list((user_root / "user-1" / "my-skills").glob(".deleting-*"))
+    assert len(deleting_dirs) == 1
+    assert (deleting_dirs[0] / "SKILL.md").is_file()
+    status, payload = _response(responses)
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["recordDeleted"] is True
+    assert payload["fileDeleted"] is False
+    assert payload["code"] == "user_skill_file_cleanup_failed"
+    assert payload["recordId"] == "record-1"
+    assert payload["skillSlug"] == "mail-assistant"
 
 
 def test_update_user_skill_same_slug_updates_frontmatter_and_nocobase(

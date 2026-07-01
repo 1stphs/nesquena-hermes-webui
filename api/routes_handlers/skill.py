@@ -2413,6 +2413,33 @@ def _nocobase_update_user_skill_record(user_id: str, original_skill_slug: str, p
     return updated if isinstance(updated, dict) and updated else {**record, **patch}
 
 
+def _nocobase_delete_user_skill_record(user_id: str, skill_slug: str, *, record_id: str = "") -> dict:
+    record = _nocobase_get_user_skill_record(user_id, skill_slug)
+    if not record:
+        raise _NocobaseSkillError("Skill record not found", status=404, code="skill_record_not_found")
+
+    existing_record_id = str(record.get("id") or "").strip()
+    normalized_record_id = str(record_id or "").strip()
+    if normalized_record_id and existing_record_id and normalized_record_id != existing_record_id:
+        raise _NocobaseSkillError(
+            "Skill record does not match requested skill",
+            status=409,
+            code="skill_record_mismatch",
+        )
+
+    params = [("filter[user_id]", user_id)]
+    if existing_record_id:
+        params.append(("filterByTk", existing_record_id))
+    else:
+        params.append(("filter[skill_slug]", skill_slug))
+
+    _nocobase_request(
+        f"/{_USER_SKILLS_COLLECTION_NAME}:destroy?{urllib.parse.urlencode(params)}",
+        method="POST",
+    )
+    return record
+
+
 def _nocobase_list_skill_template_records(*, title: str = "", path: str = "") -> list[dict]:
     params = [("paginate", "false")]
     normalized_title = str(title or "").strip()
@@ -4313,6 +4340,104 @@ def _handle_user_skill_file_update(handler, body):
             "skillSlug": skill_slug,
         },
     )
+
+
+def _handle_user_skill_delete(handler, body):
+    moved_dir = None
+    skill_dir = None
+    record_deleted = False
+
+    try:
+        skill_slug = _validate_user_skill_english_name(
+            body.get("skill_slug") or body.get("skillSlug")
+        )
+        record_id = str(
+            body.get("record_id") or body.get("recordId") or body.get("id") or ""
+        ).strip()
+        user_id = _get_current_user_id(handler)
+        record = _nocobase_get_user_skill_record(user_id, skill_slug)
+        if not record:
+            raise _UserSkillError("Skill record not found", status=404, code="skill_record_not_found")
+
+        existing_record_id = str(record.get("id") or "").strip()
+        if record_id and existing_record_id and record_id != existing_record_id:
+            raise _UserSkillError(
+                "Skill record does not match requested skill",
+                status=409,
+                code="skill_record_mismatch",
+            )
+
+        my_skills_dir = _user_my_skills_dir(user_id)
+        if my_skills_dir.exists() and my_skills_dir.is_symlink():
+            raise _UserSkillError("My skills directory cannot be a symlink", code="my_skills_dir_symlink")
+
+        skill_dir = _safe_skill_child_dir(my_skills_dir, skill_slug)
+        if skill_dir.exists():
+            if not skill_dir.is_dir() or skill_dir.is_symlink():
+                raise _UserSkillError(
+                    "Invalid user skill destination",
+                    code="invalid_user_skill_destination",
+                )
+            _assert_no_symlink_tree(skill_dir)
+            moved_dir = _safe_skill_child_dir(my_skills_dir, f".deleting-{uuid.uuid4().hex}")
+            skill_dir.rename(moved_dir)
+
+        try:
+            deleted_record = _nocobase_delete_user_skill_record(
+                user_id,
+                skill_slug,
+                record_id=record_id,
+            )
+            record_deleted = True
+        except _UserSkillError:
+            if moved_dir and moved_dir.exists() and skill_dir and not skill_dir.exists():
+                moved_dir.rename(skill_dir)
+            raise
+
+        file_deleted = False
+        if moved_dir and moved_dir.exists():
+            try:
+                shutil.rmtree(moved_dir)
+                file_deleted = True
+            except OSError as exc:
+                logger.exception("Failed to remove deleted user skill directory")
+                return _routes_binding("j")(
+                    handler,
+                    {
+                        "ok": True,
+                        "recordDeleted": True,
+                        "fileDeleted": False,
+                        "cleanupError": _routes_binding("_sanitize_error")(exc),
+                        "code": "user_skill_file_cleanup_failed",
+                        "recordId": str(deleted_record.get("id") or existing_record_id or record_id or ""),
+                        "skillSlug": skill_slug,
+                    },
+                )
+
+        return _routes_binding("j")(
+            handler,
+            {
+                "ok": True,
+                "recordDeleted": True,
+                "fileDeleted": file_deleted,
+                "recordId": str(deleted_record.get("id") or existing_record_id or record_id or ""),
+                "skillSlug": skill_slug,
+            },
+        )
+    except _UserSkillError as exc:
+        return _user_skill_error_response(handler, exc)
+    except OSError as exc:
+        logger.exception("Failed to delete user skill")
+        if not record_deleted and moved_dir and moved_dir.exists() and skill_dir and not skill_dir.exists():
+            try:
+                moved_dir.rename(skill_dir)
+            except OSError:
+                logger.exception("Failed to roll back user skill delete")
+        return _routes_binding("bad")(
+            handler,
+            _routes_binding("_sanitize_error")(exc),
+            500,
+        )
 
 
 def _handle_user_skill_test_security(handler, body):

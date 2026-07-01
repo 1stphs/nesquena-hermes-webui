@@ -2082,6 +2082,9 @@ def dispatch_post(handler, parsed) -> bool:
     if parsed.path == "/api/user-skills/update":
         return _handle_user_skill_update(handler, body)
 
+    if parsed.path == "/api/user-skills/delete":
+        return _handle_user_skill_delete(handler, body)
+
     if parsed.path == "/api/user-skills/file/update":
         return _handle_user_skill_file_update(handler, body)
 
