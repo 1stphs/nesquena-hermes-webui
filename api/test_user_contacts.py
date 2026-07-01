@@ -207,6 +207,84 @@ def test_search_current_user_contacts_prefers_personal_profile_over_company_dupl
     assert result["contacts"][0]["source"] == "personal_contact"
 
 
+def test_search_current_user_contacts_returns_external_personal_contact(monkeypatch):
+    calls = []
+
+    def fake_list(collection, params):
+        calls.append((collection, list(params)))
+        if collection == user_contacts.CONTACT_RELATION_COLLECTION:
+            return [
+                {
+                    "id": "relation-external-1",
+                    "affiliated_user_id": "user-1",
+                    "contact_added_id": None,
+                    "nickname": "外部顾问",
+                    "email": "advisor@example.com",
+                    "phone": "13800138000",
+                    "company": "External Co",
+                    "department": "Consulting",
+                }
+            ]
+        if collection == user_contacts.HERMES_USERS_COLLECTION:
+            return []
+        raise AssertionError(collection)
+
+    monkeypatch.setattr(user_contacts, "_nocobase_list", fake_list)
+
+    result = user_contacts.search_current_user_contacts("user-1", query="顾问", limit=5)
+
+    assert result["count"] == 1
+    assert result["contacts"] == [
+        {
+            "name": "外部顾问",
+            "email": "advisor@example.com",
+            "phone": "13800138000",
+            "company": "External Co",
+            "department": "Consulting",
+            "source": "personal_contact",
+        }
+    ]
+    assert calls[0][0] == user_contacts.CONTACT_RELATION_COLLECTION
+    assert not any(
+        key == "filter[id][$in][]" for _collection, params in calls for key, _value in params
+    )
+
+
+def test_search_current_user_contacts_keeps_multiple_external_personal_contacts(monkeypatch):
+    def fake_list(collection, params):
+        if collection == user_contacts.CONTACT_RELATION_COLLECTION:
+            return [
+                {
+                    "id": "relation-external-1",
+                    "affiliated_user_id": "user-1",
+                    "nickname": "外部张三",
+                    "email": "external-one@example.com",
+                    "company": "External One",
+                },
+                {
+                    "id": "relation-external-2",
+                    "affiliated_user_id": "user-1",
+                    "nickname": "外部张三助理",
+                    "email": "external-two@example.com",
+                    "company": "External Two",
+                },
+            ]
+        if collection == user_contacts.HERMES_USERS_COLLECTION:
+            return []
+        raise AssertionError(collection)
+
+    monkeypatch.setattr(user_contacts, "_nocobase_list", fake_list)
+
+    result = user_contacts.search_current_user_contacts("user-1", query="外部", limit=5)
+
+    assert result["count"] == 2
+    assert [contact["email"] for contact in result["contacts"]] == [
+        "external-one@example.com",
+        "external-two@example.com",
+    ]
+    assert all(contact["source"] == "personal_contact" for contact in result["contacts"])
+
+
 def test_nocobase_list_accepts_api_base_url_with_or_without_api_suffix(monkeypatch):
     captured_urls = []
     monkeypatch.setenv("NOCOBASE_AUTHORIZATION", "secret-token")
